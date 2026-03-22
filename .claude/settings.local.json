@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check src/routes/index.js)",
+      "Bash(node --check src/models/index.js)",
+      "Bash(node --check src/swagger.json)",
+      "Bash(node -e \"JSON.parse\\(require\\(''fs''\\).readFileSync\\(''src/swagger.json'',''utf8''\\)\\); console.log\\(''swagger JSON valid''\\)\")"
+    ]
+  }
+}

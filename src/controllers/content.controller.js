@@ -22,7 +22,8 @@ exports.identifyPlant = async (req, res) => {
     };
 
     // Call Google Vision / Plant.id API if key available
-    if (process.env.PLANT_ID_API_KEY) {
+    if (process.env.PLANT_ID_API_KEY || process.env.GOOGLE_VISION_API_KEY) {
+      const apiKey = process.env.PLANT_ID_API_KEY || process.env.GOOGLE_VISION_API_KEY;
       try {
         const fs = require('fs');
         const imageData = fs.readFileSync(req.file.path).toString('base64');
@@ -31,7 +32,7 @@ exports.identifyPlant = async (req, res) => {
           plant_details: ['common_names', 'url', 'wiki_description', 'taxonomy', 'synonyms'],
           plant_language: 'en',
           disease_details: ['cause', 'description', 'treatment']
-        }, { headers: { 'Api-Key': process.env.PLANT_ID_API_KEY } });
+        }, { headers: { 'Api-Key': apiKey } });
 
         const result = response.data.suggestions[0];
         if (result) {

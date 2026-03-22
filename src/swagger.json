@@ -2,107 +2,4250 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Ghar Ka Mali API",
-    "version": "2.0.0",
-    "description": "Complete gardening platform API — 83 endpoints"
+    "version": "2.1.0",
+    "description": "Complete gardening platform API — Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` → `POST /auth/verify-otp` → use returned `token` as `Bearer <token>`"
   },
   "servers": [
-    { "url": "http://YOUR_LIGHTSAIL_IP:3000/api", "description": "Production (Lightsail)" },
-    { "url": "http://localhost:3000/api", "description": "Local Development" }
+    {
+      "url": "http://localhost:3000/api",
+      "description": "Local Development"
+    },
+    {
+      "url": "http://YOUR_LIGHTSAIL_IP:3000/api",
+      "description": "Production (Lightsail)"
+    }
   ],
   "components": {
     "securitySchemes": {
-      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Success": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pages": {
+            "type": "integer"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "supervisor",
+              "gardener",
+              "customer"
+            ]
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "is_approved": {
+            "type": "boolean"
+          },
+          "profile_image": {
+            "type": "string"
+          },
+          "wallet_balance": {
+            "type": "number"
+          },
+          "referral_code": {
+            "type": "string"
+          }
+        }
+      },
+      "Booking": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "booking_number": {
+            "type": "string",
+            "example": "GKM12345678"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "assigned",
+              "en_route",
+              "arrived",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "failed"
+            ]
+          },
+          "scheduled_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "scheduled_time": {
+            "type": "string"
+          },
+          "otp": {
+            "type": "string",
+            "description": "4-digit OTP for visit verification"
+          },
+          "service_address": {
+            "type": "string"
+          },
+          "plant_count": {
+            "type": "integer"
+          },
+          "base_amount": {
+            "type": "number"
+          },
+          "total_amount": {
+            "type": "number"
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        }
+      },
+      "ServiceZone": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "base_price": {
+            "type": "number"
+          },
+          "price_per_plant": {
+            "type": "number"
+          },
+          "min_plants": {
+            "type": "integer"
+          },
+          "center_latitude": {
+            "type": "number"
+          },
+          "center_longitude": {
+            "type": "number"
+          },
+          "radius_km": {
+            "type": "number"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ServicePlan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "plan_type": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "ondemand"
+            ]
+          },
+          "visits_per_month": {
+            "type": "integer"
+          },
+          "price": {
+            "type": "number"
+          },
+          "duration_days": {
+            "type": "integer"
+          },
+          "max_plants": {
+            "type": "integer"
+          },
+          "is_weekend_included": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "page": {
+        "name": "page",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 1
+        }
+      },
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 20
+        }
+      },
+      "id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      }
     }
   },
   "tags": [
-    {"name": "Auth"}, {"name": "Bookings"}, {"name": "Gardener"},
-    {"name": "Subscriptions"}, {"name": "Plans"}, {"name": "Zones"},
-    {"name": "Payments"}, {"name": "Plantopedia"}, {"name": "Content"},
-    {"name": "Notifications"}, {"name": "Complaints"}, {"name": "Add-Ons"},
-    {"name": "Admin"}, {"name": "SLA"}, {"name": "Supervisor"}
+    {
+      "name": "Auth",
+      "description": "OTP login for customers & gardeners; password login for admin/supervisor"
+    },
+    {
+      "name": "Gardener",
+      "description": "Gardener app — jobs, location, profile, earnings"
+    },
+    {
+      "name": "Bookings",
+      "description": "Customer booking management — create, track, rate"
+    },
+    {
+      "name": "Subscriptions",
+      "description": "Subscription plans & management"
+    },
+    {
+      "name": "Plans",
+      "description": "Service plan catalog"
+    },
+    {
+      "name": "Zones",
+      "description": "Service zone & geo-fencing"
+    },
+    {
+      "name": "Payments",
+      "description": "PayU payment gateway & wallet"
+    },
+    {
+      "name": "Plantopedia",
+      "description": "AI plant identification & care guide"
+    },
+    {
+      "name": "Content",
+      "description": "Blogs & city SEO pages"
+    },
+    {
+      "name": "Notifications",
+      "description": "In-app push notifications"
+    },
+    {
+      "name": "Complaints",
+      "description": "Customer complaint management"
+    },
+    {
+      "name": "Add-Ons",
+      "description": "Extra add-on services catalog"
+    },
+    {
+      "name": "Supervisor",
+      "description": "Supervisor team & performance management"
+    },
+    {
+      "name": "Admin",
+      "description": "Admin panel — all management & analytics"
+    },
+    {
+      "name": "SLA",
+      "description": "SLA configuration & breach monitoring"
+    }
   ],
   "paths": {
-    "/auth/send-otp":           { "post": { "tags":["Auth"], "summary":"Send OTP to phone", "requestBody":{"content":{"application/json":{"schema":{"properties":{"phone":{"type":"string","example":"9876543210"}}}}}}, "responses":{"200":{"description":"OTP sent (static: 123456 in dev)"}} } },
-    "/auth/verify-otp":         { "post": { "tags":["Auth"], "summary":"Verify OTP → login or register customer", "requestBody":{"content":{"application/json":{"schema":{"properties":{"phone":{"type":"string"},"otp":{"type":"string","example":"123456"},"name":{"type":"string"}}}}}}, "responses":{"200":{"description":"JWT token + user"}} } },
-    "/auth/admin-login":        { "post": { "tags":["Auth"], "summary":"Admin/Supervisor password login", "requestBody":{"content":{"application/json":{"schema":{"properties":{"phone":{"type":"string"},"password":{"type":"string"}}}}}}, "responses":{"200":{"description":"JWT token"}} } },
-    "/auth/gardener-login":     { "post": { "tags":["Auth"], "summary":"Gardener OTP login", "requestBody":{"content":{"application/json":{"schema":{"properties":{"phone":{"type":"string"},"otp":{"type":"string"}}}}}}, "responses":{"200":{"description":"JWT + gardener profile"}} } },
-    "/auth/gardener-register":  { "post": { "tags":["Auth"], "summary":"Gardener registration (multipart)", "requestBody":{"content":{"multipart/form-data":{"schema":{"properties":{"name":{"type":"string"},"phone":{"type":"string"},"email":{"type":"string"},"experience_years":{"type":"integer"},"bio":{"type":"string"},"service_zone_ids":{"type":"array","items":{"type":"integer"}},"profile_image":{"type":"string","format":"binary"},"id_proof":{"type":"string","format":"binary"}}}}}}, "responses":{"201":{"description":"Submitted, awaiting approval"}} } },
-    "/auth/profile":            { "get":{"tags":["Auth"],"summary":"Get current user profile","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"User + gardener profile if applicable"}}}, "put":{"tags":["Auth"],"summary":"Update profile","security":[{"bearerAuth":[]}],"requestBody":{"content":{"multipart/form-data":{"schema":{"properties":{"name":{"type":"string"},"email":{"type":"string"},"address":{"type":"string"},"profile_image":{"type":"string","format":"binary"}}}}}},"responses":{"200":{"description":"Updated user"}}} },
-
-    "/plans":                   { "get": { "tags":["Plans"], "summary":"Get all active service plans", "responses":{"200":{"description":"Plans list"}} } },
-    "/zones":                   { "get": { "tags":["Zones"], "summary":"Get all active service zones", "responses":{"200":{"description":"Zones with pricing"}} } },
-    "/addons":                  { "get": { "tags":["Add-Ons"], "summary":"Get all active add-on services", "responses":{"200":{"description":"Add-ons grouped by category"}} } },
-
-    "/payments/check-serviceability": { "get": { "tags":["Payments"], "summary":"Check if lat/lng is in serviceable zone", "parameters":[{"name":"latitude","in":"query","required":true,"schema":{"type":"number"}},{"name":"longitude","in":"query","required":true,"schema":{"type":"number"}}], "responses":{"200":{"description":"serviceable: bool, zones: []"}} } },
-    "/payments/initiate":       { "post": { "tags":["Payments"], "summary":"Initiate PayU payment", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"type":{"type":"string","enum":["booking","subscription","wallet_topup"]},"booking_id":{"type":"integer"},"subscription_id":{"type":"integer"},"amount":{"type":"number"}}}}}}, "responses":{"200":{"description":"PayU params + payment_id"}} } },
-    "/payments/success":        { "post": { "tags":["Payments"], "summary":"PayU success callback (called by PayU)", "responses":{"302":{"description":"Redirect to frontend"}} } },
-    "/payments/failure":        { "post": { "tags":["Payments"], "summary":"PayU failure callback (called by PayU)", "responses":{"302":{"description":"Redirect to frontend"}} } },
-    "/payments/status/{txnid}": { "get": { "tags":["Payments"], "summary":"Check payment status by transaction ID", "security":[{"bearerAuth":[]}], "parameters":[{"name":"txnid","in":"path","required":true,"schema":{"type":"string"}}], "responses":{"200":{"description":"Payment record"}} } },
-    "/payments/my":             { "get": { "tags":["Payments"], "summary":"Get my payment history", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"Paginated payments"}} } },
-    "/payments/wallet-topup":   { "post": { "tags":["Payments"], "summary":"Initiate wallet top-up via PayU", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"amount":{"type":"number","minimum":100}}}}}}, "responses":{"200":{"description":"PayU params"}} } },
-    "/payments/reschedule":     { "post": { "tags":["Bookings"], "summary":"Reschedule a booking", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"booking_id":{"type":"integer"},"new_date":{"type":"string","format":"date"},"new_time":{"type":"string"}}}}}}, "responses":{"200":{"description":"Rescheduled booking"}} } },
-
-    "/bookings":                { "post": { "tags":["Bookings"], "summary":"Create on-demand booking", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"required":["zone_id","scheduled_date","service_address","service_latitude","service_longitude"],"properties":{"zone_id":{"type":"integer"},"scheduled_date":{"type":"string","format":"date"},"scheduled_time":{"type":"string"},"service_address":{"type":"string"},"service_latitude":{"type":"number"},"service_longitude":{"type":"number"},"plant_count":{"type":"integer"},"preferred_gardener_id":{"type":"integer"},"customer_notes":{"type":"string"}}}}}}, "responses":{"201":{"description":"Booking with OTP"}} } },
-    "/bookings/my":             { "get": { "tags":["Bookings"], "summary":"Get my bookings (customer)", "security":[{"bearerAuth":[]}], "parameters":[{"name":"status","in":"query","schema":{"type":"string"}},{"name":"page","in":"query","schema":{"type":"integer"}}], "responses":{"200":{"description":"Paginated bookings"}} } },
-    "/bookings/{id}":           { "get": { "tags":["Bookings"], "summary":"Get booking detail", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"Full booking with gardener & zone"}} } },
-    "/bookings/verify-otp":     { "post": { "tags":["Gardener"], "summary":"Verify visit OTP to start job", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"booking_id":{"type":"integer"},"otp":{"type":"string"}}}}}}, "responses":{"200":{"description":"Visit started"}} } },
-    "/bookings/status":         { "put": { "tags":["Gardener"], "summary":"Update booking status + work proof images", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"multipart/form-data":{"schema":{"properties":{"booking_id":{"type":"integer"},"status":{"type":"string","enum":["en_route","arrived","in_progress","completed","failed"]},"gardener_notes":{"type":"string"},"extra_plants":{"type":"integer"},"before_image":{"type":"string","format":"binary"},"after_image":{"type":"string","format":"binary"}}}}}}, "responses":{"200":{"description":"Status updated"}} } },
-    "/bookings/rate":           { "post": { "tags":["Bookings"], "summary":"Rate a completed booking (1-5 stars)", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"booking_id":{"type":"integer"},"rating":{"type":"integer","minimum":1,"maximum":5},"review":{"type":"string"}}}}}}, "responses":{"200":{"description":"Rated, gardener avg updated"}} } },
-    "/bookings/cancel":         { "post": { "tags":["Bookings"], "summary":"Cancel a booking", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"booking_id":{"type":"integer"},"reason":{"type":"string"}}}}}}, "responses":{"200":{"description":"Cancelled"}} } },
-    "/bookings/location":       { "post": { "tags":["Gardener"], "summary":"Update gardener GPS location", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"latitude":{"type":"number"},"longitude":{"type":"number"},"booking_id":{"type":"integer"}}}}}}, "responses":{"200":{"description":"Location saved + Socket.io broadcast"}} } },
-    "/bookings/track/{booking_id}": { "get": { "tags":["Bookings"], "summary":"Get gardener current location for tracking", "security":[{"bearerAuth":[]}], "parameters":[{"name":"booking_id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"lat/lng + last_updated"}} } },
-    "/bookings/gardener/jobs":  { "get": { "tags":["Gardener"], "summary":"Get gardener's assigned jobs", "security":[{"bearerAuth":[]}], "parameters":[{"name":"status","in":"query","schema":{"type":"string"}},{"name":"date","in":"query","schema":{"type":"string","format":"date"}},{"name":"page","in":"query","schema":{"type":"integer"}}], "responses":{"200":{"description":"Jobs list"}} } },
-    "/bookings/gardener/earnings": { "get": { "tags":["Gardener"], "summary":"Gardener earnings breakdown by period", "security":[{"bearerAuth":[]}], "parameters":[{"name":"period","in":"query","schema":{"type":"string","enum":["daily","weekly","monthly"]}}], "responses":{"200":{"description":"Breakdown + totals"}} } },
-    "/bookings/{id}/addons":    { "get":{"tags":["Add-Ons"],"summary":"Get add-ons for a booking","security":[{"bearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}],"responses":{"200":{"description":"Add-ons list"}}}, "post":{"tags":["Add-Ons"],"summary":"Add extra services to a booking","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"addon_ids":{"type":"array","items":{"type":"object","properties":{"addon_id":{"type":"integer"},"quantity":{"type":"integer"}}}}}}}}},"responses":{"200":{"description":"Add-ons attached, total updated"}}} },
-
-    "/subscriptions":           { "post": { "tags":["Subscriptions"], "summary":"Purchase a subscription plan", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"required":["plan_id","service_address","service_latitude","service_longitude"],"properties":{"plan_id":{"type":"integer"},"zone_id":{"type":"integer"},"service_address":{"type":"string"},"service_latitude":{"type":"number"},"service_longitude":{"type":"number"},"plant_count":{"type":"integer"},"preferred_gardener_id":{"type":"integer"},"auto_renew":{"type":"boolean"}}}}}}, "responses":{"201":{"description":"Subscription + auto-scheduled visits"}} } },
-    "/subscriptions/my":        { "get": { "tags":["Subscriptions"], "summary":"Get my subscriptions", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"Subscriptions with plan details"}} } },
-    "/subscriptions/{id}/cancel": { "put": { "tags":["Subscriptions"], "summary":"Cancel subscription", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"Cancelled"}} } },
-
-    "/plants/identify":         { "post": { "tags":["Plantopedia"], "summary":"AI plant identification from image", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"multipart/form-data":{"schema":{"properties":{"image":{"type":"string","format":"binary"}}}}}}, "responses":{"200":{"description":"Plant name, care guide, watering schedule, fertilizer tips"}} } },
-    "/plants/history":          { "get": { "tags":["Plantopedia"], "summary":"Get my plant identification history", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"History list"}} } },
-
-    "/blogs":                   { "get": { "tags":["Content"], "summary":"Get published blogs (SSG)", "parameters":[{"name":"page","in":"query","schema":{"type":"integer"}},{"name":"category","in":"query","schema":{"type":"string"}},{"name":"city_slug","in":"query","schema":{"type":"string"}}], "responses":{"200":{"description":"Paginated blogs"}} } },
-    "/blogs/{slug}":            { "get": { "tags":["Content"], "summary":"Get blog post by slug", "parameters":[{"name":"slug","in":"path","required":true,"schema":{"type":"string"}}], "responses":{"200":{"description":"Full blog post, views incremented"}} } },
-    "/cities":                  { "get": { "tags":["Content"], "summary":"Get active city SEO pages", "responses":{"200":{"description":"City list"}} } },
-    "/cities/{slug}":           { "get": { "tags":["Content"], "summary":"Get city page by slug", "parameters":[{"name":"slug","in":"path","required":true,"schema":{"type":"string"}}], "responses":{"200":{"description":"City SEO page"}} } },
-
-    "/notifications":           { "get": { "tags":["Notifications"], "summary":"Get my notifications", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"30 most recent"}} } },
-    "/notifications/{id}/read": { "put": { "tags":["Notifications"], "summary":"Mark notification as read", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"Marked"}} } },
-
-    "/complaints":              { "post":{"tags":["Complaints"],"summary":"Raise a complaint (customer)","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["type","description"],"properties":{"booking_id":{"type":"integer"},"type":{"type":"string","enum":["service_quality","late_arrival","no_show","rude_behavior","billing","damage","other"]},"description":{"type":"string"},"priority":{"type":"string","enum":["low","medium","high"]}}}}}},"responses":{"201":{"description":"Complaint raised, supervisor notified via WhatsApp"}}}, "get":{"tags":["Complaints"],"summary":"Get all complaints (admin/supervisor)","security":[{"bearerAuth":[]}],"parameters":[{"name":"status","in":"query","schema":{"type":"string"}},{"name":"priority","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"Complaints list"}}} },
-    "/complaints/my":           { "get": { "tags":["Complaints"], "summary":"Get my complaints (customer)", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"Customer complaints"}} } },
-    "/complaints/stats":        { "get": { "tags":["Complaints"], "summary":"Complaint stats (admin/supervisor)", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"open/inReview/resolved/highPriority counts"}} } },
-    "/complaints/{id}":         { "put": { "tags":["Complaints"], "summary":"Update complaint — assign/resolve (admin/supervisor)", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"status":{"type":"string"},"resolution_notes":{"type":"string"},"assigned_to":{"type":"integer"}}}}}}, "responses":{"200":{"description":"Updated, customer notified"}} } },
-
-    "/supervisor/dashboard":    { "get": { "tags":["Supervisor"], "summary":"Supervisor team dashboard", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"Team gardeners + today stats"}} } },
-
-    "/admin/dashboard":         { "get": { "tags":["Admin"], "summary":"Admin overview stats", "security":[{"bearerAuth":[]}], "responses":{"200":{"description":"Stats + recent bookings"}} } },
-    "/admin/analytics":         { "get": { "tags":["Admin"], "summary":"Full analytics data", "security":[{"bearerAuth":[]}], "parameters":[{"name":"period","in":"query","schema":{"type":"string","default":"30"},"description":"Days to look back"},{"name":"zone_id","in":"query","schema":{"type":"integer"}}], "responses":{"200":{"description":"Revenue, zones, cities, users, plans, ratings, repeat customers"}} } },
-    "/admin/utilization":       { "get": { "tags":["Admin"], "summary":"Gardener utilization rate report", "security":[{"bearerAuth":[]}], "parameters":[{"name":"period","in":"query","schema":{"type":"string","default":"30"}}], "responses":{"200":{"description":"Per-gardener utilization % + summary"}} } },
-    "/admin/gardeners":         { "get":{"tags":["Admin"],"summary":"List gardeners with filter","security":[{"bearerAuth":[]}],"parameters":[{"name":"status","in":"query","schema":{"type":"string","enum":["pending","active","inactive",""]}},{"name":"search","in":"query","schema":{"type":"string"}},{"name":"city","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"Paginated gardeners with profiles"}}} },
-    "/admin/gardeners/approve": { "post": { "tags":["Admin"], "summary":"Approve gardener + assign supervisor", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"user_id":{"type":"integer"},"supervisor_id":{"type":"integer"}}}}}}, "responses":{"200":{"description":"Approved, WhatsApp sent"}} } },
-    "/admin/gardeners/reject":  { "post": { "tags":["Admin"], "summary":"Reject gardener application", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"properties":{"user_id":{"type":"integer"},"reason":{"type":"string"}}}}}}, "responses":{"200":{"description":"Rejected"}} } },
-    "/admin/supervisors":       { "get":{"tags":["Admin"],"summary":"List supervisors","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"Supervisors list"}}}, "post":{"tags":["Admin"],"summary":"Create supervisor account","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["name","phone","password"],"properties":{"name":{"type":"string"},"phone":{"type":"string"},"email":{"type":"string"},"password":{"type":"string"}}}}}},"responses":{"201":{"description":"Supervisor created"}}} },
-    "/admin/zones":             { "get":{"tags":["Admin"],"summary":"List all zones","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"Zones"}}}, "post":{"tags":["Admin"],"summary":"Create service zone","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["name","city","state","base_price"],"properties":{"name":{"type":"string"},"city":{"type":"string"},"state":{"type":"string"},"base_price":{"type":"number"},"price_per_plant":{"type":"number"},"center_latitude":{"type":"number"},"center_longitude":{"type":"number"},"radius_km":{"type":"number"}}}}}},"responses":{"201":{"description":"Zone created"}}} },
-    "/admin/zones/{id}":        { "put": { "tags":["Admin"], "summary":"Update zone", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "requestBody":{"content":{"application/json":{"schema":{}}}}, "responses":{"200":{"description":"Updated"}} } },
-    "/admin/plans":             { "post": { "tags":["Admin"], "summary":"Create service plan", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"required":["name","price"],"properties":{"name":{"type":"string"},"plan_type":{"type":"string","enum":["subscription","ondemand"]},"price":{"type":"number"},"visits_per_month":{"type":"integer"},"max_plants":{"type":"integer"},"duration_days":{"type":"integer"}}}}}}, "responses":{"201":{"description":"Plan created"}} } },
-    "/admin/plans/{id}":        { "put": { "tags":["Admin"], "summary":"Update plan (logs price change)", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "requestBody":{"content":{"application/json":{"schema":{}}}}, "responses":{"200":{"description":"Updated + PriceHikeLog if price changed"}} } },
-    "/admin/bookings":          { "get": { "tags":["Admin"], "summary":"List all bookings with filters", "security":[{"bearerAuth":[]}], "parameters":[{"name":"status","in":"query","schema":{"type":"string"}},{"name":"zone_id","in":"query","schema":{"type":"integer"}},{"name":"date","in":"query","schema":{"type":"string"}},{"name":"gardener_id","in":"query","schema":{"type":"integer"}}], "responses":{"200":{"description":"Paginated bookings"}} } },
-    "/admin/subscriptions":     { "get": { "tags":["Admin"], "summary":"List all subscriptions", "security":[{"bearerAuth":[]}], "parameters":[{"name":"status","in":"query","schema":{"type":"string"}}], "responses":{"200":{"description":"Paginated subscriptions"}} } },
-    "/admin/customers":         { "get": { "tags":["Admin"], "summary":"List customers", "security":[{"bearerAuth":[]}], "parameters":[{"name":"search","in":"query","schema":{"type":"string"}},{"name":"city","in":"query","schema":{"type":"string"}}], "responses":{"200":{"description":"Paginated customers"}} } },
-    "/admin/rewards":           { "get":{"tags":["Admin"],"summary":"List rewards/penalties","security":[{"bearerAuth":[]}],"parameters":[{"name":"gardener_id","in":"query","schema":{"type":"integer"}},{"name":"type","in":"query","schema":{"type":"string","enum":["reward","penalty"]}}],"responses":{"200":{"description":"Paginated rewards/penalties"}}}, "post":{"tags":["Admin"],"summary":"Create manual reward or penalty","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["gardener_id","type","amount","reason"],"properties":{"gardener_id":{"type":"integer"},"type":{"type":"string","enum":["reward","penalty"]},"amount":{"type":"number"},"reason":{"type":"string"},"booking_id":{"type":"integer"}}}}}}, "responses":{"201":{"description":"Created + earnings updated"}}} },
-    "/admin/payments":          { "get": { "tags":["Admin"], "summary":"List all PayU transactions", "security":[{"bearerAuth":[]}], "parameters":[{"name":"status","in":"query","schema":{"type":"string"}},{"name":"type","in":"query","schema":{"type":"string"}}], "responses":{"200":{"description":"Paginated payments"}} } },
-    "/admin/price-hike":        { "post": { "tags":["Admin"], "summary":"Apply immediate price hike to zones/plans", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"required":["percentage"],"properties":{"percentage":{"type":"number"},"reason":{"type":"string"},"zone_ids":{"type":"array","items":{"type":"integer"}},"plan_ids":{"type":"array","items":{"type":"integer"}}}}}}}, "responses":{"200":{"description":"Applied + PriceHikeLog created"}} } },
-    "/admin/price-hike/schedule": { "post":{"tags":["Admin"],"summary":"Schedule a future price hike","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["percentage","scheduled_at"],"properties":{"name":{"type":"string"},"percentage":{"type":"number"},"scheduled_at":{"type":"string","format":"date-time"},"reason":{"type":"string"},"zone_ids":{"type":"array","items":{"type":"integer"}},"plan_ids":{"type":"array","items":{"type":"integer"}}}}}}},"responses":{"201":{"description":"Scheduled (runs via daily cron)"}}}, "get":{"tags":["Admin"],"summary":"List scheduled price hikes","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"Scheduled hikes"}}} },
-    "/admin/price-hike/schedule/{id}": { "delete": { "tags":["Admin"], "summary":"Delete pending scheduled hike", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"Deleted"}} } },
-    "/admin/blogs":             { "post":{"tags":["Admin"],"summary":"Create blog post","security":[{"bearerAuth":[]}],"requestBody":{"content":{"multipart/form-data":{"schema":{"properties":{"title":{"type":"string"},"content":{"type":"string"},"category":{"type":"string"},"status":{"type":"string","enum":["draft","published"]},"seo_title":{"type":"string"},"seo_description":{"type":"string"},"city_slug":{"type":"string"},"featured_image":{"type":"string","format":"binary"}}}}}},"responses":{"201":{"description":"Blog created"}}} },
-    "/admin/blogs/{id}":        { "put":{"tags":["Admin"],"summary":"Update blog post","security":[{"bearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}],"requestBody":{"content":{"multipart/form-data":{"schema":{}}}},"responses":{"200":{"description":"Updated"}}}, "delete":{"tags":["Admin"],"summary":"Archive blog","security":[{"bearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}],"responses":{"200":{"description":"Archived"}}} },
-    "/admin/cities":            { "post": { "tags":["Admin"], "summary":"Create or update city SEO page", "security":[{"bearerAuth":[]}], "requestBody":{"content":{"application/json":{"schema":{"required":["city_name"],"properties":{"city_name":{"type":"string"},"state":{"type":"string"},"hero_title":{"type":"string"},"hero_description":{"type":"string"},"content":{"type":"string"},"seo_title":{"type":"string"},"seo_description":{"type":"string"}}}}}}, "responses":{"200":{"description":"City page saved"}} } },
-    "/admin/addons":            { "get":{"tags":["Add-Ons"],"summary":"List all add-on services (admin)","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"Full catalog"}}}, "post":{"tags":["Add-Ons"],"summary":"Create add-on service","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"required":["name","price"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"price":{"type":"number"},"duration_mins":{"type":"integer"},"icon":{"type":"string"},"category":{"type":"string"}}}}}},"responses":{"201":{"description":"Created"}}} },
-    "/admin/addons/{id}":       { "put": { "tags":["Add-Ons"], "summary":"Update add-on service", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "requestBody":{"content":{"application/json":{"schema":{}}}}, "responses":{"200":{"description":"Updated"}} } },
-    "/admin/sla/config":        { "get":{"tags":["SLA"],"summary":"Get SLA config","security":[{"bearerAuth":[]}],"responses":{"200":{"description":"max_arrival_delay_mins, max_service_duration_hrs, response_time_hrs"}}}, "put":{"tags":["SLA"],"summary":"Update SLA thresholds","security":[{"bearerAuth":[]}],"requestBody":{"content":{"application/json":{"schema":{"properties":{"max_arrival_delay_mins":{"type":"integer"},"max_service_duration_hrs":{"type":"number"},"response_time_hrs":{"type":"integer"}}}}}},"responses":{"200":{"description":"Updated"}}} },
-    "/admin/sla/breaches":      { "get": { "tags":["SLA"], "summary":"List SLA breaches", "security":[{"bearerAuth":[]}], "parameters":[{"name":"is_resolved","in":"query","schema":{"type":"boolean"}},{"name":"breach_type","in":"query","schema":{"type":"string"}}], "responses":{"200":{"description":"Breaches with booking + gardener"}} } },
-    "/admin/sla/breaches/{id}/resolve": { "put": { "tags":["SLA"], "summary":"Mark SLA breach as resolved", "security":[{"bearerAuth":[]}], "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer"}}], "responses":{"200":{"description":"Resolved"}} } }
+    "/auth/send-otp": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Send OTP to phone number",
+        "description": "Sends a 6-digit OTP via SMS. In dev mode (`USE_STATIC_OTP=true`), OTP is always `123456` and returned in response.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210",
+                    "description": "10-digit Indian mobile number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP sent. In dev mode, OTP field returned in response."
+          },
+          "400": {
+            "description": "Invalid phone number"
+          },
+          "429": {
+            "description": "Too many OTP requests (5/minute limit)"
+          }
+        }
+      }
+    },
+    "/auth/verify-otp": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Verify OTP → login or auto-register customer",
+        "description": "Verifies OTP. Creates a new customer account if phone doesn't exist. Returns JWT token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone",
+                  "otp"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Required for new registrations"
+                  },
+                  "fcm_token": {
+                    "type": "string",
+                    "description": "Firebase push notification token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JWT token + user object"
+          },
+          "400": {
+            "description": "Invalid or expired OTP"
+          }
+        }
+      }
+    },
+    "/auth/admin-login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Admin / Supervisor password login",
+        "description": "Password-based login for admin and supervisor roles. Seed admin: phone `9999999999`, password `Admin@123`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone",
+                  "password"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "example": "9999999999"
+                  },
+                  "password": {
+                    "type": "string",
+                    "example": "Admin@123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JWT token + user"
+          },
+          "401": {
+            "description": "Invalid credentials or inactive account"
+          }
+        }
+      }
+    },
+    "/auth/gardener-login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Gardener OTP login",
+        "description": "OTP-based login for approved gardeners. Returns token + gardener profile.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "phone",
+                  "otp"
+                ],
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "123456"
+                  },
+                  "fcm_token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JWT token + user + gardener profile"
+          },
+          "403": {
+            "description": "Account not yet approved by admin"
+          },
+          "404": {
+            "description": "Gardener not found"
+          }
+        }
+      }
+    },
+    "/auth/gardener-register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Gardener registration (multipart)",
+        "description": "Submit gardener registration. Admin approval required before login.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "name",
+                  "phone"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "experience_years": {
+                    "type": "integer"
+                  },
+                  "bio": {
+                    "type": "string"
+                  },
+                  "service_zone_ids": {
+                    "type": "string",
+                    "description": "JSON array of zone IDs"
+                  },
+                  "profile_image": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "id_proof": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Government ID proof"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registration submitted. Awaiting admin approval."
+          },
+          "400": {
+            "description": "Phone already registered"
+          }
+        }
+      }
+    },
+    "/auth/profile": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get current user profile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile. Includes gardenerProfile for gardener role."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Update profile (name, email, address, photo)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "pincode": {
+                    "type": "string"
+                  },
+                  "profile_image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated user"
+          }
+        }
+      }
+    },
+    "/gardener/profile": {
+      "get": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Get gardener's own full profile with assigned zones",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User + gardenerProfile + zones"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Update gardener bio & bank details",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "bio": {
+                    "type": "string"
+                  },
+                  "experience_years": {
+                    "type": "integer"
+                  },
+                  "bank_account": {
+                    "type": "string"
+                  },
+                  "bank_ifsc": {
+                    "type": "string"
+                  },
+                  "bank_name": {
+                    "type": "string"
+                  },
+                  "id_proof_type": {
+                    "type": "string",
+                    "enum": [
+                      "aadhar",
+                      "pan",
+                      "driving_license",
+                      "passport"
+                    ]
+                  },
+                  "id_proof_number": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated gardener profile"
+          }
+        }
+      }
+    },
+    "/gardener/availability": {
+      "patch": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Toggle gardener availability (go online/offline)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "is_available"
+                ],
+                "properties": {
+                  "is_available": {
+                    "type": "boolean",
+                    "example": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Availability updated"
+          }
+        }
+      }
+    },
+    "/bookings": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Create on-demand booking",
+        "description": "Creates a booking and auto-assigns nearest available gardener. Sends WhatsApp confirmation.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "zone_id",
+                  "scheduled_date",
+                  "service_address",
+                  "service_latitude",
+                  "service_longitude"
+                ],
+                "properties": {
+                  "zone_id": {
+                    "type": "integer"
+                  },
+                  "scheduled_date": {
+                    "type": "string",
+                    "format": "date",
+                    "example": "2026-03-25"
+                  },
+                  "scheduled_time": {
+                    "type": "string",
+                    "example": "09:00"
+                  },
+                  "service_address": {
+                    "type": "string"
+                  },
+                  "service_latitude": {
+                    "type": "number",
+                    "example": 28.5355
+                  },
+                  "service_longitude": {
+                    "type": "number",
+                    "example": 77.391
+                  },
+                  "plant_count": {
+                    "type": "integer",
+                    "default": 1
+                  },
+                  "preferred_gardener_id": {
+                    "type": "integer",
+                    "description": "Optional preferred gardener"
+                  },
+                  "customer_notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Booking created with OTP for visit verification"
+          },
+          "404": {
+            "description": "Zone not found"
+          }
+        }
+      }
+    },
+    "/bookings/my": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Get my bookings (customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "assigned",
+                "en_route",
+                "arrived",
+                "in_progress",
+                "completed",
+                "cancelled",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated bookings with gardener and zone details"
+          }
+        }
+      }
+    },
+    "/bookings/{id}": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Get booking detail",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full booking with customer, gardener, zone, last tracking point"
+          },
+          "404": {
+            "description": "Booking not found"
+          }
+        }
+      }
+    },
+    "/bookings/verify-otp": {
+      "post": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Verify visit OTP to start job (Gardener)",
+        "description": "Customer shares their booking OTP with gardener. Gardener enters it to officially start the visit. Timer begins.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "booking_id",
+                  "otp"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "4821",
+                    "description": "4-digit OTP shown to customer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Visit started, status → in_progress, WhatsApp sent to customer"
+          },
+          "400": {
+            "description": "Invalid OTP"
+          },
+          "403": {
+            "description": "Not your booking"
+          }
+        }
+      }
+    },
+    "/bookings/status": {
+      "put": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Update booking status + upload work proof (Gardener)",
+        "description": "Gardener updates status through: en_route → arrived → in_progress (via OTP) → completed/failed. Work images uploaded on completion.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "booking_id",
+                  "status"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "en_route",
+                      "arrived",
+                      "completed",
+                      "failed"
+                    ]
+                  },
+                  "gardener_notes": {
+                    "type": "string"
+                  },
+                  "extra_plants": {
+                    "type": "integer",
+                    "description": "Additional plants serviced (auto-billed)"
+                  },
+                  "before_image": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "after_image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated. On completion: extra billing applied, customer notified via WhatsApp + push"
+          }
+        }
+      }
+    },
+    "/bookings/rate": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Rate a completed booking (1-5 stars)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "booking_id",
+                  "rating"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "rating": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "review": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rating submitted. Gardener average rating auto-updated."
+          }
+        }
+      }
+    },
+    "/bookings/cancel": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Cancel a booking",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "booking_id"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled"
+          },
+          "400": {
+            "description": "Cannot cancel booking in current status (only pending/assigned)"
+          }
+        }
+      }
+    },
+    "/bookings/location": {
+      "post": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Update gardener GPS location (Gardener)",
+        "description": "Called every 30s by gardener app. Broadcasts via Socket.io to customer tracking room.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "properties": {
+                  "latitude": {
+                    "type": "number",
+                    "example": 28.5355
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "example": 77.391
+                  },
+                  "booking_id": {
+                    "type": "integer",
+                    "description": "If provided, creates a tracking record"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location saved + Socket.io broadcast"
+          }
+        }
+      }
+    },
+    "/bookings/track/{booking_id}": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Get gardener's current location for real-time tracking",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "latitude, longitude, updated_at"
+          }
+        }
+      }
+    },
+    "/bookings/gardener/jobs": {
+      "get": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Get gardener's assigned jobs",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "assigned",
+                "en_route",
+                "arrived",
+                "in_progress",
+                "completed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Filter by specific date (YYYY-MM-DD)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs with customer details and zone"
+          }
+        }
+      }
+    },
+    "/bookings/gardener/earnings": {
+      "get": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Gardener earnings breakdown by period",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "daily",
+                "weekly",
+                "monthly"
+              ],
+              "default": "monthly"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Period breakdown + totals (jobs, earnings, avg rating)"
+          }
+        }
+      }
+    },
+    "/bookings/{id}/addons": {
+      "get": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Get add-on services for a booking",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Add-ons attached to this booking"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Add extra services to a booking (Customer)",
+        "description": "Adds add-on services to a pending/assigned booking. Total amount auto-updated.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "addon_ids"
+                ],
+                "properties": {
+                  "addon_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "addon_id": {
+                          "type": "integer"
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "default": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Add-ons attached, booking total updated"
+          }
+        }
+      }
+    },
+    "/plans": {
+      "get": {
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Get all active service plans",
+        "responses": {
+          "200": {
+            "description": "List of subscription and on-demand plans"
+          }
+        }
+      }
+    },
+    "/subscriptions": {
+      "post": {
+        "tags": [
+          "Subscriptions"
+        ],
+        "summary": "Purchase a subscription plan",
+        "description": "Creates subscription and auto-schedules visits (Mon-Sat, no weekends). WhatsApp confirmation sent.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "plan_id",
+                  "service_address",
+                  "service_latitude",
+                  "service_longitude"
+                ],
+                "properties": {
+                  "plan_id": {
+                    "type": "integer"
+                  },
+                  "zone_id": {
+                    "type": "integer"
+                  },
+                  "service_address": {
+                    "type": "string"
+                  },
+                  "service_latitude": {
+                    "type": "number"
+                  },
+                  "service_longitude": {
+                    "type": "number"
+                  },
+                  "plant_count": {
+                    "type": "integer",
+                    "default": 1
+                  },
+                  "preferred_gardener_id": {
+                    "type": "integer"
+                  },
+                  "auto_renew": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "payment_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscription activated + all visits auto-scheduled"
+          }
+        }
+      }
+    },
+    "/subscriptions/my": {
+      "get": {
+        "tags": [
+          "Subscriptions"
+        ],
+        "summary": "Get my subscriptions (Customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscriptions with plan details"
+          }
+        }
+      }
+    },
+    "/subscriptions/{id}/cancel": {
+      "put": {
+        "tags": [
+          "Subscriptions"
+        ],
+        "summary": "Cancel subscription (Customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription cancelled"
+          },
+          "404": {
+            "description": "Subscription not found"
+          }
+        }
+      }
+    },
+    "/subscriptions/{id}/pause": {
+      "patch": {
+        "tags": [
+          "Subscriptions"
+        ],
+        "summary": "Pause an active subscription (Customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription paused"
+          },
+          "404": {
+            "description": "Active subscription not found"
+          }
+        }
+      }
+    },
+    "/subscriptions/{id}/resume": {
+      "patch": {
+        "tags": [
+          "Subscriptions"
+        ],
+        "summary": "Resume a paused subscription (Customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription resumed"
+          },
+          "404": {
+            "description": "Paused subscription not found"
+          }
+        }
+      }
+    },
+    "/zones": {
+      "get": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "Get all active service zones (public)",
+        "responses": {
+          "200": {
+            "description": "Zones with base pricing"
+          }
+        }
+      }
+    },
+    "/addons": {
+      "get": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Get all active add-on services (public)",
+        "responses": {
+          "200": {
+            "description": "Add-ons grouped by category"
+          }
+        }
+      }
+    },
+    "/payments/check-serviceability": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Check if a location is in a serviceable zone",
+        "parameters": [
+          {
+            "name": "latitude",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number"
+            },
+            "example": 28.5355
+          },
+          {
+            "name": "longitude",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number"
+            },
+            "example": 77.391
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "serviceable: bool, zones: [] (matching zones)"
+          }
+        }
+      }
+    },
+    "/payments/initiate": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Initiate PayU payment",
+        "description": "Returns PayU parameters. Client should POST these to PayU payment URL.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "booking",
+                      "subscription",
+                      "wallet_topup"
+                    ]
+                  },
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "subscription_id": {
+                    "type": "integer"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "Required for wallet_topup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "payment_id + payu_url + params to POST to PayU"
+          }
+        }
+      }
+    },
+    "/payments/success": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "PayU success callback (called by PayU gateway)",
+        "description": "PayU posts here on successful payment. Verifies hash, updates booking/subscription status.",
+        "responses": {
+          "302": {
+            "description": "Redirect to frontend success page"
+          }
+        }
+      }
+    },
+    "/payments/failure": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "PayU failure callback (called by PayU gateway)",
+        "responses": {
+          "302": {
+            "description": "Redirect to frontend failure page"
+          }
+        }
+      }
+    },
+    "/payments/status/{txnid}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Check payment status by transaction ID",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "txnid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment record"
+          }
+        }
+      }
+    },
+    "/payments/my": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Get my payment history",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated payment transactions"
+          }
+        }
+      }
+    },
+    "/payments/wallet-topup": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Initiate wallet top-up (minimum ₹100)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "minimum": 100,
+                    "example": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PayU params for wallet top-up"
+          },
+          "400": {
+            "description": "Minimum top-up is ₹100"
+          }
+        }
+      }
+    },
+    "/payments/reschedule": {
+      "post": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Reschedule a pending/assigned booking",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "booking_id",
+                  "new_date"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "new_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "new_time": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Booking rescheduled"
+          }
+        }
+      }
+    },
+    "/plants/identify": {
+      "post": {
+        "tags": [
+          "Plantopedia"
+        ],
+        "summary": "AI plant identification from photo",
+        "description": "Upload a plant image. If `PLANT_ID_API_KEY` is set, uses Plant.id API for identification. Otherwise returns default care instructions.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "JPG/PNG of the plant (max 10MB)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plant name, scientific name, care instructions, watering schedule, fertilizer tips, sunlight requirements, confidence score"
+          }
+        }
+      }
+    },
+    "/plants/history": {
+      "get": {
+        "tags": [
+          "Plantopedia"
+        ],
+        "summary": "Get my plant identification history",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Last 20 identifications"
+          }
+        }
+      }
+    },
+    "/blogs": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Get published blogs (paginated)",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "city_slug",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter blogs by city"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated blogs (without full content)"
+          }
+        }
+      }
+    },
+    "/blogs/{slug}": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Get blog post by slug (full content)",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full blog post. View count incremented."
+          },
+          "404": {
+            "description": "Blog not found"
+          }
+        }
+      }
+    },
+    "/cities": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Get all active city SEO landing pages",
+        "responses": {
+          "200": {
+            "description": "City list"
+          }
+        }
+      }
+    },
+    "/cities/{slug}": {
+      "get": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Get city SEO page by slug",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "City page with hero, content, SEO meta"
+          },
+          "404": {
+            "description": "City page not found"
+          }
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Get my notifications (last 30)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notification list with is_read flag"
+          }
+        }
+      }
+    },
+    "/notifications/{id}/read": {
+      "put": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark a specific notification as read",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Marked as read"
+          }
+        }
+      }
+    },
+    "/notifications/read-all": {
+      "put": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark ALL notifications as read",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All unread notifications marked as read"
+          }
+        }
+      }
+    },
+    "/complaints": {
+      "post": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "Raise a complaint (Customer)",
+        "description": "Auto-assigns to gardener's supervisor. Customer & supervisor receive WhatsApp notification.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "type",
+                  "description"
+                ],
+                "properties": {
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "service_quality",
+                      "late_arrival",
+                      "no_show",
+                      "rude_behavior",
+                      "billing",
+                      "damage",
+                      "other"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ],
+                    "default": "medium"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Complaint raised. Supervisor notified via WhatsApp."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "Get all complaints (Admin/Supervisor)",
+        "description": "Supervisors only see complaints assigned to them.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "in_review",
+                "resolved",
+                "closed"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complaints with customer, gardener, supervisor details"
+          }
+        }
+      }
+    },
+    "/complaints/my": {
+      "get": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "Get my complaints (Customer)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Customer's complaints with booking & gardener details"
+          }
+        }
+      }
+    },
+    "/complaints/stats": {
+      "get": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "Complaint statistics (Admin/Supervisor)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "open, inReview, resolved, highPriority counts"
+          }
+        }
+      }
+    },
+    "/complaints/{id}": {
+      "put": {
+        "tags": [
+          "Complaints"
+        ],
+        "summary": "Update complaint — assign, escalate, or resolve (Admin/Supervisor)",
+        "description": "On resolve: customer notified via WhatsApp, auto penalty applied to gardener (₹50).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "in_review",
+                      "resolved",
+                      "closed"
+                    ]
+                  },
+                  "resolution_notes": {
+                    "type": "string"
+                  },
+                  "assigned_to": {
+                    "type": "integer",
+                    "description": "Supervisor user ID"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated, customer notified via WhatsApp"
+          }
+        }
+      }
+    },
+    "/supervisor/dashboard": {
+      "get": {
+        "tags": [
+          "Supervisor"
+        ],
+        "summary": "Supervisor team overview dashboard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team gardeners + today's job stats"
+          }
+        }
+      }
+    },
+    "/supervisor/gardeners": {
+      "get": {
+        "tags": [
+          "Supervisor"
+        ],
+        "summary": "Get supervisor's team gardeners",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "supervisor_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Admin only: view another supervisor's team"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team gardeners with full profiles"
+          }
+        }
+      }
+    },
+    "/supervisor/gardeners/{id}/performance": {
+      "get": {
+        "tags": [
+          "Supervisor"
+        ],
+        "summary": "Get individual gardener performance report",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Gardener user ID"
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "30"
+            },
+            "description": "Days to look back"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gardener stats: completion rate, rewards, penalties, job counts"
+          }
+        }
+      }
+    },
+    "/admin/dashboard": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Admin overview dashboard",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Platform stats: users, bookings, revenue, active subscriptions, recent bookings"
+          }
+        }
+      }
+    },
+    "/admin/analytics": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Full analytics data",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "30"
+            },
+            "description": "Days to analyze"
+          },
+          {
+            "name": "zone_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revenue trends, zone performance, city distribution, user growth, top gardeners, subscription plan distribution, repeat customers, rating by zone"
+          }
+        }
+      }
+    },
+    "/admin/utilization": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Gardener utilization rate report",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "30"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-gardener utilization %, completion %, overloaded/underutilized/optimal summary"
+          }
+        }
+      }
+    },
+    "/admin/gardeners": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all gardeners with filters",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "active",
+                "inactive"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search by name or phone"
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated gardeners with profiles"
+          }
+        }
+      }
+    },
+    "/admin/gardeners/{id}": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get single gardener full detail",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gardener user + profile + assigned zones + recent rewards + recent jobs"
+          }
+        }
+      }
+    },
+    "/admin/gardeners/{id}/toggle": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Activate or deactivate a gardener",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gardener active status toggled"
+          }
+        }
+      }
+    },
+    "/admin/gardeners/approve": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Approve gardener application",
+        "description": "Approves gardener and optionally assigns to supervisor. WhatsApp welcome message sent.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "user_id"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "integer"
+                  },
+                  "supervisor_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved. WhatsApp sent to gardener."
+          }
+        }
+      }
+    },
+    "/admin/gardeners/reject": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Reject gardener application",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "user_id"
+                ],
+                "properties": {
+                  "user_id": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rejected"
+          }
+        }
+      }
+    },
+    "/admin/gardeners/{id}/zones": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get zones assigned to a gardener",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of assigned service zones"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Assign a zone to a gardener",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "zone_id"
+                ],
+                "properties": {
+                  "zone_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Zone assigned to gardener"
+          },
+          "400": {
+            "description": "Zone already assigned"
+          }
+        }
+      }
+    },
+    "/admin/gardeners/{id}/zones/{zone_id}": {
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Remove a zone from a gardener",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "zone_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Zone removed from gardener"
+          }
+        }
+      }
+    },
+    "/admin/supervisors": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all supervisors",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supervisor accounts"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create supervisor account",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name",
+                  "phone",
+                  "password"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Supervisor created"
+          }
+        }
+      }
+    },
+    "/admin/zones": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all service zones",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All zones with pricing info"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create a new service zone (geo-fence)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name",
+                  "city",
+                  "state",
+                  "base_price"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Koramangala"
+                  },
+                  "city": {
+                    "type": "string",
+                    "example": "Bangalore"
+                  },
+                  "state": {
+                    "type": "string",
+                    "example": "Karnataka"
+                  },
+                  "base_price": {
+                    "type": "number",
+                    "example": 349
+                  },
+                  "price_per_plant": {
+                    "type": "number",
+                    "example": 18
+                  },
+                  "min_plants": {
+                    "type": "integer",
+                    "default": 5
+                  },
+                  "center_latitude": {
+                    "type": "number"
+                  },
+                  "center_longitude": {
+                    "type": "number"
+                  },
+                  "radius_km": {
+                    "type": "number",
+                    "example": 5
+                  },
+                  "polygon_coordinates": {
+                    "type": "array",
+                    "description": "GeoJSON polygon coordinates"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Zone created"
+          }
+        }
+      }
+    },
+    "/admin/zones/{id}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update service zone pricing or boundaries",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "base_price": {
+                    "type": "number"
+                  },
+                  "price_per_plant": {
+                    "type": "number"
+                  },
+                  "radius_km": {
+                    "type": "number"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Zone updated"
+          }
+        }
+      }
+    },
+    "/admin/plans": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create a service plan",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name",
+                  "price"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "plan_type": {
+                    "type": "string",
+                    "enum": [
+                      "subscription",
+                      "ondemand"
+                    ],
+                    "default": "subscription"
+                  },
+                  "visits_per_month": {
+                    "type": "integer",
+                    "example": 8
+                  },
+                  "price": {
+                    "type": "number",
+                    "example": 999
+                  },
+                  "duration_days": {
+                    "type": "integer",
+                    "default": 30
+                  },
+                  "max_plants": {
+                    "type": "integer",
+                    "default": 20
+                  },
+                  "is_weekend_included": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "features": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Plan created"
+          }
+        }
+      }
+    },
+    "/admin/plans/{id}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update plan (price change creates PriceHikeLog automatically)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  },
+                  "price_reason": {
+                    "type": "string"
+                  },
+                  "visits_per_month": {
+                    "type": "integer"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan updated. PriceHikeLog created if price changed."
+          }
+        }
+      }
+    },
+    "/admin/bookings": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all bookings with filters",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "zone_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "gardener_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated bookings with customer/gardener/zone"
+          }
+        }
+      }
+    },
+    "/admin/subscriptions": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all subscriptions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "paused",
+                "cancelled",
+                "expired"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated subscriptions with customer and plan details"
+          }
+        }
+      }
+    },
+    "/admin/customers": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all customers",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "city",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated customers"
+          }
+        }
+      }
+    },
+    "/admin/rewards": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List reward & penalty records",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "gardener_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "reward",
+                "penalty"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated rewards/penalties with gardener details"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create manual reward or penalty",
+        "description": "Instantly applies to gardener's total_earnings.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "gardener_id",
+                  "type",
+                  "amount",
+                  "reason"
+                ],
+                "properties": {
+                  "gardener_id": {
+                    "type": "integer"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "reward",
+                      "penalty"
+                    ]
+                  },
+                  "amount": {
+                    "type": "number",
+                    "example": 200
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "booking_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created + gardener earnings updated"
+          }
+        }
+      }
+    },
+    "/admin/payments": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all PayU transactions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "success",
+                "failed",
+                "refunded"
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "booking",
+                "subscription",
+                "refund",
+                "wallet_topup"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated payment records with user info"
+          }
+        }
+      }
+    },
+    "/admin/price-hike": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Apply immediate price hike to zones and/or plans",
+        "description": "Applies percentage hike immediately. Creates PriceHikeLog for each affected item.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "percentage"
+                ],
+                "properties": {
+                  "percentage": {
+                    "type": "number",
+                    "example": 10,
+                    "description": "Percentage to increase (e.g. 10 = +10%)"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "example": "Annual inflation adjustment"
+                  },
+                  "zone_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Zone IDs to apply hike to"
+                  },
+                  "plan_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Plan IDs to apply hike to"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied. Returns list of changed items with old/new prices."
+          }
+        }
+      }
+    },
+    "/admin/price-hike/schedule": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Schedule a future automated price hike",
+        "description": "Cron job runs daily at 2AM and applies due schedules.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "percentage",
+                  "scheduled_at"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Q2 Price Update"
+                  },
+                  "percentage": {
+                    "type": "number",
+                    "example": 5
+                  },
+                  "scheduled_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "zone_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "plan_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Scheduled price hike created"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all scheduled price hikes",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled hikes with is_applied status"
+          }
+        }
+      }
+    },
+    "/admin/price-hike/schedule/{id}": {
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Delete a pending scheduled price hike",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted (only if not yet applied)"
+          }
+        }
+      }
+    },
+    "/admin/price-hike/logs": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get price hike history log",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated price change history with old/new prices"
+          }
+        }
+      }
+    },
+    "/admin/blogs": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create a blog post (draft or published)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "title",
+                  "content"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Full HTML/Markdown content"
+                  },
+                  "excerpt": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "string",
+                    "description": "JSON array e.g. [\"gardening\",\"tips\"]"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "published"
+                    ],
+                    "default": "draft"
+                  },
+                  "seo_title": {
+                    "type": "string"
+                  },
+                  "seo_description": {
+                    "type": "string"
+                  },
+                  "city_slug": {
+                    "type": "string",
+                    "description": "Link blog to city page"
+                  },
+                  "featured_image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Blog post created"
+          }
+        }
+      }
+    },
+    "/admin/blogs/{id}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Update blog post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "published",
+                      "archived"
+                    ]
+                  },
+                  "featured_image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Blog updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Archive (soft delete) a blog post",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blog archived"
+          }
+        }
+      }
+    },
+    "/admin/cities": {
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create or update a city SEO landing page",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "city_name"
+                ],
+                "properties": {
+                  "city_name": {
+                    "type": "string",
+                    "example": "Bangalore"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "hero_title": {
+                    "type": "string",
+                    "example": "Best Gardeners in Bangalore"
+                  },
+                  "hero_description": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Full page HTML/Markdown"
+                  },
+                  "seo_title": {
+                    "type": "string"
+                  },
+                  "seo_description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "City page created or updated"
+          }
+        }
+      }
+    },
+    "/admin/addons": {
+      "get": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "List all add-on services including inactive (Admin)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full add-on catalog"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Create a new add-on service",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name",
+                  "price"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Deep Fertilizing"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number",
+                    "example": 299
+                  },
+                  "duration_mins": {
+                    "type": "integer",
+                    "example": 45
+                  },
+                  "icon": {
+                    "type": "string",
+                    "example": "🌱"
+                  },
+                  "category": {
+                    "type": "string",
+                    "example": "nutrition"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Add-on created"
+          }
+        }
+      }
+    },
+    "/admin/addons/{id}": {
+      "put": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Update an add-on service",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "price": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Add-on updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Add-Ons"
+        ],
+        "summary": "Deactivate (soft delete) an add-on service",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Add-on deactivated"
+          }
+        }
+      }
+    },
+    "/admin/sla/config": {
+      "get": {
+        "tags": [
+          "SLA"
+        ],
+        "summary": "Get current SLA configuration",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "max_arrival_delay_mins, max_service_duration_hrs, response_time_hrs"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "SLA"
+        ],
+        "summary": "Update SLA thresholds",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "max_arrival_delay_mins": {
+                    "type": "integer",
+                    "example": 30,
+                    "description": "Minutes after scheduled time before late_arrival breach is logged"
+                  },
+                  "max_service_duration_hrs": {
+                    "type": "number",
+                    "example": 3,
+                    "description": "Hours before service_overtime breach"
+                  },
+                  "response_time_hrs": {
+                    "type": "integer",
+                    "example": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SLA config updated"
+          }
+        }
+      }
+    },
+    "/admin/sla/breaches": {
+      "get": {
+        "tags": [
+          "SLA"
+        ],
+        "summary": "List SLA breaches (Admin/Supervisor)",
+        "description": "Cron detects breaches hourly. Types: late_arrival, service_overtime.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "is_resolved",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "breach_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "late_arrival",
+                "service_overtime",
+                "no_start",
+                "no_completion"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Breaches with booking number and gardener details"
+          }
+        }
+      }
+    },
+    "/admin/sla/breaches/{id}/resolve": {
+      "put": {
+        "tags": [
+          "SLA"
+        ],
+        "summary": "Mark an SLA breach as resolved",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Breach resolved"
+          }
+        }
+      }
+    },
+    "/gardener/rewards": {
+      "get": {
+        "tags": [
+          "Gardener"
+        ],
+        "summary": "Get own reward/penalty history",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "reward",
+                "penalty"
+              ]
+            },
+            "description": "Filter by type"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reward/penalty list with summary totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Success"
+                    }
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "summary": {
+                          "type": "object",
+                          "properties": {
+                            "totalRewards": {
+                              "type": "number"
+                            },
+                            "totalPenalties": {
+                              "type": "number"
+                            },
+                            "net": {
+                              "type": "number"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/bookings/{id}/reassign": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Manually reassign a gardener to a booking",
+        "description": "Admin or supervisor can replace the assigned gardener on any open booking. Sends WhatsApp notification to new gardener.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "gardener_id"
+                ],
+                "properties": {
+                  "gardener_id": {
+                    "type": "integer",
+                    "description": "ID of the new gardener to assign"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "example": "Original gardener called sick"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Booking reassigned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Success"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Booking is already closed (completed/cancelled/failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Booking or gardener not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/customers/{id}": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Get full customer detail",
+        "description": "Returns customer profile, last 10 bookings, all subscriptions, last 10 payments, and lifetime stats (total bookings, total spent, avg rating).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Customer detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Success"
+                    }
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "customer": {
+                          "$ref": "#/components/schemas/User"
+                        },
+                        "recentBookings": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Booking"
+                          }
+                        },
+                        "subscriptions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "recentPayments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "stats": {
+                          "type": "object",
+                          "properties": {
+                            "total_bookings": {
+                              "type": "integer"
+                            },
+                            "total_spent": {
+                              "type": "number"
+                            },
+                            "avg_rating": {
+                              "type": "number"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Customer not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

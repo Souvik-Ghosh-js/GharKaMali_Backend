@@ -232,7 +232,7 @@ router.put('/admin/sla/config', authenticate, authorize('admin'), async (req, re
 
 router.get('/admin/sla/breaches', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { SLABreach } = require('../models');
+    const { SLABreach, Booking: B, User: U } = require('../models');
     const { Op } = require('sequelize');
     const { is_resolved, breach_type, page = 1, limit = 20 } = req.query;
     const where = {};
@@ -241,8 +241,8 @@ router.get('/admin/sla/breaches', authenticate, authorize('admin', 'supervisor')
     const { count, rows } = await SLABreach.findAndCountAll({
       where, order: [['detected_at', 'DESC']],
       include: [
-        { model: Booking, as: 'booking', attributes: ['booking_number', 'scheduled_date', 'scheduled_time'] },
-        { model: User, as: 'gardener', attributes: ['name', 'phone'] }
+        { model: B, as: 'booking', attributes: ['booking_number', 'scheduled_date', 'scheduled_time'] },
+        { model: U, as: 'gardener', attributes: ['name', 'phone'] }
       ],
       limit: parseInt(limit), offset: (page - 1) * limit
     });
@@ -270,7 +270,7 @@ router.get('/addons', async (req, res) => {
 router.post('/bookings/:id/addons', authenticate, authorize('customer'), async (req, res) => {
   try {
     const { addon_ids } = req.body; // array of { addon_id, quantity }
-    const { AddOnService, BookingAddOn } = require('../models');
+    const { AddOnService, BookingAddOn, Booking } = require('../models');
     const booking = await Booking.findOne({ where: { id: req.params.id, customer_id: req.user.id } });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     if (!['pending','assigned'].includes(booking.status)) return res.status(400).json({ success: false, message: 'Can only add services to pending/assigned bookings' });
@@ -326,5 +326,311 @@ router.put('/admin/addons/:id', authenticate, authorize('admin'), async (req, re
     await AddOnService.update(req.body, { where: { id: req.params.id } });
     const addon = await AddOnService.findByPk(req.params.id);
     res.json({ success: true, data: addon });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── GARDENER PROFILE (dedicated gardener routes) ──────────────────────────────
+router.get('/gardener/profile', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { GardenerProfile, User, ServiceZone, GardenerZone } = require('../models');
+    const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'otp', 'otp_expires_at'] } });
+    const profile = await GardenerProfile.findOne({ where: { user_id: req.user.id } });
+    const zones = await GardenerZone.findAll({
+      where: { gardener_id: req.user.id },
+      include: [{ model: ServiceZone, as: 'zone' }]
+    });
+    res.json({ success: true, data: { user, profile, zones } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.put('/gardener/profile', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { GardenerProfile } = require('../models');
+    const { bio, experience_years, bank_account, bank_ifsc, bank_name, id_proof_type, id_proof_number } = req.body;
+    const updates = {};
+    if (bio !== undefined) updates.bio = bio;
+    if (experience_years !== undefined) updates.experience_years = experience_years;
+    if (bank_account !== undefined) updates.bank_account = bank_account;
+    if (bank_ifsc !== undefined) updates.bank_ifsc = bank_ifsc;
+    if (bank_name !== undefined) updates.bank_name = bank_name;
+    if (id_proof_type !== undefined) updates.id_proof_type = id_proof_type;
+    if (id_proof_number !== undefined) updates.id_proof_number = id_proof_number;
+    await GardenerProfile.update(updates, { where: { user_id: req.user.id } });
+    const profile = await GardenerProfile.findOne({ where: { user_id: req.user.id } });
+    res.json({ success: true, message: 'Profile updated', data: profile });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.patch('/gardener/availability', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { GardenerProfile } = require('../models');
+    const { is_available } = req.body;
+    if (typeof is_available !== 'boolean') return res.status(400).json({ success: false, message: 'is_available must be boolean' });
+    await GardenerProfile.update({ is_available }, { where: { user_id: req.user.id } });
+    res.json({ success: true, message: `Availability set to ${is_available}`, data: { is_available } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SUBSCRIPTION PAUSE / RESUME ───────────────────────────────────────────────
+router.patch('/subscriptions/:id/pause', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Subscription } = require('../models');
+    const sub = await Subscription.findOne({ where: { id: req.params.id, customer_id: req.user.id, status: 'active' } });
+    if (!sub) return res.status(404).json({ success: false, message: 'Active subscription not found' });
+    await sub.update({ status: 'paused' });
+    res.json({ success: true, message: 'Subscription paused', data: sub });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.patch('/subscriptions/:id/resume', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Subscription } = require('../models');
+    const sub = await Subscription.findOne({ where: { id: req.params.id, customer_id: req.user.id, status: 'paused' } });
+    if (!sub) return res.status(404).json({ success: false, message: 'Paused subscription not found' });
+    await sub.update({ status: 'active' });
+    res.json({ success: true, message: 'Subscription resumed', data: sub });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── NOTIFICATIONS MARK ALL READ ───────────────────────────────────────────────
+router.put('/notifications/read-all', authenticate, async (req, res) => {
+  try {
+    const { Notification } = require('../models');
+    await Notification.update({ is_read: true, read_at: new Date() }, { where: { user_id: req.user.id, is_read: false } });
+    res.json({ success: true, message: 'All notifications marked as read' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: SINGLE GARDENER DETAIL ─────────────────────────────────────────────
+router.get('/admin/gardeners/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { User, GardenerProfile, GardenerZone, ServiceZone, RewardPenalty, Booking } = require('../models');
+    const { Op } = require('sequelize');
+    const user = await User.findOne({
+      where: { id: req.params.id, role: 'gardener' },
+      attributes: { exclude: ['password', 'otp', 'otp_expires_at'] },
+      include: [{ model: GardenerProfile, as: 'gardenerProfile' }]
+    });
+    if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
+    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: ServiceZone, as: 'zone' }] });
+    const rewards = await RewardPenalty.findAll({ where: { gardener_id: req.params.id }, order: [['created_at', 'DESC']], limit: 10 });
+    const recentJobs = await Booking.findAll({ where: { gardener_id: req.params.id }, order: [['created_at', 'DESC']], limit: 5, attributes: ['id', 'booking_number', 'status', 'scheduled_date', 'total_amount', 'rating'] });
+    res.json({ success: true, data: { ...user.toJSON(), zones, recentRewards: rewards, recentJobs } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: TOGGLE GARDENER ACTIVE STATUS ─────────────────────────────────────
+router.patch('/admin/gardeners/:id/toggle', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const user = await User.findOne({ where: { id: req.params.id, role: 'gardener' } });
+    if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
+    await user.update({ is_active: !user.is_active });
+    res.json({ success: true, message: `Gardener ${user.is_active ? 'activated' : 'deactivated'}`, data: { is_active: user.is_active } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: GARDENER ZONE ASSIGNMENT ──────────────────────────────────────────
+router.get('/admin/gardeners/:id/zones', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { GardenerZone, ServiceZone } = require('../models');
+    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: ServiceZone, as: 'zone' }] });
+    res.json({ success: true, data: zones });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/admin/gardeners/:id/zones', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { GardenerZone } = require('../models');
+    const { zone_id } = req.body;
+    const existing = await GardenerZone.findOne({ where: { gardener_id: req.params.id, zone_id } });
+    if (existing) return res.status(400).json({ success: false, message: 'Zone already assigned' });
+    const gz = await GardenerZone.create({ gardener_id: req.params.id, zone_id });
+    res.status(201).json({ success: true, message: 'Zone assigned', data: gz });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/admin/gardeners/:id/zones/:zone_id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { GardenerZone } = require('../models');
+    await GardenerZone.destroy({ where: { gardener_id: req.params.id, zone_id: req.params.zone_id } });
+    res.json({ success: true, message: 'Zone removed from gardener' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: PRICE HIKE LOGS ─────────────────────────────────────────────────────
+router.get('/admin/price-hike/logs', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { PriceHikeLog, ServiceZone, ServicePlan, User } = require('../models');
+    const { page = 1, limit = 20 } = req.query;
+    const { count, rows } = await PriceHikeLog.findAndCountAll({
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { logs: rows, total: count, page: parseInt(page) } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SUPERVISOR: TEAM GARDENERS ────────────────────────────────────────────────
+router.get('/supervisor/gardeners', authenticate, authorize('supervisor', 'admin'), async (req, res) => {
+  try {
+    const { GardenerProfile, User } = require('../models');
+    const supervisorId = req.user.role === 'admin' ? (req.query.supervisor_id || req.user.id) : req.user.id;
+    const gardeners = await GardenerProfile.findAll({
+      where: { supervisor_id: supervisorId },
+      include: [{ model: User, as: 'user', attributes: { exclude: ['password', 'otp', 'otp_expires_at'] } }],
+      order: [[{ model: User, as: 'user' }, 'name', 'ASC']]
+    });
+    res.json({ success: true, data: gardeners });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SUPERVISOR: INDIVIDUAL GARDENER PERFORMANCE ───────────────────────────────
+router.get('/supervisor/gardeners/:id/performance', authenticate, authorize('supervisor', 'admin'), async (req, res) => {
+  try {
+    const { GardenerProfile, Booking, RewardPenalty, User } = require('../models');
+    const { Op } = require('sequelize');
+    const moment = require('moment');
+    const { period = '30' } = req.query;
+    const since = moment().subtract(parseInt(period), 'days').toDate();
+
+    const profile = await GardenerProfile.findOne({
+      where: { user_id: req.params.id },
+      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone', 'city'] }]
+    });
+    if (!profile) return res.status(404).json({ success: false, message: 'Gardener not found' });
+
+    // Verify supervisor owns this gardener (skip for admin)
+    if (req.user.role === 'supervisor' && profile.supervisor_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const [allJobs, completedJobs, cancelledJobs, rewards, penalties] = await Promise.all([
+      Booking.count({ where: { gardener_id: req.params.id, created_at: { [Op.gte]: since } } }),
+      Booking.count({ where: { gardener_id: req.params.id, status: 'completed', created_at: { [Op.gte]: since } } }),
+      Booking.count({ where: { gardener_id: req.params.id, status: 'cancelled', created_at: { [Op.gte]: since } } }),
+      RewardPenalty.sum('amount', { where: { gardener_id: req.params.id, type: 'reward', created_at: { [Op.gte]: since } } }),
+      RewardPenalty.sum('amount', { where: { gardener_id: req.params.id, type: 'penalty', created_at: { [Op.gte]: since } } })
+    ]);
+
+    const completionRate = allJobs > 0 ? ((completedJobs / allJobs) * 100).toFixed(1) : 0;
+    res.json({
+      success: true,
+      data: {
+        gardener: { ...profile.user.toJSON(), profile: { rating: profile.rating, is_available: profile.is_available, total_jobs: profile.total_jobs, total_earnings: profile.total_earnings } },
+        period_days: parseInt(period),
+        stats: { allJobs, completedJobs, cancelledJobs, completionRate: parseFloat(completionRate), rewards: rewards || 0, penalties: penalties || 0, net: (rewards || 0) - (penalties || 0) }
+      }
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: DELETE ADD-ON ───────────────────────────────────────────────────────
+router.delete('/admin/addons/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { AddOnService } = require('../models');
+    await AddOnService.update({ is_active: false }, { where: { id: req.params.id } });
+    res.json({ success: true, message: 'Add-on deactivated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── GARDENER: OWN REWARD/PENALTY HISTORY ─────────────────────────────────────
+router.get('/gardener/rewards', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { RewardPenalty } = require('../models');
+    const { type, page = 1, limit = 20 } = req.query;
+    const where = { gardener_id: req.user.id };
+    if (type) where.type = type;
+    const { count, rows } = await RewardPenalty.findAndCountAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+    const totalRewards = await RewardPenalty.sum('amount', { where: { gardener_id: req.user.id, type: 'reward' } }) || 0;
+    const totalPenalties = await RewardPenalty.sum('amount', { where: { gardener_id: req.user.id, type: 'penalty' } }) || 0;
+    res.json({ success: true, data: { items: rows, total: count, page: parseInt(page), summary: { totalRewards, totalPenalties, net: totalRewards - totalPenalties } } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: MANUALLY REASSIGN GARDENER TO BOOKING ─────────────────────────────
+router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { Booking, User, GardenerProfile } = require('../models');
+    const { gardener_id, reason } = req.body;
+    if (!gardener_id) return res.status(400).json({ success: false, message: 'gardener_id is required' });
+
+    const booking = await Booking.findByPk(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (['completed', 'cancelled', 'failed'].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot reassign a closed booking' });
+    }
+
+    const gardener = await User.findOne({ where: { id: gardener_id, role: 'gardener', is_active: true, is_approved: true } });
+    if (!gardener) return res.status(404).json({ success: false, message: 'Gardener not found or inactive' });
+
+    const oldGardenerId = booking.gardener_id;
+    await booking.update({ gardener_id, status: 'assigned', reassignment_reason: reason || 'Manual reassignment by admin' });
+
+    // Notify new gardener via WhatsApp
+    const { sendWhatsApp } = require('../services/otp.service');
+    await sendWhatsApp(gardener.phone, `🌿 *Ghar Ka Mali*\nHello ${gardener.name}, a booking (${booking.booking_number}) has been assigned to you for ${booking.scheduled_date} at ${booking.scheduled_time || 'morning'}. Please check your app.`);
+
+    res.json({ success: true, message: `Booking reassigned to ${gardener.name}`, data: { booking_id: booking.id, old_gardener_id: oldGardenerId, new_gardener_id: gardener_id } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN: SINGLE CUSTOMER DETAIL ─────────────────────────────────────────────
+router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { User, Booking, Subscription, ServicePlan, Payment } = require('../models');
+    const { Op } = require('sequelize');
+
+    const customer = await User.findOne({
+      where: { id: req.params.id, role: 'customer' },
+      attributes: { exclude: ['password', 'otp', 'otp_expires_at'] }
+    });
+    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+    const [bookings, subscriptions, payments, stats] = await Promise.all([
+      Booking.findAll({
+        where: { customer_id: req.params.id },
+        order: [['created_at', 'DESC']],
+        limit: 10,
+        attributes: ['id', 'booking_number', 'status', 'scheduled_date', 'total_amount', 'rating', 'created_at']
+      }),
+      Subscription.findAll({
+        where: { customer_id: req.params.id },
+        include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'duration_months'] }],
+        order: [['created_at', 'DESC']]
+      }),
+      Payment.findAll({
+        where: { user_id: req.params.id },
+        order: [['created_at', 'DESC']],
+        limit: 10,
+        attributes: ['id', 'txn_id', 'amount', 'status', 'payment_for', 'created_at']
+      }),
+      Booking.findAll({
+        where: { customer_id: req.params.id },
+        attributes: [
+          [require('sequelize').fn('COUNT', require('sequelize').col('id')), 'total_bookings'],
+          [require('sequelize').fn('SUM', require('sequelize').col('total_amount')), 'total_spent'],
+          [require('sequelize').fn('AVG', require('sequelize').col('rating')), 'avg_rating']
+        ],
+        raw: true
+      })
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        customer,
+        recentBookings: bookings,
+        subscriptions,
+        recentPayments: payments,
+        stats: stats[0] || { total_bookings: 0, total_spent: 0, avg_rating: null }
+      }
+    });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

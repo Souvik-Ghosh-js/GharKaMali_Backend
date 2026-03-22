@@ -211,7 +211,7 @@ const Blog = sequelize.define('Blog', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   title: { type: DataTypes.STRING(300), allowNull: false },
   slug: { type: DataTypes.STRING(300), unique: true, allowNull: false },
-  content: { type: DataTypes.LONGTEXT, allowNull: false },
+  content: { type: DataTypes.TEXT('long'), allowNull: false },
   excerpt: { type: DataTypes.TEXT },
   featured_image: { type: DataTypes.STRING(500) },
   category: { type: DataTypes.STRING(100) },
@@ -233,7 +233,7 @@ const CityPage = sequelize.define('CityPage', {
   state: { type: DataTypes.STRING(100) },
   hero_title: { type: DataTypes.STRING(300) },
   hero_description: { type: DataTypes.TEXT },
-  content: { type: DataTypes.LONGTEXT },
+  content: { type: DataTypes.TEXT('long') },
   seo_title: { type: DataTypes.STRING(300) },
   seo_description: { type: DataTypes.TEXT },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
@@ -365,10 +365,26 @@ Subscription.belongsTo(User, { foreignKey: 'preferred_gardener_id', as: 'preferr
 
 GardenerZone.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 GardenerZone.belongsTo(ServiceZone, { foreignKey: 'zone_id', as: 'zone' });
+User.hasMany(GardenerZone, { foreignKey: 'gardener_id', as: 'assignedZones' });
+ServiceZone.hasMany(GardenerZone, { foreignKey: 'zone_id', as: 'gardenerAssignments' });
 
 RewardPenalty.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Payment associations
 Payment.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Payment.belongsTo(Booking, { foreignKey: 'booking_id', as: 'bookingRef' });
+Payment.belongsTo(Subscription, { foreignKey: 'subscription_id', as: 'subscriptionRef' });
+
+// Blog associations
+Blog.belongsTo(User, { foreignKey: 'author_id', as: 'author' });
+
+// Complaint associations
+Complaint.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+Complaint.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Complaint.belongsTo(User, { foreignKey: 'assigned_to', as: 'assignedTo' });
+Complaint.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
 SLABreach.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 SLABreach.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 BookingAddOn.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
