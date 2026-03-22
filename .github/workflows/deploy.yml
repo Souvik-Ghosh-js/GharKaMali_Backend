@@ -1,0 +1,40 @@
+name: Deploy to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Lightsail via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "📦 Pulling latest code..."
+            cd /var/www/gharkamali
+            git pull origin main
+
+            echo "📦 Installing dependencies..."
+            npm install --production
+
+            echo "🔄 Creating log directory if needed..."
+            sudo mkdir -p /var/log/gharkamali
+            sudo chown -R ubuntu:ubuntu /var/log/gharkamali
+
+            echo "♻️  Restarting app..."
+            pm2 restart gharkamali-backend || pm2 start ecosystem.config.js
+            pm2 save
+
+            echo "✅ Deployment complete!"
