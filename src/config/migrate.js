@@ -1,4 +1,36 @@
 require('dotenv').config();
+const { Sequelize } = require('sequelize');
+
+// First connect without a database to create it if needed
+async function ensureDatabase() {
+  const rootConn = new Sequelize(
+    '',
+    process.env.DB_USER || 'root',
+    process.env.DB_PASSWORD || '',
+    {
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT) || 3306,
+      dialect: 'mysql',
+      logging: false,
+    }
+  );
+
+  const dbName = process.env.DB_NAME || 'gharkamali';
+  const dbUser = process.env.DB_USER || 'root';
+
+  await rootConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+  console.log(`  ✅ Database '${dbName}' ready`);
+
+  // Grant all privileges to the user on this DB (useful if not root)
+  if (dbUser !== 'root') {
+    await rootConn.query(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'%';`);
+    await rootConn.query(`FLUSH PRIVILEGES;`);
+    console.log(`  ✅ Privileges granted to '${dbUser}'`);
+  }
+
+  await rootConn.close();
+}
+
 const sequelize = require('./database');
 
 const tables = [
@@ -474,6 +506,7 @@ const tables = [
 
 async function migrate() {
   try {
+    await ensureDatabase();
     await sequelize.authenticate();
     console.log('Database connected.\n');
 

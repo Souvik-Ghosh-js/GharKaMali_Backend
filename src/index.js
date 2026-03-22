@@ -11,6 +11,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────────
+// Disable CSP for Swagger UI (helmet blocks its inline scripts by default)
+app.use('/api-docs', (req, res, next) => {
+  res.setHeader('Content-Security-Policy', '');
+  next();
+});
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], allowedHeaders: ['Content-Type', 'Authorization'] }));
 app.use(compression());
