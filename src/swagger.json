@@ -7,12 +7,12 @@
   },
   "servers": [
     {
-      "url": "http://localhost:3000/api",
-      "description": "Local Development"
+      "url": "https://gkm.gobt.in/api",
+      "description": "Production"
     },
     {
-      "url": "http://YOUR_LIGHTSAIL_IP:3000/api",
-      "description": "Production (Lightsail)"
+      "url": "http://localhost:3000/api",
+      "description": "Local Development"
     }
   ],
   "components": {
@@ -3415,22 +3415,6 @@
             "description": "Scheduled price hike created"
           }
         }
-      },
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "summary": "List all scheduled price hikes",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Scheduled hikes with is_applied status"
-          }
-        }
       }
     },
     "/admin/price-hike/schedule/{id}": {
@@ -4243,6 +4227,24 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/admin/price-hike/schedules": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List all scheduled price hikes",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled hikes with is_applied status"
           }
         }
       }
