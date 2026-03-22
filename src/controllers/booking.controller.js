@@ -1,0 +1,301 @@
+const { notify } = require('../services/push.service');
+const { Op, fn, col, literal } = require('sequelize');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking } = require('../models');
+const { sendWhatsApp, templates } = require('../services/otp.service');
+const { v4: uuidv4 } = require('uuid');
+const moment = require('moment');
+
+// Generate booking number
+const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;
+
+// Generate 4-digit OTP for visit
+const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
+
+// Create booking (on-demand)
+exports.createBooking = async (req, res) => {
+  try {
+    const { zone_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id } = req.body;
+
+    const zone = await ServiceZone.findByPk(zone_id);
+    if (!zone) return res.status(404).json({ success: false, message: 'Zone not found' });
+
+    const baseAmount = zone.base_price + (Math.max(0, plant_count - zone.min_plants) * zone.price_per_plant);
+
+    // Find best gardener
+    let gardener_id = null;
+    if (preferred_gardener_id) {
+      const g = await GardenerProfile.findOne({ where: { user_id: preferred_gardener_id, is_available: true } });
+      if (g) gardener_id = preferred_gardener_id;
+    }
+
+    if (!gardener_id) {
+      // Find nearest available gardener in zone
+      const available = await GardenerProfile.findOne({
+        where: { is_available: true },
+        include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true } }]
+      });
+      if (available) gardener_id = available.user_id;
+    }
+
+    const otp = genVisitOTP();
+    const booking = await Booking.create({
+      booking_number: genBookingNumber(),
+      customer_id: req.user.id,
+      gardener_id,
+      zone_id,
+      booking_type: 'ondemand',
+      status: gardener_id ? 'assigned' : 'pending',
+      scheduled_date,
+      scheduled_time,
+      otp,
+      service_address,
+      service_latitude,
+      service_longitude,
+      plant_count: plant_count || 1,
+      base_amount: baseAmount,
+      total_amount: baseAmount,
+      customer_notes
+    });
+
+    // Send WhatsApp notification
+    const customer = await User.findByPk(req.user.id);
+    await sendWhatsApp(customer.phone, templates.bookingConfirmed(customer.name, scheduled_date, scheduled_time || 'Morning'));
+    if (customer.fcm_token && gardener_id) {
+      const g = await User.findByPk(gardener_id);
+      await notify.bookingAssigned(customer.fcm_token, booking.booking_number, g?.name || 'Gardener');
+    }
+
+    res.status(201).json({ success: true, message: 'Booking created', data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get customer bookings
+exports.getMyBookings = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 10 } = req.query;
+    const where = { customer_id: req.user.id };
+    if (status) where.status = status;
+
+    const { count, rows } = await Booking.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'], include: [{ model: GardenerProfile, as: 'gardenerProfile', attributes: ['rating', 'total_jobs'] }] },
+        { model: ServiceZone, as: 'zone', attributes: ['name', 'city'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+
+    res.json({ success: true, data: { bookings: rows, total: count, page: parseInt(page), pages: Math.ceil(count / limit) } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get booking detail
+exports.getBookingDetail = async (req, res) => {
+  try {
+    const booking = await Booking.findOne({
+      where: { id: req.params.id },
+      include: [
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image'] },
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'], include: [{ model: GardenerProfile, as: 'gardenerProfile' }] },
+        { model: ServiceZone, as: 'zone' },
+        { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 }
+      ]
+    });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    res.json({ success: true, data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Verify OTP to start visit
+exports.verifyVisitOtp = async (req, res) => {
+  try {
+    const { booking_id, otp } = req.body;
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.gardener_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
+    if (booking.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+
+    await booking.update({ otp_verified: true, otp_verified_at: new Date(), status: 'in_progress', started_at: new Date() });
+
+    const customer = await User.findByPk(booking.customer_id);
+    await sendWhatsApp(customer.phone, `🌿 *Ghar Ka Mali*\nYour garden service has started! Estimated completion: 1-2 hours.`);
+
+    res.json({ success: true, message: 'Visit started', data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Gardener: Update job status
+exports.updateBookingStatus = async (req, res) => {
+  try {
+    const { booking_id, status, gardener_notes, extra_plants } = req.body;
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.gardener_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
+
+    // Handle failed visit (customer unavailable)
+    if (status === 'failed') {
+      await booking.update({ status: 'failed', gardener_notes: gardener_notes || 'Customer unavailable' });
+      const customer = await User.findByPk(booking.customer_id);
+      if (customer) {
+        await sendWhatsApp(customer.phone, `⚠️ *Ghar Ka Mali*\nYour gardener arrived for booking ${booking.booking_number} but couldn't reach you. The visit has been marked failed. Please reschedule or contact support.`);
+      }
+      return res.json({ success: true, message: 'Booking marked as failed', data: booking });
+    }
+
+    const updates = { status };
+    if (gardener_notes) updates.gardener_notes = gardener_notes;
+    if (status === 'arrived') updates.gardener_arrived_at = new Date();
+    if (status === 'en_route') {
+      const customer = await User.findByPk(booking.customer_id);
+      const gardener = await User.findByPk(req.user.id);
+      await sendWhatsApp(customer.phone, templates.gardenerEnRoute(customer.name, gardener.name, '15'));
+      if (customer.fcm_token) await notify.gardenerEnRoute(customer.fcm_token, gardener.name, booking.booking_number);
+    }
+    if (status === 'arrived') {
+      const customer = await User.findByPk(booking.customer_id);
+      await sendWhatsApp(customer.phone, templates.gardenerArrived(customer.name, booking.otp));
+      if (customer.fcm_token) await notify.gardenerArrived(customer.fcm_token, booking.otp, booking.booking_number);
+    }
+
+    if (status === 'completed') {
+      updates.completed_at = new Date();
+      // Extra plants billing
+      if (extra_plants > 0) {
+        const zone = await ServiceZone.findByPk(booking.zone_id);
+        const extraAmt = extra_plants * (zone ? zone.price_per_plant : 15);
+        updates.extra_plants = extra_plants;
+        updates.extra_amount = extraAmt;
+        updates.total_amount = booking.base_amount + extraAmt;
+      }
+
+      // Handle work proof images
+      if (req.files) {
+        const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+        if (req.files.before_image) updates.before_image = `${baseUrl}/uploads/work-proof/${req.files.before_image[0].filename}`;
+        if (req.files.after_image) updates.after_image = `${baseUrl}/uploads/work-proof/${req.files.after_image[0].filename}`;
+      }
+
+      const customer = await User.findByPk(booking.customer_id);
+      await sendWhatsApp(customer.phone, templates.visitCompleted(customer.name, updates.total_amount || booking.total_amount));
+      const cust2 = await User.findByPk(booking.customer_id);
+      if (cust2?.fcm_token) await notify.visitCompleted(cust2.fcm_token, booking.booking_number, updates.total_amount || booking.total_amount);
+
+      // Update gardener stats
+      await GardenerProfile.increment({ total_jobs: 1, completed_jobs: 1 }, { where: { user_id: req.user.id } });
+    }
+
+    await booking.update(updates);
+    res.json({ success: true, message: 'Status updated', data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Rate booking
+exports.rateBooking = async (req, res) => {
+  try {
+    const { booking_id, rating, review } = req.body;
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.customer_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
+    if (booking.status !== 'completed') return res.status(400).json({ success: false, message: 'Can only rate completed bookings' });
+
+    await booking.update({ rating, review, rated_at: new Date() });
+
+    // Update gardener rating
+    if (booking.gardener_id) {
+      const allBookings = await Booking.findAll({ where: { gardener_id: booking.gardener_id, rating: { [Op.not]: null } } });
+      const avgRating = allBookings.reduce((sum, b) => sum + b.rating, 0) / allBookings.length;
+      await GardenerProfile.update({ rating: avgRating.toFixed(2) }, { where: { user_id: booking.gardener_id } });
+    }
+
+    res.json({ success: true, message: 'Rating submitted', data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Gardener: get assigned jobs
+exports.getGardenerJobs = async (req, res) => {
+  try {
+    const { status, date } = req.query;
+    const where = { gardener_id: req.user.id };
+    if (status) where.status = status;
+    if (date) where.scheduled_date = date;
+
+    const bookings = await Booking.findAll({
+      where,
+      include: [
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image', 'address'] },
+        { model: ServiceZone, as: 'zone', attributes: ['name', 'city'] }
+      ],
+      order: [['scheduled_date', 'ASC'], ['scheduled_time', 'ASC']]
+    });
+
+    res.json({ success: true, data: bookings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Update gardener location
+exports.updateLocation = async (req, res) => {
+  try {
+    const { latitude, longitude, booking_id } = req.body;
+    await GardenerProfile.update({ current_latitude: latitude, current_longitude: longitude, last_location_update: new Date() }, { where: { user_id: req.user.id } });
+
+    if (booking_id) {
+      await BookingTracking.create({ booking_id, gardener_id: req.user.id, latitude, longitude });
+    }
+
+    res.json({ success: true, message: 'Location updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get gardener location for tracking
+exports.getGardenerLocation = async (req, res) => {
+  try {
+    const { booking_id } = req.params;
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking || booking.customer_id !== req.user.id) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    const profile = await GardenerProfile.findOne({ where: { user_id: booking.gardener_id } });
+    res.json({ success: true, data: { latitude: profile?.current_latitude, longitude: profile?.current_longitude, updated_at: profile?.last_location_update } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Cancel booking
+exports.cancelBooking = async (req, res) => {
+  try {
+    const { booking_id, reason } = req.body;
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (!['pending', 'assigned'].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot cancel booking in current status' });
+    }
+
+    await booking.update({ status: 'cancelled', cancellation_reason: reason });
+
+    if (booking.gardener_id) {
+      await GardenerProfile.increment({ cancelled_jobs: 1 }, { where: { user_id: booking.gardener_id } });
+    }
+
+    res.json({ success: true, message: 'Booking cancelled' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
