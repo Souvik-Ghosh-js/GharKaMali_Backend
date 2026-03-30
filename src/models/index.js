@@ -402,7 +402,7 @@ const Product = sequelize.define('Product', {
 // ─── ORDER ────────────────────────────────────────────────────────────────────
 const Order = sequelize.define('Order', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  order_number: { type: DataTypes.STRING(20), unique: true },
+  order_number: { type: DataTypes.STRING(50), unique: true },
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
   total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   status: { 

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS `products` (
 -- 3. Orders
 CREATE TABLE IF NOT EXISTS `orders` (
   `id`               INT              NOT NULL AUTO_INCREMENT,
-  `order_number`     VARCHAR(20)      DEFAULT NULL,
+  `order_number`     VARCHAR(50)      DEFAULT NULL,
   `customer_id`      INT              NOT NULL,
   `total_amount`     DECIMAL(10, 2)   NOT NULL,
   `status`           ENUM('pending','processing','shipped','delivered','cancelled','returned')
