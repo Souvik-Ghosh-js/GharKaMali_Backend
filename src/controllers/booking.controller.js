@@ -1,6 +1,6 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
@@ -16,10 +16,17 @@ exports.createBooking = async (req, res) => {
   try {
     const { zone_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id } = req.body;
 
-    const zone = await ServiceZone.findByPk(zone_id);
-    if (!zone) return res.status(404).json({ success: false, message: 'Zone not found' });
+    // Use Geofence for pricing if available
+    const zone = await Geofence.findByPk(zone_id);
+    if (!zone) return res.status(404).json({ success: false, message: 'Service zone not found' });
 
-    const baseAmount = zone.base_price + (Math.max(0, plant_count - zone.min_plants) * zone.price_per_plant);
+    const pCount = parseInt(plant_count) || 1;
+    const minPlants = zone.min_plants || 1;
+    const pricePerPlant = parseFloat(zone.price_per_plant) || 0;
+    const basePrice = parseFloat(zone.base_price) || 0;
+
+    const extraPlants = Math.max(0, pCount - minPlants);
+    const baseAmount = basePrice + (extraPlants * pricePerPlant);
 
     // Find best gardener
     let gardener_id = null;
@@ -171,8 +178,8 @@ exports.updateBookingStatus = async (req, res) => {
       updates.completed_at = new Date();
       // Extra plants billing
       if (extra_plants > 0) {
-        const zone = await ServiceZone.findByPk(booking.zone_id);
-        const extraAmt = extra_plants * (zone ? zone.price_per_plant : 15);
+        const zone = await Geofence.findByPk(booking.zone_id);
+        const extraAmt = extra_plants * (zone ? parseFloat(zone.price_per_plant) : 15);
         updates.extra_plants = extra_plants;
         updates.extra_amount = extraAmt;
         updates.total_amount = booking.base_amount + extraAmt;
