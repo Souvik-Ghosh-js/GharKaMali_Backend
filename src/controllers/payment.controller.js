@@ -3,8 +3,8 @@ const axios = require('axios');
 const { Payment, User, Booking, Subscription } = require('../models');
 
 // ── PayU Configuration ─────────────────────────────────────────────────────
-const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'YOUR_PAYU_KEY';
-const PAYU_SALT = process.env.PAYU_MERCHANT_SALT || 'YOUR_PAYU_SALT';
+const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'gtKFFx';
+const PAYU_SALT = process.env.PAYU_MERCHANT_SALT || 'eCwWELxi';
 const PAYU_BASE = process.env.PAYU_MODE === 'production'
   ? 'https://secure.payu.in/_payment'
   : 'https://test.payu.in/_payment';
@@ -112,9 +112,11 @@ exports.paymentSuccess = async (req, res) => {
       await User.increment({ wallet_balance: payment.amount }, { where: { id: payment.user_id } });
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/payment/success?txnid=${params.txnid}&amount=${params.amount}`);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
+    res.redirect(`${frontendUrl}/payment/success?txnid=${params.txnid}&amount=${params.amount}`);
   } catch (err) {
-    res.redirect(`${process.env.FRONTEND_URL}/payment/failure?reason=error`);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
+    res.redirect(`${frontendUrl}/payment/failure?reason=error`);
   }
 };
 
@@ -124,9 +126,11 @@ exports.paymentFailure = async (req, res) => {
     const params = req.body;
     const payment = await Payment.findOne({ where: { transaction_id: params.txnid } });
     if (payment) await payment.update({ status: 'failed', gateway_response: params });
-    res.redirect(`${process.env.FRONTEND_URL}/payment/failure?reason=payment_failed`);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
+    res.redirect(`${frontendUrl}/payment/failure?reason=payment_failed`);
   } catch (err) {
-    res.redirect(`${process.env.FRONTEND_URL}/payment/failure?reason=error`);
+    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
+    res.redirect(`${frontendUrl}/payment/failure?reason=error`);
   }
 };
 
