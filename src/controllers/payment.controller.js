@@ -9,6 +9,8 @@ const PAYU_BASE = process.env.PAYU_MODE === 'production'
   ? 'https://secure.payu.in/_payment'
   : 'https://test.payu.in/_payment';
 
+const MOCK_PAYMENT = true; // Set to true to bypass PayU and simulate success
+
 // Generate SHA512 hash for PayU
 const generateHash = (params) => {
   // Formula: key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5|udf6|SALT
@@ -86,6 +88,36 @@ exports.initiatePayment = async (req, res) => {
       furl: `${process.env.BASE_URL}/api/payments/failure`,
     };
     params.hash = generateHash(params);
+
+    // MOCK BYPASS: If active, simulate success immediately
+    if (MOCK_PAYMENT) {
+      // Simulate success callback logic
+      await payment.update({ 
+        status: 'success', 
+        payment_method: 'mock',
+        gateway_response: { note: 'Bypassed via Mock Payment' } 
+      });
+      
+      if (payment.booking_id) {
+        await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
+      }
+      if (payment.subscription_id) {
+        await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
+      }
+      if (payment.type === 'wallet_topup') {
+        await User.increment({ wallet_balance: payment.amount }, { where: { id: payment.user_id } });
+      }
+
+      return res.json({
+        success: true,
+        mock_success: true,
+        data: {
+          txnid,
+          amount: params.amount,
+          frontend_redirect: `/payment/success?txnid=${txnid}&amount=${params.amount}`
+        }
+      });
+    }
 
     res.json({
       success: true,
