@@ -116,8 +116,8 @@ exports.initiatePayment = async (req, res) => {
 
         return res.json({
           success: true,
-          mock_success: true,
           data: {
+            mock_success: true,
             txnid,
             amount: params.amount,
             frontend_redirect: `/payment/success?txnid=${txnid}&amount=${params.amount}`
