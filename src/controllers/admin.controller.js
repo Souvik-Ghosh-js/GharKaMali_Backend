@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { Op, fn, col, literal, sequelize } = require('sequelize');
 const db = require('../config/database');
-const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog } = require('../models');
+const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
@@ -546,4 +546,103 @@ exports.deleteGeofence = async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+};
+
+// ─── SHOP MANAGEMENT ─────────────────────────────────────────────────────────
+
+// Categories
+exports.getAdminCategories = async (req, res) => {
+  try {
+    const categories = await ProductCategory.findAll({ order: [['name', 'ASC']] });
+    res.json({ success: true, data: categories });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.createCategory = async (req, res) => {
+  try {
+    const category = await ProductCategory.create(req.body);
+    res.status(201).json({ success: true, data: category });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.updateCategory = async (req, res) => {
+  try {
+    await ProductCategory.update(req.body, { where: { id: req.params.id } });
+    const category = await ProductCategory.findByPk(req.params.id);
+    res.json({ success: true, data: category });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    await ProductCategory.update({ is_active: false }, { where: { id: req.params.id } });
+    res.json({ success: true, message: 'Category deactivated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// Products
+exports.getAdminProducts = async (req, res) => {
+  try {
+    const products = await Product.findAll({
+      include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }],
+      order: [['created_at', 'DESC']]
+    });
+    res.json({ success: true, data: products });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.createProduct = async (req, res) => {
+  try {
+    const product = await Product.create(req.body);
+    res.status(201).json({ success: true, data: product });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.updateProduct = async (req, res) => {
+  try {
+    await Product.update(req.body, { where: { id: req.params.id } });
+    const product = await Product.findByPk(req.params.id);
+    res.json({ success: true, data: product });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    await Product.update({ is_active: false }, { where: { id: req.params.id } });
+    res.json({ success: true, message: 'Product deactivated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// Orders
+exports.getAdminOrders = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 20 } = req.query;
+    const where = {};
+    if (status) where.status = status;
+
+    const { count, rows } = await Order.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'customer', attributes: ['name', 'phone'] },
+        { 
+          model: OrderItem, 
+          as: 'items',
+          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key'] }]
+        }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { orders: rows, total: count } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.updateOrderStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    await Order.update({ status }, { where: { id: req.params.id } });
+    const order = await Order.findByPk(req.params.id);
+    res.json({ success: true, data: order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };

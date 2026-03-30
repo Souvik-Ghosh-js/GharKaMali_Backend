@@ -372,7 +372,69 @@ const Geofence = sequelize.define('Geofence', {
 
 
 
+// ─── PRODUCT CATEGORY ─────────────────────────────────────────────────────────
+const ProductCategory = sequelize.define('ProductCategory', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false, unique: true },
+  slug: { type: DataTypes.STRING(100), unique: true },
+  icon: { type: DataTypes.STRING(50) },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'product_categories' });
+
+// ─── PRODUCT ──────────────────────────────────────────────────────────────────
+const Product = sequelize.define('Product', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  category_id: { type: DataTypes.INTEGER, references: { model: 'product_categories', key: 'id' } },
+  name: { type: DataTypes.STRING(200), allowNull: false },
+  slug: { type: DataTypes.STRING(200), unique: true },
+  description: { type: DataTypes.TEXT },
+  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  mrp: { type: DataTypes.DECIMAL(10, 2) },
+  stock_quantity: { type: DataTypes.INTEGER, defaultValue: 0 },
+  images: { type: DataTypes.JSON }, // Array of image URLs
+  icon_key: { type: DataTypes.STRING(50) }, // For SVG icons
+  badge: { type: DataTypes.STRING(50) }, // e.g., 'Bestseller', 'New'
+  rating: { type: DataTypes.DECIMAL(3, 2), defaultValue: 0 },
+  review_count: { type: DataTypes.INTEGER, defaultValue: 0 },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'products' });
+
+// ─── ORDER ────────────────────────────────────────────────────────────────────
+const Order = sequelize.define('Order', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  order_number: { type: DataTypes.STRING(20), unique: true },
+  customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  status: { 
+    type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'),
+    defaultValue: 'pending' 
+  },
+  payment_status: { type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded'), defaultValue: 'pending' },
+  payment_id: { type: DataTypes.STRING(100) },
+  shipping_address: { type: DataTypes.TEXT, allowNull: false },
+  shipping_city: { type: DataTypes.STRING(100) },
+  shipping_pincode: { type: DataTypes.STRING(15) },
+  notes: { type: DataTypes.TEXT }
+}, { tableName: 'orders' });
+
+// ─── ORDER ITEM ───────────────────────────────────────────────────────────────
+const OrderItem = sequelize.define('OrderItem', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  order_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'orders', key: 'id' } },
+  product_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'products', key: 'id' } },
+  quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false } // Price at the time of order
+}, { tableName: 'order_items' });
+
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
+Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
+ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
+
+Order.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+Order.hasMany(OrderItem, { foreignKey: 'order_id', as: 'items' });
+OrderItem.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
+OrderItem.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
+
 GardenerProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 GardenerProfile.belongsTo(User, { foreignKey: 'supervisor_id', as: 'supervisor' });
 User.hasOne(GardenerProfile, { foreignKey: 'user_id', as: 'gardenerProfile' });
@@ -417,6 +479,10 @@ BookingAddOn.belongsTo(AddOnService, { foreignKey: 'addon_id', as: 'addon' });
 Booking.hasMany(BookingAddOn, { foreignKey: 'booking_id', as: 'addons' });
 
 module.exports = {
+  Product,
+  ProductCategory,
+  Order,
+  OrderItem,
   AddOnService,
   BookingAddOn,
   SLAConfig,

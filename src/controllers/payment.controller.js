@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
-const { Payment, User, Booking, Subscription } = require('../models');
+const { Payment, User, Booking, Subscription, Order } = require('../models');
 
 // ── PayU Configuration ─────────────────────────────────────────────────────
 const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'gtKFFx';
@@ -62,6 +62,10 @@ exports.initiatePayment = async (req, res) => {
       });
       paymentAmount = sub ? (sub.plan?.price || sub.amount_paid || amount) : amount;
       productinfo = sub ? `Subscription-${sub.id}` : `Subscription-${subscription_id}`;
+    } else if (type === 'order' && req.body.order_id) {
+      const order = await Order.findByPk(req.body.order_id);
+      paymentAmount = order ? (order.total_amount || amount) : amount;
+      productinfo = order ? `Order-${order.order_number || order.id}` : `Order-${req.body.order_id}`;
     }
 
     // Create pending payment record
@@ -112,6 +116,13 @@ exports.initiatePayment = async (req, res) => {
         if (payment.type === 'wallet_topup') {
           console.log(`[MOCK] Incrementing wallet for user ${payment.user_id} by ${payment.amount}`);
           await User.increment({ wallet_balance: parseFloat(payment.amount) }, { where: { id: payment.user_id } });
+        }
+        if (payment.type === 'order' && req.body.order_id) {
+          const order = await Order.findByPk(req.body.order_id);
+          if (order) {
+            console.log(`[MOCK] Updating order ${order.id} status to paid`);
+            await order.update({ status: 'processing', payment_status: 'paid', payment_id: txnid });
+          }
         }
 
         return res.json({
@@ -165,6 +176,13 @@ exports.paymentSuccess = async (req, res) => {
     }
     if (payment.subscription_id) {
       await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
+    }
+    // Shop Order
+    if (payment.type === 'order') {
+      const orderId = payment.gateway_response ? payment.gateway_response.udf1 : null;
+      if (orderId) {
+        await Order.update({ status: 'processing', payment_status: 'paid' }, { where: { id: orderId } });
+      }
     }
     // Wallet topup
     if (payment.type === 'wallet_topup') {

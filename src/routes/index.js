@@ -7,6 +7,7 @@ const bookingCtrl = require('../controllers/booking.controller');
 const subscriptionCtrl = require('../controllers/subscription.controller');
 const adminCtrl = require('../controllers/admin.controller');
 const contentCtrl = require('../controllers/content.controller');
+const shopCtrl = require('../controllers/shop.controller');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 router.post('/auth/send-otp', authCtrl.sendOtp);
@@ -54,6 +55,13 @@ router.get('/blogs/:slug', contentCtrl.getBlogBySlug);
 // ── CITY PAGES ────────────────────────────────────────────────────────────────
 router.get('/cities', contentCtrl.getCityPages);
 router.get('/cities/:slug', contentCtrl.getCityPage);
+
+// ── SHOP / MARKETPLACE ────────────────────────────────────────────────────────
+router.get('/shop/categories', shopCtrl.getCategories);
+router.get('/shop/products', shopCtrl.getProducts);
+router.get('/shop/products/:id', shopCtrl.getProductDetail);
+router.post('/shop/orders', authenticate, authorize('customer'), shopCtrl.createOrder);
+router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
 
 // ── ZONES (public) ────────────────────────────────────────────────────────────
 router.get('/zones', adminCtrl.getZones);
@@ -107,6 +115,20 @@ router.put('/admin/blogs/:id', authenticate, authorize('admin'), uploadBlog.sing
 router.delete('/admin/blogs/:id', authenticate, authorize('admin'), contentCtrl.deleteBlog);
 router.post('/admin/cities', authenticate, authorize('admin'), contentCtrl.upsertCityPage);
 router.get('/admin/plants/history', authenticate, authorize('admin'), contentCtrl.getAllPlantIdentifications);
+
+// Admin Shop Management
+router.get('/admin/shop/categories', authenticate, authorize('admin'), adminCtrl.getAdminCategories);
+router.post('/admin/shop/categories', authenticate, authorize('admin'), adminCtrl.createCategory);
+router.put('/admin/shop/categories/:id', authenticate, authorize('admin'), adminCtrl.updateCategory);
+router.delete('/admin/shop/categories/:id', authenticate, authorize('admin'), adminCtrl.deleteCategory);
+
+router.get('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.getAdminProducts);
+router.post('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.createProduct);
+router.put('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.updateProduct);
+router.delete('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.deleteProduct);
+
+router.get('/admin/shop/orders', authenticate, authorize('admin'), adminCtrl.getAdminOrders);
+router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin'), adminCtrl.updateOrderStatus);
 
 
 module.exports = router;
