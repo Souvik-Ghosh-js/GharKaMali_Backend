@@ -54,14 +54,14 @@ exports.initiatePayment = async (req, res) => {
 
     if (type === 'booking' && booking_id) {
       const booking = await Booking.findByPk(booking_id);
-      if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-      paymentAmount = booking.total_amount;
-      productinfo = `Booking-${booking.booking_number}`;
+      paymentAmount = booking ? (booking.total_amount || amount) : amount;
+      productinfo = booking ? `Booking-${booking.booking_number || booking.id}` : `Booking-${booking_id}`;
     } else if (type === 'subscription' && subscription_id) {
-      const sub = await Subscription.findByPk(subscription_id);
-      if (!sub) return res.status(404).json({ success: false, message: 'Subscription not found' });
-      paymentAmount = sub.amount_paid;
-      productinfo = `Subscription-${sub.id}`;
+      const sub = await Subscription.findByPk(subscription_id, {
+        include: [{ model: ServicePlan, as: 'plan' }]
+      });
+      paymentAmount = sub ? (sub.plan?.price || sub.amount_paid || amount) : amount;
+      productinfo = sub ? `Subscription-${sub.id}` : `Subscription-${subscription_id}`;
     }
 
     // Create pending payment record
@@ -91,32 +91,42 @@ exports.initiatePayment = async (req, res) => {
 
     // MOCK BYPASS: If active, simulate success immediately
     if (MOCK_PAYMENT) {
-      // Simulate success callback logic
-      await payment.update({ 
-        status: 'success', 
-        payment_method: 'mock',
-        gateway_response: { note: 'Bypassed via Mock Payment' } 
-      });
-      
-      if (payment.booking_id) {
-        await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
-      }
-      if (payment.subscription_id) {
-        await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
-      }
-      if (payment.type === 'wallet_topup') {
-        await User.increment({ wallet_balance: payment.amount }, { where: { id: payment.user_id } });
-      }
-
-      return res.json({
-        success: true,
-        mock_success: true,
-        data: {
-          txnid,
-          amount: params.amount,
-          frontend_redirect: `/payment/success?txnid=${txnid}&amount=${params.amount}`
+      try {
+        console.log(`[MOCK] Processing payment for TXN: ${txnid}, Type: ${type}`);
+        
+        // Simulate success callback logic
+        await payment.update({ 
+          status: 'success', 
+          payment_method: 'mock',
+          gateway_response: { note: 'Bypassed via Mock Payment' } 
+        });
+        
+        if (payment.booking_id) {
+          console.log(`[MOCK] Updating booking ${payment.booking_id} status to paid`);
+          await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
         }
-      });
+        if (payment.subscription_id) {
+          console.log(`[MOCK] Activating subscription ${payment.subscription_id}`);
+          await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
+        }
+        if (payment.type === 'wallet_topup') {
+          console.log(`[MOCK] Incrementing wallet for user ${payment.user_id} by ${payment.amount}`);
+          await User.increment({ wallet_balance: parseFloat(payment.amount) }, { where: { id: payment.user_id } });
+        }
+
+        return res.json({
+          success: true,
+          mock_success: true,
+          data: {
+            txnid,
+            amount: params.amount,
+            frontend_redirect: `/payment/success?txnid=${txnid}&amount=${params.amount}`
+          }
+        });
+      } catch (mockErr) {
+        console.error('[MOCK ERROR]', mockErr);
+        throw mockErr; // Let the outer catch handle it
+      }
     }
 
     res.json({
