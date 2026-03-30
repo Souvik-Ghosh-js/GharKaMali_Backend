@@ -72,6 +72,14 @@ router.get('/admin/analytics', authenticate, authorize('admin'), adminCtrl.getAn
 router.get('/admin/gardeners', authenticate, authorize('admin', 'supervisor'), adminCtrl.getGardeners);
 router.post('/admin/gardeners/approve', authenticate, authorize('admin'), adminCtrl.approveGardener);
 router.post('/admin/gardeners/reject', authenticate, authorize('admin'), adminCtrl.rejectGardener);
+router.delete('/admin/gardeners/:id', authenticate, authorize('admin'), adminCtrl.deleteGardener);
+
+// ── GEOFENCE MANAGEMENT ──────────────────────────────────────────────────────
+router.get('/admin/geofence', authenticate, authorize('admin'), adminCtrl.getGeofences);
+router.post('/admin/geofence', authenticate, authorize('admin'), adminCtrl.createGeofence);
+router.put('/admin/geofence/:id', authenticate, authorize('admin'), adminCtrl.updateGeofence);
+router.delete('/admin/geofence/:id', authenticate, authorize('admin'), adminCtrl.deleteGeofence);
+
 
 router.get('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.getSupervisors);
 router.post('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.createSupervisor);

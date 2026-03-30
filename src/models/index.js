@@ -86,7 +86,11 @@ const ServicePlan = sequelize.define('ServicePlan', {
   plan_type: { type: DataTypes.ENUM('subscription', 'ondemand'), defaultValue: 'subscription' },
   visits_per_month: { type: DataTypes.INTEGER, defaultValue: 8 },
   price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  price_subtitle: { type: DataTypes.STRING(50), defaultValue: 'Every month' },
+  plan_summary: { type: DataTypes.STRING(100) },
   price_per_visit: { type: DataTypes.DECIMAL(10, 2) },
+  is_best_value: { type: DataTypes.BOOLEAN, defaultValue: false },
+  button_text: { type: DataTypes.STRING(50), defaultValue: 'Select' },
   duration_days: { type: DataTypes.INTEGER, defaultValue: 30 },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   features: { type: DataTypes.JSON },
@@ -350,6 +354,18 @@ const BookingAddOn = sequelize.define('BookingAddOn', {
   status:     { type: DataTypes.ENUM('pending','completed'), defaultValue: 'pending' }
 }, { tableName: 'booking_addons' });
 
+// ─── GEOFENCE ──────────────────────────────────────────────────────
+const Geofence = sequelize.define('Geofence', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false },
+  city: { type: DataTypes.STRING(100), allowNull: false },
+  state: { type: DataTypes.STRING(100) },
+  // JSON string: array of [lat, lng] pairs forming the polygon
+  polygon_coords: { type: DataTypes.TEXT('long'), allowNull: false },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  created_by: { type: DataTypes.INTEGER }
+}, { tableName: 'geofences', sync: { force: false } });
+
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 GardenerProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 GardenerProfile.belongsTo(User, { foreignKey: 'supervisor_id', as: 'supervisor' });
@@ -401,6 +417,7 @@ module.exports = {
   SLABreach,
   Complaint,
   PriceHikeSchedule,
+  Geofence,
   sequelize,
   User,
   GardenerProfile,
@@ -418,3 +435,4 @@ module.exports = {
   Payment,
   PriceHikeLog
 };
+

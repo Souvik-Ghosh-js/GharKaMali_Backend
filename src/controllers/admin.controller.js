@@ -181,6 +181,34 @@ exports.rejectGardener = async (req, res) => {
   }
 };
 
+exports.deleteGardener = async (req, res) => {
+  try {
+    const { GardenerProfile, GardenerZone } = require('../models');
+    const user = await User.findOne({ where: { id: req.params.id, role: 'gardener' } });
+    if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
+
+    // Safety check: block deletion if gardener has active/pending bookings
+    const activeBookings = await Booking.count({
+      where: { gardener_id: req.params.id, status: { [Op.in]: ['pending', 'assigned', 'in_progress'] } }
+    });
+    if (activeBookings > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete gardener with ${activeBookings} active/pending booking(s). Reassign or cancel them first.`
+      });
+    }
+
+    // Cascade delete profile and zone assignments first
+    await GardenerZone.destroy({ where: { gardener_id: req.params.id } });
+    await GardenerProfile.destroy({ where: { user_id: req.params.id } });
+    await user.destroy();
+
+    res.json({ success: true, message: `Gardener "${user.name}" has been permanently deleted.` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── SUPERVISOR MANAGEMENT ─────────────────────────────────────────────────────
 exports.createSupervisor = async (req, res) => {
   try {
@@ -446,6 +474,67 @@ exports.getUtilizationReport = async (req, res) => {
         }
       }
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── GEOFENCE MANAGEMENT ───────────────────────────────────────────────────────
+exports.getGeofences = async (req, res) => {
+  try {
+    const { Geofence } = require('../models');
+    const geofences = await Geofence.findAll({ order: [['city', 'ASC'], ['name', 'ASC']] });
+    res.json({ success: true, data: geofences });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.createGeofence = async (req, res) => {
+  try {
+    const { Geofence } = require('../models');
+    const { name, city, state, polygon_coords, is_active } = req.body;
+    if (!polygon_coords || !Array.isArray(polygon_coords) || polygon_coords.length < 3) {
+      return res.status(400).json({ success: false, message: 'polygon_coords must be an array of at least 3 [lat, lng] points' });
+    }
+    const geofence = await Geofence.create({
+      name, city, state: state || '', polygon_coords: JSON.stringify(polygon_coords),
+      is_active: is_active !== false, created_by: req.user.id
+    });
+    res.status(201).json({ success: true, data: geofence });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.updateGeofence = async (req, res) => {
+  try {
+    const { Geofence } = require('../models');
+    const geofence = await Geofence.findByPk(req.params.id);
+    if (!geofence) return res.status(404).json({ success: false, message: 'Geofence not found' });
+    const { name, city, state, polygon_coords, is_active } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (city !== undefined) updates.city = city;
+    if (state !== undefined) updates.state = state;
+    if (is_active !== undefined) updates.is_active = is_active;
+    if (polygon_coords && Array.isArray(polygon_coords) && polygon_coords.length >= 3) {
+      updates.polygon_coords = JSON.stringify(polygon_coords);
+    }
+    await geofence.update(updates);
+    res.json({ success: true, data: geofence });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.deleteGeofence = async (req, res) => {
+  try {
+    const { Geofence } = require('../models');
+    const geofence = await Geofence.findByPk(req.params.id);
+    if (!geofence) return res.status(404).json({ success: false, message: 'Geofence not found' });
+    await geofence.destroy();
+    res.json({ success: true, message: 'Geofence deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
