@@ -11,15 +11,31 @@ const PAYU_BASE = process.env.PAYU_MODE === 'production'
 
 // Generate SHA512 hash for PayU
 const generateHash = (params) => {
-  // Formula: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
-  const str = `${params.key}|${params.txnid}|${params.amount}|${params.productinfo}|${params.firstname}|${params.email}|||||||||||${PAYU_SALT}`;
+  // Formula: key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5|udf6|SALT
+  // Based on your image, PayU Biz test gateway expects exactly 7 pipes after the email
+  const key = String(params.key).trim();
+  const txnid = String(params.txnid).trim();
+  const amount = String(params.amount).trim();
+  const productinfo = String(params.productinfo).trim();
+  const firstname = String(params.firstname).trim();
+  const email = String(params.email).trim();
+  
+  const str = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||${PAYU_SALT}`;
   return crypto.createHash('sha512').update(str).digest('hex');
 };
 
 // Verify hash on response
 const verifyHash = (params) => {
-  // Formula: sha512(SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
-  const str = `${PAYU_SALT}|${params.status}|||||||||||${params.email}|${params.firstname}|${params.productinfo}|${params.amount}|${params.txnid}|${params.key}`;
+  const key = String(params.key).trim();
+  const status = String(params.status).trim();
+  const amount = String(params.amount).trim();
+  const txnid = String(params.txnid).trim();
+  const productinfo = String(params.productinfo).trim();
+  const firstname = String(params.firstname).trim();
+  const email = String(params.email).trim();
+
+  // SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
+  const str = `${PAYU_SALT}|${status}|||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
   const computed = crypto.createHash('sha512').update(str).digest('hex');
   return computed === params.hash;
 };
@@ -68,7 +84,6 @@ exports.initiatePayment = async (req, res) => {
       phone: user.phone,
       surl: `${process.env.BASE_URL}/api/payments/success`,
       furl: `${process.env.BASE_URL}/api/payments/failure`,
-      service_provider: 'payu_paisa',
     };
     params.hash = generateHash(params);
 
