@@ -79,6 +79,22 @@ exports.getMyPlantHistory = async (req, res) => {
   }
 };
 
+// ── Admin: get all plant identification history ───────────────────────────────
+exports.getAllPlantIdentifications = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const { count, rows } = await PlantIdentification.findAndCountAll({
+      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit,
+    });
+    res.json({ success: true, data: { items: rows, total: count, page: parseInt(page) } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── BLOGS ─────────────────────────────────────────────────────────────────────
 exports.getBlogs = async (req, res) => {
   try {

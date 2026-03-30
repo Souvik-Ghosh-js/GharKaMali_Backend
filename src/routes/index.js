@@ -106,6 +106,8 @@ router.post('/admin/blogs', authenticate, authorize('admin'), uploadBlog.single(
 router.put('/admin/blogs/:id', authenticate, authorize('admin'), uploadBlog.single('featured_image'), contentCtrl.updateBlog);
 router.delete('/admin/blogs/:id', authenticate, authorize('admin'), contentCtrl.deleteBlog);
 router.post('/admin/cities', authenticate, authorize('admin'), contentCtrl.upsertCityPage);
+router.get('/admin/plants/history', authenticate, authorize('admin'), contentCtrl.getAllPlantIdentifications);
+
 
 module.exports = router;
 
