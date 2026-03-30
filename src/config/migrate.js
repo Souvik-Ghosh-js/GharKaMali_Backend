@@ -147,6 +147,7 @@ const tables = [
     features             JSON,
     max_plants           INT          NOT NULL DEFAULT 20,
     is_weekend_included  TINYINT(1)   NOT NULL DEFAULT 0,
+    weekend_surge_price  DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     created_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_sp_type    (plan_type),
