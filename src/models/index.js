@@ -363,8 +363,13 @@ const Geofence = sequelize.define('Geofence', {
   // JSON string: array of [lat, lng] pairs forming the polygon
   polygon_coords: { type: DataTypes.TEXT('long'), allowNull: false },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  // Pricing (replaces ServiceZone pricing)
+  base_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   created_by: { type: DataTypes.INTEGER }
 }, { tableName: 'geofences', sync: { force: false } });
+
 
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 GardenerProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });

@@ -208,32 +208,67 @@ exports.rescheduleBooking = async (req, res) => {
   }
 };
 
-// Check if location is in a service zone
+// Check if a point [lat, lng] is inside a polygon using ray-casting algorithm
+function pointInPolygon(lat, lng, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [yi, xi] = polygon[i];
+    const [yj, xj] = polygon[j];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Check if location is in a serviceable geofence zone
 exports.checkServiceability = async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
-    const { ServiceZone } = require('../models');
-    const zones = await ServiceZone.findAll({ where: { is_active: true } });
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
 
-    // Simple radius check
-    const R = 6371;
-    const serviced = zones.filter(zone => {
-      if (!zone.center_latitude || !zone.center_longitude) return false;
-      const dLat = (latitude - zone.center_latitude) * Math.PI / 180;
-      const dLon = (longitude - zone.center_longitude) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 + Math.cos(zone.center_latitude * Math.PI/180) * Math.cos(latitude * Math.PI/180) * Math.sin(dLon/2)**2;
-      const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return dist <= (zone.radius_km || 10);
-    });
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ success: false, message: 'Valid latitude and longitude are required' });
+    }
+
+    const { Geofence } = require('../models');
+    const geofences = await Geofence.findAll({ where: { is_active: true } });
+
+    const matched = [];
+    for (const gf of geofences) {
+      let polygon = [];
+      try {
+        polygon = typeof gf.polygon_coords === 'string'
+          ? JSON.parse(gf.polygon_coords)
+          : (gf.polygon_coords || []);
+      } catch { continue; }
+
+      if (polygon.length < 3) continue;
+
+      if (pointInPolygon(lat, lng, polygon)) {
+        matched.push({
+          id: gf.id,
+          name: gf.name,
+          city: gf.city,
+          state: gf.state,
+          base_price: gf.base_price,
+          price_per_plant: gf.price_per_plant,
+          min_plants: gf.min_plants,
+          polygon_vertices: polygon.length,
+        });
+      }
+    }
 
     res.json({
       success: true,
       data: {
-        serviceable: serviced.length > 0,
-        zones: serviced
+        serviceable: matched.length > 0,
+        zones: matched,
       }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
