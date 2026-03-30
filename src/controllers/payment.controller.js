@@ -4,20 +4,22 @@ const { Payment, User, Booking, Subscription } = require('../models');
 
 // ── PayU Configuration ─────────────────────────────────────────────────────
 const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'gtKFFx';
-const PAYU_SALT = process.env.PAYU_MERCHANT_SALT || 'eCwWELxi';
+const PAYU_SALT = process.env.PAYU_MERCHANT_SALT || '4R38lvwiV57FwVpsgOvTXBdLE4tHUXFW';
 const PAYU_BASE = process.env.PAYU_MODE === 'production'
   ? 'https://secure.payu.in/_payment'
   : 'https://test.payu.in/_payment';
 
 // Generate SHA512 hash for PayU
 const generateHash = (params) => {
-  const str = `${params.key}|${params.txnid}|${params.amount}|${params.productinfo}|${params.firstname}|${params.email}|||||||||||||${PAYU_SALT}`;
+  // Formula: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
+  const str = `${params.key}|${params.txnid}|${params.amount}|${params.productinfo}|${params.firstname}|${params.email}|||||||||||${PAYU_SALT}`;
   return crypto.createHash('sha512').update(str).digest('hex');
 };
 
 // Verify hash on response
 const verifyHash = (params) => {
-  const str = `${PAYU_SALT}|${params.status}|||||||||||||${params.email}|${params.firstname}|${params.productinfo}|${params.amount}|${params.txnid}|${params.key}`;
+  // Formula: sha512(SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+  const str = `${PAYU_SALT}|${params.status}|||||||||||${params.email}|${params.firstname}|${params.productinfo}|${params.amount}|${params.txnid}|${params.key}`;
   const computed = crypto.createHash('sha512').update(str).digest('hex');
   return computed === params.hash;
 };
