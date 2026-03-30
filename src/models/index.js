@@ -82,6 +82,7 @@ const ServicePlan = sequelize.define('ServicePlan', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING(100), allowNull: false },
   description: { type: DataTypes.TEXT },
+  tagline: { type: DataTypes.STRING(255) },
   plan_type: { type: DataTypes.ENUM('subscription', 'ondemand'), defaultValue: 'subscription' },
   visits_per_month: { type: DataTypes.INTEGER, defaultValue: 8 },
   price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },

@@ -138,6 +138,7 @@ const tables = [
     id                   INT AUTO_INCREMENT PRIMARY KEY,
     name                 VARCHAR(100) NOT NULL UNIQUE,
     description          TEXT,
+    tagline              VARCHAR(255),
     plan_type            ENUM('subscription','ondemand') NOT NULL DEFAULT 'subscription',
     visits_per_month     INT          NOT NULL DEFAULT 8,
     price                DECIMAL(10,2) NOT NULL,
