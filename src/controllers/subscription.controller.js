@@ -151,7 +151,12 @@ exports.selectDates = async (req, res) => {
     let totalSurgeAmount = 0;
 
     for (const d of dates) {
-      const dayOfWeek = moment(d, 'YYYY-MM-DD').day();
+      const dateMoment = moment(d, 'YYYY-MM-DD');
+      if (dateMoment.isBefore(moment(subscription.start_date, 'YYYY-MM-DD'), 'day') || dateMoment.isAfter(moment(subscription.end_date, 'YYYY-MM-DD'), 'day')) {
+        return res.status(400).json({ success: false, message: `Date ${d} is outside your active billing period (${subscription.start_date} to ${subscription.end_date})` });
+      }
+
+      const dayOfWeek = dateMoment.day();
       const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6); // 0=Sun, 6=Sat
       
       let extraAmount = 0;
