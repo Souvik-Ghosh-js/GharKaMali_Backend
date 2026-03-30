@@ -90,7 +90,8 @@ const ServicePlan = sequelize.define('ServicePlan', {
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   features: { type: DataTypes.JSON },
   max_plants: { type: DataTypes.INTEGER, defaultValue: 20 },
-  is_weekend_included: { type: DataTypes.BOOLEAN, defaultValue: false }
+  is_weekend_included: { type: DataTypes.BOOLEAN, defaultValue: false },
+  weekend_surge_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
 }, { tableName: 'service_plans' });
 
 // ─── SUBSCRIPTION ─────────────────────────────────────────────────────────────

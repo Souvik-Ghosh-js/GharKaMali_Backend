@@ -41,6 +41,7 @@ router.get('/plans', subscriptionCtrl.getPlans);
 router.post('/subscriptions', authenticate, authorize('customer'), subscriptionCtrl.subscribe);
 router.get('/subscriptions/my', authenticate, authorize('customer'), subscriptionCtrl.getMySubscriptions);
 router.put('/subscriptions/:id/cancel', authenticate, authorize('customer'), subscriptionCtrl.cancelSubscription);
+router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer'), subscriptionCtrl.selectDates);
 
 // ── PLANTOPEDIA ───────────────────────────────────────────────────────────────
 router.post('/plants/identify', authenticate, uploadPlant.single('image'), contentCtrl.identifyPlant);

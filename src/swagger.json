@@ -3,7 +3,15 @@
   "info": {
     "title": "Ghar Ka Mali API",
     "version": "2.1.0",
-    "description": "Complete gardening platform API — Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` → `POST /auth/verify-otp` → use returned `token` as `Bearer <token>`"
+    "description": "Complete gardening platform API \u2014 Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` \u2192 `POST /auth/verify-otp` \u2192 use returned `token` as `Bearer <token>`",
+    "x-frontend-notes": {
+      "missing_backend_endpoints": [
+        "GET /admin/blogs - does not exist; FE should use GET /blogs instead",
+        "PUT /admin/supervisors/{id} - not implemented in backend",
+        "DELETE /admin/plans/{id} - not implemented in backend"
+      ],
+      "approve_gardener_note": "FE must call POST /admin/gardeners/approve with {user_id} body, not PATCH /admin/gardeners/{id}/approve"
+    }
   },
   "servers": [
     {
@@ -265,11 +273,11 @@
     },
     {
       "name": "Gardener",
-      "description": "Gardener app — jobs, location, profile, earnings"
+      "description": "Gardener app \u2014 jobs, location, profile, earnings"
     },
     {
       "name": "Bookings",
-      "description": "Customer booking management — create, track, rate"
+      "description": "Customer booking management \u2014 create, track, rate"
     },
     {
       "name": "Subscriptions",
@@ -313,7 +321,7 @@
     },
     {
       "name": "Admin",
-      "description": "Admin panel — all management & analytics"
+      "description": "Admin panel \u2014 all management & analytics"
     },
     {
       "name": "SLA",
@@ -365,7 +373,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Verify OTP → login or auto-register customer",
+        "summary": "Verify OTP \u2192 login or auto-register customer",
         "description": "Verifies OTP. Creates a new customer account if phone doesn't exist. Returns JWT token.",
         "requestBody": {
           "required": true,
@@ -922,7 +930,7 @@
         },
         "responses": {
           "200": {
-            "description": "Visit started, status → in_progress, WhatsApp sent to customer"
+            "description": "Visit started, status \u2192 in_progress, WhatsApp sent to customer"
           },
           "400": {
             "description": "Invalid OTP"
@@ -939,7 +947,7 @@
           "Gardener"
         ],
         "summary": "Update booking status + upload work proof (Gardener)",
-        "description": "Gardener updates status through: en_route → arrived → in_progress (via OTP) → completed/failed. Work images uploaded on completion.",
+        "description": "Gardener updates status through: en_route \u2192 arrived \u2192 in_progress (via OTP) \u2192 completed/failed. Work images uploaded on completion.",
         "security": [
           {
             "bearerAuth": []
@@ -1707,7 +1715,7 @@
         "tags": [
           "Payments"
         ],
-        "summary": "Initiate wallet top-up (minimum ₹100)",
+        "summary": "Initiate wallet top-up (minimum \u20b9100)",
         "security": [
           {
             "bearerAuth": []
@@ -1737,7 +1745,7 @@
             "description": "PayU params for wallet top-up"
           },
           "400": {
-            "description": "Minimum top-up is ₹100"
+            "description": "Minimum top-up is \u20b9100"
           }
         }
       }
@@ -1880,7 +1888,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated blogs (without full content)"
+            "description": "Blog list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "blogs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2121,7 +2161,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Complaints with customer, gardener, supervisor details"
+            "description": "Complaint list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "complaints": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2167,8 +2239,8 @@
         "tags": [
           "Complaints"
         ],
-        "summary": "Update complaint — assign, escalate, or resolve (Admin/Supervisor)",
-        "description": "On resolve: customer notified via WhatsApp, auto penalty applied to gardener (₹50).",
+        "summary": "Update complaint \u2014 assign, escalate, or resolve (Admin/Supervisor)",
+        "description": "On resolve: customer notified via WhatsApp, auto penalty applied to gardener (\u20b950).",
         "security": [
           {
             "bearerAuth": []
@@ -2321,7 +2393,62 @@
         ],
         "responses": {
           "200": {
-            "description": "Platform stats: users, bookings, revenue, active subscriptions, recent bookings"
+            "description": "Dashboard data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "stats": {
+                          "type": "object",
+                          "properties": {
+                            "totalCustomers": {
+                              "type": "integer"
+                            },
+                            "totalGardeners": {
+                              "type": "integer"
+                            },
+                            "totalSupervisors": {
+                              "type": "integer"
+                            },
+                            "activeSubscriptions": {
+                              "type": "integer"
+                            },
+                            "pendingGardeners": {
+                              "type": "integer"
+                            },
+                            "todayBookings": {
+                              "type": "integer"
+                            },
+                            "completedToday": {
+                              "type": "integer"
+                            },
+                            "pendingBookings": {
+                              "type": "integer"
+                            },
+                            "totalRevenue": {
+                              "type": "number"
+                            }
+                          }
+                        },
+                        "recentBookings": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2439,7 +2566,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated gardeners with profiles"
+            "description": "Gardener list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "gardeners": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2502,11 +2661,10 @@
     },
     "/admin/gardeners/approve": {
       "post": {
+        "summary": "Approve a gardener",
         "tags": [
           "Admin"
         ],
-        "summary": "Approve gardener application",
-        "description": "Approves gardener and optionally assigns to supervisor. WhatsApp welcome message sent.",
         "security": [
           {
             "bearerAuth": []
@@ -2517,6 +2675,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "type": "object",
                 "required": [
                   "user_id"
                 ],
@@ -2534,17 +2693,17 @@
         },
         "responses": {
           "200": {
-            "description": "Approved. WhatsApp sent to gardener."
+            "description": "Gardener approved"
           }
         }
       }
     },
     "/admin/gardeners/reject": {
       "post": {
+        "summary": "Reject a gardener",
         "tags": [
           "Admin"
         ],
-        "summary": "Reject gardener application",
         "security": [
           {
             "bearerAuth": []
@@ -2555,15 +2714,13 @@
           "content": {
             "application/json": {
               "schema": {
+                "type": "object",
                 "required": [
                   "user_id"
                 ],
                 "properties": {
                   "user_id": {
                     "type": "integer"
-                  },
-                  "reason": {
-                    "type": "string"
                   }
                 }
               }
@@ -2572,7 +2729,7 @@
         },
         "responses": {
           "200": {
-            "description": "Rejected"
+            "description": "Gardener rejected"
           }
         }
       }
@@ -2700,7 +2857,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Supervisor accounts"
+            "description": "Supervisor list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -2762,7 +2937,25 @@
         ],
         "responses": {
           "200": {
-            "description": "All zones with pricing info"
+            "description": "Zone list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3059,7 +3252,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated bookings with customer/gardener/zone"
+            "description": "Booking list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "bookings": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3099,7 +3324,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated subscriptions with customer and plan details"
+            "description": "Subscription list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "subscriptions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3140,7 +3397,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated customers"
+            "description": "Customer list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "customers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "page": {
+                          "type": "integer"
+                        },
+                        "pages": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3185,7 +3474,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Paginated rewards/penalties with gardener details"
+            "description": "Reward/penalty list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3702,7 +4017,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Full add-on catalog"
+            "description": "Addon list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3743,7 +4076,7 @@
                   },
                   "icon": {
                     "type": "string",
-                    "example": "🌱"
+                    "example": "\ud83c\udf31"
                   },
                   "category": {
                     "type": "string",
@@ -3935,7 +4268,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Breaches with booking number and gardener details"
+            "description": "SLA breaches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "breaches": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

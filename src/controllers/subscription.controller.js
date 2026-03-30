@@ -46,39 +46,7 @@ exports.subscribe = async (req, res) => {
       payment_id
     });
 
-    // Schedule visits (Mon-Sat, skip Sunday)
-    const visitDates = [];
-    let current = moment(startDate);
-    let count = 0;
-    while (count < plan.visits_per_month && current.isBefore(moment(endDate))) {
-      if (current.day() !== 0 && (!plan.is_weekend_included ? current.day() !== 6 : true)) {
-        visitDates.push(current.format('YYYY-MM-DD'));
-        count++;
-      }
-      current.add(Math.floor(30 / plan.visits_per_month), 'days');
-    }
-
-    // Create scheduled bookings
-    for (const date of visitDates) {
-      await Booking.create({
-        booking_number: genBookingNumber(),
-        customer_id: req.user.id,
-        gardener_id: preferred_gardener_id || null,
-        subscription_id: subscription.id,
-        zone_id,
-        booking_type: 'subscription',
-        status: 'assigned',
-        scheduled_date: date,
-        scheduled_time: '09:00:00',
-        otp: genVisitOTP(),
-        service_address,
-        service_latitude,
-        service_longitude,
-        plant_count: plant_count || 1,
-        base_amount: plan.price / plan.visits_per_month,
-        total_amount: plan.price / plan.visits_per_month
-      });
-    }
+    // Auto-scheduling removed - user will select dates manually via selectDates API
 
     const customer = await User.findByPk(req.user.id);
     await sendWhatsApp(customer.phone, templates.subscriptionRenewed(customer.name, plan.name, endDate));
@@ -94,10 +62,26 @@ exports.getMySubscriptions = async (req, res) => {
   try {
     const subs = await Subscription.findAll({
       where: { customer_id: req.user.id },
-      include: [{ model: ServicePlan, as: 'plan' }],
+      include: [
+        { model: ServicePlan, as: 'plan' },
+        { model: Booking, as: 'bookings', attributes: ['id', 'scheduled_date', 'status'] }
+      ],
       order: [['created_at', 'DESC']]
     });
-    res.json({ success: true, data: subs });
+    
+    // Calculate simple next_visit_date and clean up data
+    const enhancedSubs = subs.map(sub => {
+      const data = sub.toJSON();
+      const upcoming = data.bookings.filter(b => moment(b.scheduled_date).isSameOrAfter(moment(), 'day'));
+      if (upcoming.length > 0) {
+        upcoming.sort((a,b) => moment(a.scheduled_date).valueOf() - moment(b.scheduled_date).valueOf());
+        data.next_visit_date = upcoming[0].scheduled_date;
+      }
+      data.scheduled_visits_count = data.bookings.length;
+      return data;
+    });
+
+    res.json({ success: true, data: enhancedSubs });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -131,6 +115,77 @@ exports.getAllSubscriptions = async (req, res) => {
       offset: (page - 1) * limit
     });
     res.json({ success: true, data: { subscriptions: rows, total: count, page: parseInt(page), pages: Math.ceil(count / limit) } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Select dates manually
+exports.selectDates = async (req, res) => {
+  try {
+    const { dates } = req.body;
+    const subscriptionId = req.params.id;
+
+    if (!Array.isArray(dates) || dates.length === 0) {
+      return res.status(400).json({ success: false, message: 'Please provide an array of dates' });
+    }
+
+    const subscription = await Subscription.findOne({
+      where: { id: subscriptionId, customer_id: req.user.id },
+      include: [{ model: ServicePlan, as: 'plan' }]
+    });
+
+    if (!subscription) return res.status(404).json({ success: false, message: 'Subscription not found' });
+    if (subscription.status !== 'active') return res.status(400).json({ success: false, message: 'Subscription is not active' });
+
+    const existingBookings = await Booking.count({ where: { subscription_id: subscription.id } });
+    const remainingToSchedule = subscription.visits_total - existingBookings;
+
+    if (dates.length > remainingToSchedule) {
+      return res.status(400).json({ success: false, message: `You can only schedule ${remainingToSchedule} more visits` });
+    }
+
+    const plan = subscription.plan;
+    const weekendSurgePrice = parseFloat(plan.weekend_surge_price) || 0;
+    const baseAmountPerVisit = parseFloat(plan.price) / plan.visits_per_month;
+    let totalSurgeAmount = 0;
+
+    for (const d of dates) {
+      const dayOfWeek = moment(d, 'YYYY-MM-DD').day();
+      const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6); // 0=Sun, 6=Sat
+      
+      let extraAmount = 0;
+      if (isWeekend && weekendSurgePrice > 0) {
+        extraAmount = weekendSurgePrice;
+        totalSurgeAmount += weekendSurgePrice;
+      }
+
+      await Booking.create({
+        booking_number: genBookingNumber(),
+        customer_id: req.user.id,
+        gardener_id: subscription.preferred_gardener_id || null,
+        subscription_id: subscription.id,
+        zone_id: subscription.zone_id,
+        booking_type: 'subscription',
+        status: 'assigned',
+        scheduled_date: d,
+        scheduled_time: '09:00:00',
+        otp: genVisitOTP(),
+        service_address: subscription.service_address,
+        service_latitude: subscription.service_latitude,
+        service_longitude: subscription.service_longitude,
+        plant_count: subscription.plant_count,
+        base_amount: baseAmountPerVisit,
+        extra_amount: extraAmount,
+        total_amount: baseAmountPerVisit + extraAmount
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${dates.length} visits scheduled successfully.`,
+      data: { total_surge_amount: totalSurgeAmount }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
