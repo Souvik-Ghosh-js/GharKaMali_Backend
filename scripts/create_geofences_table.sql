@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS `geofences` (
   `id`              INT             NOT NULL AUTO_INCREMENT,
   `name`            VARCHAR(100)    NOT NULL,
-  `city`            VARCHAR(100)    NOT NULL,
+  `city`              VARCHAR(100)    NOT NULL,
   `state`           VARCHAR(100)    DEFAULT '',
   `polygon_coords`  LONGTEXT        NOT NULL  COMMENT 'JSON array of [lat, lng] pairs — unlimited vertices',
   `is_active`       TINYINT(1)      NOT NULL  DEFAULT 1,
@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS `geofences` (
   `price_per_plant` DECIMAL(10, 2)  NOT NULL  DEFAULT 0.00,
   `min_plants`      INT             NOT NULL  DEFAULT 1,
   `created_by`      INT             DEFAULT NULL,
-  `createdAt`       DATETIME        NOT NULL  DEFAULT CURRENT_TIMESTAMP,
-  `updatedAt`       DATETIME        NOT NULL  DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `created_at`       DATETIME        NOT NULL  DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`       DATETIME        NOT NULL  DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_geofences_city` (`city`),
   KEY `idx_geofences_active` (`is_active`)

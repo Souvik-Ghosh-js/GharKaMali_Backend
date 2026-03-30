@@ -368,7 +368,8 @@ const Geofence = sequelize.define('Geofence', {
   price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   created_by: { type: DataTypes.INTEGER }
-}, { tableName: 'geofences', sync: { force: false } });
+}, { tableName: 'geofences', underscored: true });
+
 
 
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
