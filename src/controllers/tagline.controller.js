@@ -20,7 +20,8 @@ exports.createTagline = async (req, res) => {
     
     let image_url = req.body.image_url;
     if (req.file) {
-      image_url = `/uploads/shop/${req.file.filename}`;
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
     }
     
     const item = await Tagline.create({ text, image_url, display_order, is_active: is_active !== false });
@@ -38,7 +39,8 @@ exports.updateTagline = async (req, res) => {
     
     const data = { ...req.body };
     if (req.file) {
-      data.image_url = `/uploads/shop/${req.file.filename}`;
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
     }
     
     await item.update(data);

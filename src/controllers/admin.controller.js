@@ -691,7 +691,8 @@ exports.createCategory = async (req, res) => {
   try {
     const data = { ...req.body };
     if (req.file) {
-      data.image_url = `/uploads/shop/${req.file.filename}`;
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
     }
     const category = await ProductCategory.create(data);
     res.status(201).json({ success: true, data: category });
@@ -702,7 +703,8 @@ exports.updateCategory = async (req, res) => {
   try {
     const data = { ...req.body };
     if (req.file) {
-      data.image_url = `/uploads/shop/${req.file.filename}`;
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
     }
     await ProductCategory.update(data, { where: { id: req.params.id } });
     const category = await ProductCategory.findByPk(req.params.id);
@@ -732,7 +734,8 @@ exports.createProduct = async (req, res) => {
   try {
     const data = { ...req.body };
     if (req.file) {
-      data.images = [`/uploads/shop/${req.file.filename}`];
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      data.images = [`${baseUrl}/uploads/shop/${req.file.filename}`];
     }
     const product = await Product.create(data);
     res.status(201).json({ success: true, data: product });
@@ -743,7 +746,8 @@ exports.updateProduct = async (req, res) => {
   try {
     const data = { ...req.body };
     if (req.file) {
-      data.images = [`/uploads/shop/${req.file.filename}`];
+      const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+      data.images = [`${baseUrl}/uploads/shop/${req.file.filename}`];
     }
     await Product.update(data, { where: { id: req.params.id } });
     const product = await Product.findByPk(req.params.id);
