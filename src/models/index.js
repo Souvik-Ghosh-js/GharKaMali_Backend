@@ -378,6 +378,7 @@ const ProductCategory = sequelize.define('ProductCategory', {
   name: { type: DataTypes.STRING(100), allowNull: false, unique: true },
   slug: { type: DataTypes.STRING(100), unique: true },
   icon: { type: DataTypes.STRING(50) },
+  image_url: { type: DataTypes.STRING(500) },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'product_categories' });
 
