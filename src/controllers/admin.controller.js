@@ -329,7 +329,14 @@ exports.getCustomers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search, city } = req.query;
     const where = { role: 'customer' };
-    if (search) where[Op.or] = [{ name: { [Op.like]: `%${search}%` } }, { phone: { [Op.like]: `%${search}%` } }];
+    if (search) {
+      where[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } }
+      ];
+      if (!isNaN(search)) where[Op.or].push({ id: search });
+    }
     if (city) where.city = city;
     const { count, rows } = await User.findAndCountAll({
       where,
@@ -347,12 +354,23 @@ exports.getCustomers = async (req, res) => {
 // ── ALL BOOKINGS ──────────────────────────────────────────────────────────────
 exports.getAllBookings = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, zone_id, date, gardener_id } = req.query;
+    const { page = 1, limit = 20, status, zone_id, date, gardener_id, customer_id, subscription_id, search } = req.query;
     const where = {};
     if (status) where.status = status;
     if (zone_id) where.zone_id = zone_id;
     if (date) where.scheduled_date = date;
     if (gardener_id) where.gardener_id = gardener_id;
+    if (customer_id) where.customer_id = customer_id;
+    if (subscription_id) where.subscription_id = subscription_id;
+
+    if (search) {
+      where[Op.or] = [
+        { booking_number: { [Op.like]: `%${search}%` } },
+        { '$customer.name$': { [Op.like]: `%${search}%` } },
+        { '$customer.phone$': { [Op.like]: `%${search}%` } },
+        { '$gardener.name$': { [Op.like]: `%${search}%` } }
+      ];
+    }
 
     const { count, rows } = await Booking.findAndCountAll({
       where,
@@ -363,7 +381,8 @@ exports.getAllBookings = async (req, res) => {
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
-      offset: (page - 1) * limit
+      offset: (page - 1) * limit,
+      distinct: true
     });
     res.json({ success: true, data: { bookings: rows, total: count, page: parseInt(page), pages: Math.ceil(count / limit) } });
   } catch (err) {
@@ -616,14 +635,23 @@ exports.deleteProduct = async (req, res) => {
 // Orders
 exports.getAdminOrders = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 20, search } = req.query;
     const where = {};
     if (status) where.status = status;
+    
+    if (search) {
+      where[Op.or] = [
+        { order_number: { [Op.like]: `%${search}%` } },
+        { '$customer.name$': { [Op.like]: `%${search}%` } },
+        { '$customer.phone$': { [Op.like]: `%${search}%` } }
+      ];
+      if (!isNaN(search)) where[Op.or].push({ id: search });
+    }
 
     const { count, rows } = await Order.findAndCountAll({
       where,
       include: [
-        { model: User, as: 'customer', attributes: ['name', 'phone'] },
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone'] },
         { 
           model: OrderItem, 
           as: 'items',
@@ -632,7 +660,8 @@ exports.getAdminOrders = async (req, res) => {
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
-      offset: (page - 1) * limit
+      offset: (page - 1) * limit,
+      distinct: true
     });
     res.json({ success: true, data: { orders: rows, total: count } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

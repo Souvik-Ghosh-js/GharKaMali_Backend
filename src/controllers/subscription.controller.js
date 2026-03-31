@@ -102,8 +102,16 @@ exports.cancelSubscription = async (req, res) => {
 // Admin: get all subscriptions
 exports.getAllSubscriptions = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, search } = req.query;
     const where = status ? { status } : {};
+    
+    if (search) {
+      where[Op.or] = [
+        { '$customer.name$': { [Op.like]: `%${search}%` } },
+        { '$customer.phone$': { [Op.like]: `%${search}%` } }
+      ];
+    }
+
     const { count, rows } = await Subscription.findAndCountAll({
       where,
       include: [
@@ -112,7 +120,8 @@ exports.getAllSubscriptions = async (req, res) => {
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
-      offset: (page - 1) * limit
+      offset: (page - 1) * limit,
+      distinct: true
     });
     res.json({ success: true, data: { subscriptions: rows, total: count, page: parseInt(page), pages: Math.ceil(count / limit) } });
   } catch (err) {
