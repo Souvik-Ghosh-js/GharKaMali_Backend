@@ -768,7 +768,7 @@ exports.getAdminOrders = async (req, res) => {
       attributes: {
         include: [
           [
-            sequelize.literal(`(
+            literal(`(
               SELECT COUNT(*) FROM orders AS o2 
               WHERE o2.customer_id = Order.customer_id AND o2.id <= Order.id
             )`),

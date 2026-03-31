@@ -103,6 +103,7 @@ router.post('/admin/plans', authenticate, authorize('admin'), adminCtrl.createPl
 router.put('/admin/plans/:id', authenticate, authorize('admin'), adminCtrl.updatePlan);
 
 router.get('/admin/bookings', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAllBookings);
+router.get('/admin/bookings/:id', authenticate, authorize('admin', 'supervisor'), bookingCtrl.getBookingDetail);
 router.get('/admin/subscriptions', authenticate, authorize('admin'), subscriptionCtrl.getAllSubscriptions);
 router.get('/admin/customers', authenticate, authorize('admin'), adminCtrl.getCustomers);
 
@@ -644,7 +645,7 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
       }),
       Subscription.findAll({
         where: { customer_id: req.params.id },
-        include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'duration_months'] }],
+        include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'duration_days'] }],
         order: [['created_at', 'DESC']]
       }),
       Payment.findAll({
