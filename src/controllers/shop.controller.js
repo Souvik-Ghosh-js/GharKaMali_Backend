@@ -19,7 +19,7 @@ exports.getCategories = async (req, res) => {
 // List products with filters
 exports.getProducts = async (req, res) => {
   try {
-    const { category, search, min_price, max_price, zone_id, geofence_id } = req.query;
+    const { category, search, min_price, max_price, zone_id, geofence_id, limit = 20, page = 1 } = req.query;
     const where = { is_active: true };
 
     let productMarkup = 0;
@@ -53,7 +53,9 @@ exports.getProducts = async (req, res) => {
     const items = await Product.findAll({
       where,
       include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }],
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (parseInt(page) - 1) * parseInt(limit)
     });
 
     // ── Location-based availability filter ────────────────────────────────────
