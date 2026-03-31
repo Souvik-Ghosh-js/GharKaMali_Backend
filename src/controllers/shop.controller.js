@@ -1,4 +1,4 @@
-const { Product, ProductCategory, Order, OrderItem, Payment, sequelize } = require('../models');
+const { Product, ProductCategory, Order, OrderItem, Payment, Geofence, User, sequelize } = require('../models');
 const { Op } = require('sequelize');
 
 // ─── PUBLIC SHOP ENDPOINTS ──────────────────────────────────────────────────
@@ -19,8 +19,14 @@ exports.getCategories = async (req, res) => {
 // List products with filters
 exports.getProducts = async (req, res) => {
   try {
-    const { category, search, min_price, max_price } = req.query;
+    const { category, search, min_price, max_price, zone_id, geofence_id } = req.query;
     const where = { is_active: true };
+
+    let productMarkup = 0;
+    if (zone_id) {
+      const zone = await Geofence.findByPk(zone_id);
+      if (zone) productMarkup = parseFloat(zone.product_markup) || 0;
+    }
 
     if (category) {
       const { Op: Op2 } = require('sequelize');
@@ -44,10 +50,33 @@ exports.getProducts = async (req, res) => {
       if (max_price) where.price[Op.lte] = parseFloat(max_price);
     }
 
-    const products = await Product.findAll({
+    const items = await Product.findAll({
       where,
       include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }],
       order: [['created_at', 'DESC']]
+    });
+
+    // ── Location-based availability filter ────────────────────────────────────
+    // Products with null/empty available_geofence_ids are available everywhere.
+    // Products with a list are restricted to those geofence IDs only.
+    let filteredItems = items;
+    if (geofence_id) {
+      const gfId = Number(geofence_id);
+      filteredItems = items.filter(p => {
+        const ids = p.available_geofence_ids;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) return true;
+        return ids.map(Number).includes(gfId);
+      });
+    }
+
+    const products = filteredItems.map(p => {
+      const json = p.toJSON();
+      if (productMarkup > 0) {
+        json.price = parseFloat(json.price) + productMarkup;
+        json.mrp = json.mrp ? parseFloat(json.mrp) + productMarkup : null;
+        json.location_markup = productMarkup;
+      }
+      return json;
     });
 
     res.json({ success: true, data: products });
@@ -76,10 +105,21 @@ exports.getProductDetail = async (req, res) => {
 exports.createOrder = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { items, shipping_address, shipping_city, shipping_pincode, notes } = req.body;
+    const {
+      items, shipping_address, shipping_city, shipping_pincode, notes, zone_id,
+      geofence_id,
+      // Book a Mali fields
+      book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali
+    } = req.body;
     
     if (!items || !items.length) {
       return res.status(400).json({ success: false, message: 'Cart is empty' });
+    }
+
+    let productMarkup = 0;
+    if (zone_id) {
+      const zone = await Geofence.findByPk(zone_id);
+      if (zone) productMarkup = parseFloat(zone.product_markup) || 0;
     }
 
     let totalAmount = 0;
@@ -95,13 +135,21 @@ exports.createOrder = async (req, res) => {
         throw new Error(`Insufficient stock for ${product.name}`);
       }
 
-      const itemTotal = parseFloat(product.price) * item.quantity;
+      // ── Check location-based availability ──────────────────────────────────
+      if (geofence_id && product.available_geofence_ids && Array.isArray(product.available_geofence_ids) && product.available_geofence_ids.length > 0) {
+        if (!product.available_geofence_ids.map(Number).includes(Number(geofence_id))) {
+          throw new Error(`"${product.name}" is not available for delivery in your area`);
+        }
+      }
+
+      const finalPrice = parseFloat(product.price) + productMarkup;
+      const itemTotal = finalPrice * item.quantity;
       totalAmount += itemTotal;
 
       orderItemsData.push({
         product_id: product.id,
         quantity: item.quantity,
-        price: product.price
+        price: finalPrice
       });
 
       // Optional: Decrement stock
@@ -150,15 +198,49 @@ exports.createOrder = async (req, res) => {
       });
     } catch (_) { /* Non-critical, ignore */ }
 
+    // ── Book a Mali if requested ─────────────────────────────────────────────
+    let maliBookingData = null;
+    if (book_mali) {
+      try {
+        const { Booking } = require('../models');
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const scheduledDate = scheduled_date_for_mali || tomorrow.toISOString().split('T')[0];
+        const maliAddr = service_address_for_mali || shipping_address || '';
+        const maliBooking = await Booking.create({
+          booking_number: `GKM-BKG-${Date.now()}`,
+          customer_id: req.user.id,
+          zone_id: zone_id_for_mali || null,
+          booking_type: 'ondemand',
+          status: 'pending',
+          scheduled_date: scheduledDate,
+          service_address: maliAddr,
+          service_latitude: 0,
+          service_longitude: 0,
+          total_amount: 0,
+          customer_notes: `Booked alongside shop order ${orderNumber}. Please contact customer to confirm visit details.`
+        });
+        maliBookingData = {
+          booking_number: maliBooking.booking_number,
+          scheduled_date: scheduledDate,
+          status: 'pending',
+          message: 'Your mali booking is confirmed! We will contact you to schedule the exact visit time.'
+        };
+      } catch (_) { /* Non-critical */ }
+    }
+
     return res.json({
       success: true,
-      message: 'Order placed successfully! Payment confirmed.',
+      message: book_mali
+        ? 'Order placed & Mali booked! Our gardener will contact you soon.'
+        : 'Order placed successfully! Payment confirmed.',
       data: {
         order_number: order.order_number,
         order_id: order.id,
         total_amount: totalAmount,
         payment_status: 'paid',
-        txnid
+        txnid,
+        mali_booking: maliBookingData
       }
     });
 

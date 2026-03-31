@@ -67,6 +67,7 @@ const ServiceZone = sequelize.define('ServiceZone', {
   base_price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
+  product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   description: { type: DataTypes.TEXT }
 }, { tableName: 'service_zones' });
 
@@ -367,6 +368,7 @@ const Geofence = sequelize.define('Geofence', {
   base_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
+  product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   created_by: { type: DataTypes.INTEGER }
 }, { tableName: 'geofences', underscored: true });
 
@@ -398,7 +400,8 @@ const Product = sequelize.define('Product', {
   rating: { type: DataTypes.DECIMAL(3, 2), defaultValue: 0 },
   review_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
-  tags: { type: DataTypes.JSON } // Array of string tags for search/filtering
+  tags: { type: DataTypes.JSON }, // Array of string tags for search/filtering
+  available_geofence_ids: { type: DataTypes.JSON, defaultValue: null } // null = available everywhere; array of geofence IDs = restricted
 }, { tableName: 'products' });
 
 // ─── ORDER ────────────────────────────────────────────────────────────────────

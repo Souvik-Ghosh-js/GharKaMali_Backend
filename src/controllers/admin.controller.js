@@ -53,10 +53,17 @@ exports.getAnalytics = async (req, res) => {
     const bookingWhere = { created_at: { [Op.gte]: since } };
     if (zone_id) bookingWhere.zone_id = zone_id;
 
-    // Revenue by day
+    // Revenue by day (with booking count)
     const revenueByDay = await db.query(`
       SELECT DATE(created_at) as date, SUM(total_amount) as revenue, COUNT(*) as bookings
       FROM bookings WHERE status='completed' AND created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
+      GROUP BY DATE(created_at) ORDER BY date ASC
+    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+
+    // Bookings by day (all statuses, for volume chart)
+    const bookingsByDay = await db.query(`
+      SELECT DATE(created_at) as date, COUNT(*) as count
+      FROM bookings WHERE created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
       GROUP BY DATE(created_at) ORDER BY date ASC
     `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
 
@@ -119,17 +126,101 @@ exports.getAnalytics = async (req, res) => {
       WHERE b.rating IS NOT NULL GROUP BY b.zone_id
     `, { type: db.QueryTypes.SELECT });
 
+    // ── NEW: Completion rate & avg rating ─────────────────────────────────
+    const completionStats = await db.query(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed
+      FROM bookings WHERE created_at >= :since
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    const avgRatingRow = await db.query(`
+      SELECT AVG(rating) as avg_rating FROM bookings
+      WHERE rating IS NOT NULL AND created_at >= :since
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    const completionRate = completionStats[0]?.total > 0
+      ? parseFloat(((completionStats[0].completed / completionStats[0].total) * 100).toFixed(1))
+      : 0;
+
+    // ── NEW: Shop order analytics ──────────────────────────────────────────
+    const shopOrdersStats = await db.query(`
+      SELECT
+        COUNT(*) as total_orders,
+        COALESCE(SUM(total_amount), 0) as total_revenue,
+        COALESCE(AVG(total_amount), 0) as avg_order_value,
+        SUM(CASE WHEN status='delivered'   THEN 1 ELSE 0 END) as delivered_orders,
+        SUM(CASE WHEN status='cancelled'   THEN 1 ELSE 0 END) as cancelled_orders,
+        SUM(CASE WHEN status='processing'  THEN 1 ELSE 0 END) as processing_orders,
+        SUM(CASE WHEN status='shipped'     THEN 1 ELSE 0 END) as shipped_orders,
+        SUM(CASE WHEN status='pending'     THEN 1 ELSE 0 END) as pending_orders
+      FROM orders WHERE created_at >= :since
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    // ── NEW: Top selling products ──────────────────────────────────────────
+    const topProducts = await db.query(`
+      SELECT p.name, p.icon_key,
+        SUM(oi.quantity) as total_sold,
+        SUM(oi.price * oi.quantity) as revenue
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.created_at >= :since AND o.payment_status = 'paid'
+      GROUP BY oi.product_id ORDER BY total_sold DESC LIMIT 10
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    // ── NEW: Active subscriptions by plan ──────────────────────────────────
+    const subscriptionsByPlan = await db.query(`
+      SELECT sp.name, sp.price,
+        COUNT(s.id) as active_count,
+        SUM(s.amount_paid) as total_revenue
+      FROM subscriptions s
+      JOIN service_plans sp ON s.plan_id = sp.id
+      WHERE s.status = 'active'
+      GROUP BY s.plan_id ORDER BY active_count DESC
+    `, { type: db.QueryTypes.SELECT });
+
+    // ── NEW: Revenue breakdown ─────────────────────────────────────────────
+    const revenueBreakdown = await db.query(`
+      SELECT
+        (SELECT COALESCE(SUM(total_amount), 0) FROM bookings
+          WHERE status='completed' AND created_at >= :since) as booking_revenue,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM orders
+          WHERE payment_status='paid' AND created_at >= :since) as shop_revenue,
+        (SELECT COALESCE(SUM(amount_paid), 0) FROM subscriptions
+          WHERE created_at >= :since) as subscription_revenue
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    // ── NEW: Active counts ─────────────────────────────────────────────────
+    const activeGardeners = await db.query(`
+      SELECT COUNT(*) as count FROM users WHERE role='gardener' AND is_active=1 AND is_approved=1
+    `, { type: db.QueryTypes.SELECT });
+
+    const activeSubscriptions = await db.query(`
+      SELECT COUNT(*) as count FROM subscriptions WHERE status='active'
+    `, { type: db.QueryTypes.SELECT });
+
     res.json({
       success: true, data: {
-        revenueByDay, bookingsByZone, bookingsByCity, customerLocations,
+        revenueByDay, bookingsByDay, bookingsByZone, bookingsByCity, customerLocations,
         bookingStatusDist, planDist, topGardeners, newUsersTrend,
-        repeatCustomers: repeatCustomers[0]?.count || 0, ratingByZone
+        repeatCustomers: repeatCustomers[0]?.count || 0, ratingByZone,
+        // ── New fields ──────────────────────────────────────────────────────
+        completionRate,
+        avgRating: avgRatingRow[0]?.avg_rating || null,
+        shopOrdersStats: shopOrdersStats[0] || {},
+        topProducts,
+        subscriptionsByPlan,
+        revenueBreakdown: revenueBreakdown[0] || {},
+        activeGardeners: activeGardeners[0]?.count || 0,
+        activeSubscriptions: activeSubscriptions[0]?.count || 0,
       }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 // ── GARDENER MANAGEMENT ───────────────────────────────────────────────────────
 exports.getGardeners = async (req, res) => {
@@ -375,9 +466,10 @@ exports.getAllBookings = async (req, res) => {
     const { count, rows } = await Booking.findAndCountAll({
       where,
       include: [
-        { model: User, as: 'customer', attributes: ['id', 'name', 'phone'] },
-        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone'] },
-        { model: ServiceZone, as: 'zone', attributes: ['name', 'city'] }
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image', 'city', 'address'] },
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'] },
+        { model: ServiceZone, as: 'zone', attributes: ['id', 'name', 'city', 'center_latitude', 'center_longitude'] },
+        { model: Subscription, as: 'subscription', include: [{ model: ServicePlan, as: 'plan', attributes: ['name'] }] }
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
@@ -499,6 +591,22 @@ exports.getUtilizationReport = async (req, res) => {
 };
 
 // ── GEOFENCE MANAGEMENT ───────────────────────────────────────────────────────
+exports.updateGardener = async (req, res) => {
+  try {
+    const { supervisor_id, is_active } = req.body;
+    const gardener = await User.findByPk(req.params.id);
+    if (!gardener || gardener.role !== 'gardener') return res.status(404).json({ success: false, message: 'Gardener not found' });
+    
+    if (is_active !== undefined) await gardener.update({ is_active });
+    
+    if (supervisor_id !== undefined) {
+      await GardenerProfile.update({ supervisor_id: supervisor_id || null }, { where: { user_id: gardener.id } });
+    }
+    
+    res.json({ success: true, message: 'Gardener updated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
 exports.getGeofences = async (req, res) => {
   try {
     const { Geofence } = require('../models');
@@ -512,7 +620,7 @@ exports.getGeofences = async (req, res) => {
 exports.createGeofence = async (req, res) => {
   try {
     const { Geofence } = require('../models');
-    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants } = req.body;
+    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup } = req.body;
     if (!polygon_coords || !Array.isArray(polygon_coords) || polygon_coords.length < 3) {
       return res.status(400).json({ success: false, message: 'polygon_coords must be an array of at least 3 [lat, lng] points' });
     }
@@ -523,6 +631,7 @@ exports.createGeofence = async (req, res) => {
       base_price: parseFloat(base_price) || 0,
       price_per_plant: parseFloat(price_per_plant) || 0,
       min_plants: parseInt(min_plants) || 1,
+      product_markup: parseFloat(product_markup) || 0,
       created_by: req.user.id
     });
     res.status(201).json({ success: true, data: geofence });
@@ -536,7 +645,7 @@ exports.updateGeofence = async (req, res) => {
     const { Geofence } = require('../models');
     const geofence = await Geofence.findByPk(req.params.id);
     if (!geofence) return res.status(404).json({ success: false, message: 'Geofence not found' });
-    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants } = req.body;
+    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (city !== undefined) updates.city = city;
@@ -545,6 +654,7 @@ exports.updateGeofence = async (req, res) => {
     if (base_price !== undefined) updates.base_price = parseFloat(base_price) || 0;
     if (price_per_plant !== undefined) updates.price_per_plant = parseFloat(price_per_plant) || 0;
     if (min_plants !== undefined) updates.min_plants = parseInt(min_plants) || 1;
+    if (product_markup !== undefined) updates.product_markup = parseFloat(product_markup) || 0;
     if (polygon_coords && Array.isArray(polygon_coords) && polygon_coords.length >= 3) {
       updates.polygon_coords = JSON.stringify(polygon_coords);
     }
@@ -655,12 +765,23 @@ exports.getAdminOrders = async (req, res) => {
 
     const { count, rows } = await Order.findAndCountAll({
       where,
+      attributes: {
+        include: [
+          [
+            sequelize.literal(`(
+              SELECT COUNT(*) FROM orders AS o2 
+              WHERE o2.customer_id = Order.customer_id AND o2.id <= Order.id
+            )`),
+            'order_sequence'
+          ]
+        ]
+      },
       include: [
-        { model: User, as: 'customer', attributes: ['id', 'name', 'phone'] },
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'city', 'address'] },
         { 
           model: OrderItem, 
           as: 'items',
-          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key'] }]
+          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key', 'price', 'mrp'] }]
         }
       ],
       order: [['created_at', 'DESC']],

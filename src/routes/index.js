@@ -79,6 +79,7 @@ router.get('/admin/dashboard', authenticate, authorize('admin'), adminCtrl.getDa
 router.get('/admin/analytics', authenticate, authorize('admin'), adminCtrl.getAnalytics);
 
 router.get('/admin/gardeners', authenticate, authorize('admin', 'supervisor'), adminCtrl.getGardeners);
+router.put('/admin/gardeners/:id', authenticate, authorize('admin'), adminCtrl.updateGardener);
 router.post('/admin/gardeners/approve', authenticate, authorize('admin'), adminCtrl.approveGardener);
 router.post('/admin/gardeners/reject', authenticate, authorize('admin'), adminCtrl.rejectGardener);
 router.delete('/admin/gardeners/:id', authenticate, authorize('admin'), adminCtrl.deleteGardener);
