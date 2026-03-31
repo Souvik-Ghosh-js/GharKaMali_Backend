@@ -32,7 +32,10 @@ exports.getProducts = async (req, res) => {
     }
 
     if (search) {
-      where.name = { [Op.like]: `%${search}%` };
+      where[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { tags: { [Op.like]: `%${search}%` } }
+      ];
     }
 
     if (min_price || max_price) {

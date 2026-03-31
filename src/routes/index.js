@@ -8,6 +8,7 @@ const subscriptionCtrl = require('../controllers/subscription.controller');
 const adminCtrl = require('../controllers/admin.controller');
 const contentCtrl = require('../controllers/content.controller');
 const shopCtrl = require('../controllers/shop.controller');
+const taglineCtrl = require('../controllers/tagline.controller');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 router.post('/auth/send-otp', authCtrl.sendOtp);
@@ -127,8 +128,15 @@ router.post('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.
 router.put('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.updateProduct);
 router.delete('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.deleteProduct);
 
-router.get('/admin/shop/orders', authenticate, authorize('admin'), adminCtrl.getAdminOrders);
-router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin'), adminCtrl.updateOrderStatus);
+router.get('/admin/shop/orders', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAdminOrders);
+router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin', 'supervisor'), adminCtrl.updateOrderStatus);
+
+// ─── TAGLINES ────────────────────────────────────────────────────────────────
+router.get('/taglines', taglineCtrl.getActiveTaglines);
+router.get('/admin/taglines', authenticate, authorize('admin'), taglineCtrl.getAdminTaglines);
+router.post('/admin/taglines', authenticate, authorize('admin'), taglineCtrl.createTagline);
+router.put('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.updateTagline);
+router.delete('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.deleteTagline);
 
 
 module.exports = router;

@@ -396,7 +396,8 @@ const Product = sequelize.define('Product', {
   badge: { type: DataTypes.STRING(50) }, // e.g., 'Bestseller', 'New'
   rating: { type: DataTypes.DECIMAL(3, 2), defaultValue: 0 },
   review_count: { type: DataTypes.INTEGER, defaultValue: 0 },
-  is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  tags: { type: DataTypes.JSON } // Array of string tags for search/filtering
 }, { tableName: 'products' });
 
 // ─── ORDER ────────────────────────────────────────────────────────────────────
@@ -419,12 +420,16 @@ const Order = sequelize.define('Order', {
 
 // ─── ORDER ITEM ───────────────────────────────────────────────────────────────
 const OrderItem = sequelize.define('OrderItem', {
-  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  order_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'orders', key: 'id' } },
-  product_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'products', key: 'id' } },
-  quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
-  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false } // Price at the time of order
 }, { tableName: 'order_items' });
+
+// ─── TAGLINE ──────────────────────────────────────────────────────────────────
+const Tagline = sequelize.define('Tagline', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  text: { type: DataTypes.TEXT, allowNull: false },
+  image_url: { type: DataTypes.STRING(500) },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  display_order: { type: DataTypes.INTEGER, defaultValue: 0 }
+}, { tableName: 'taglines', underscored: true });
 
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
@@ -505,6 +510,7 @@ module.exports = {
   Blog,
   CityPage,
   Payment,
-  PriceHikeLog
+  PriceHikeLog,
+  Tagline
 };
 

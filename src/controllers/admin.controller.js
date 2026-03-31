@@ -640,12 +640,17 @@ exports.getAdminOrders = async (req, res) => {
     if (status) where.status = status;
     
     if (search) {
-      where[Op.or] = [
+      const searchConditions = [
         { order_number: { [Op.like]: `%${search}%` } },
         { '$customer.name$': { [Op.like]: `%${search}%` } },
         { '$customer.phone$': { [Op.like]: `%${search}%` } }
       ];
-      if (!isNaN(search)) where[Op.or].push({ id: search });
+      // Only search by ID if it's a reasonably small positive integer
+      const searchId = parseInt(search);
+      if (!isNaN(searchId) && searchId > 0 && searchId < 2147483647) {
+        searchConditions.push({ id: searchId });
+      }
+      where[Op.or] = searchConditions;
     }
 
     const { count, rows } = await Order.findAndCountAll({
