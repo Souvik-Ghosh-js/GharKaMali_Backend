@@ -20,7 +20,7 @@ cron.schedule('0 0 * * *', async () => {
       if (customer) {
         await sendWhatsApp(
           customer.phone,
-          `🌿 *Ghar Ka Mali*\nHi ${customer.name}! Your subscription has expired. Renew to continue enjoying our services! 🌱`
+          `🌿 *GharKaMali*\nHi ${customer.name}! Your subscription has expired. Renew to continue enjoying our services! 🌱`
         );
       }
     }
@@ -112,7 +112,7 @@ cron.schedule('0 20 * * *', async () => {
       if (b.customer) {
         await sendWhatsApp(
           b.customer.phone,
-          `🌿 *Ghar Ka Mali*\nReminder: Your garden visit is tomorrow (${tomorrow}). Gardener: ${b.gardener?.name || 'being assigned'}. Be available to share OTP! 🌱`
+          `🌿 *GharKaMali*\nReminder: Your garden visit is tomorrow (${tomorrow}). Gardener: ${b.gardener?.name || 'being assigned'}. Be available to share OTP! 🌱`
         );
       }
     }
@@ -211,7 +211,7 @@ cron.schedule('*/30 * * * *', async () => {
         if (customer) {
           await sendWhatsApp(
             customer.phone,
-            `🌿 *Ghar Ka Mali*\nYour gardener has been reassigned for booking ${booking.booking_number}. New gardener will arrive as scheduled. 🌱`
+            `🌿 *GharKaMali*\nYour gardener has been reassigned for booking ${booking.booking_number}. New gardener will arrive as scheduled. 🌱`
           );
         }
       }
@@ -242,13 +242,13 @@ cron.schedule('0 * * * *', async () => {
       if (customer) {
         await sendWhatsApp(
           customer.phone,
-          `⚠️ *Ghar Ka Mali*\nYour gardener waited at your location for ${booking.booking_number} but couldn't start the visit. Please reschedule or contact support.`
+          `⚠️ *GharKaMali*\nYour gardener waited at your location for ${booking.booking_number} but couldn't start the visit. Please reschedule or contact support.`
         );
       }
       if (gardener) {
         await sendWhatsApp(
           gardener.phone,
-          `ℹ️ *Ghar Ka Mali*\nBooking ${booking.booking_number} has been marked as failed as OTP was not verified within 45 minutes.`
+          `ℹ️ *GharKaMali*\nBooking ${booking.booking_number} has been marked as failed as OTP was not verified within 45 minutes.`
         );
       }
     }
@@ -297,7 +297,7 @@ cron.schedule('0 * * * *', async () => {
               const sup = await User.findByPk(profile.supervisor_id);
               if (sup) {
                 await sendWhatsApp(sup.phone,
-                  `🚨 *SLA Breach — Ghar Ka Mali*\nBooking ${b.booking_number} is ${delayMins} minutes late.\nGardener: ${b.gardener?.name || 'Unknown'}\nCustomer: ${b.customer?.name || 'Unknown'}\nPlease investigate immediately.`
+                  `🚨 *SLA Breach — GharKaMali*\nBooking ${b.booking_number} is ${delayMins} minutes late.\nGardener: ${b.gardener?.name || 'Unknown'}\nCustomer: ${b.customer?.name || 'Unknown'}\nPlease investigate immediately.`
                 );
                 await breach.update({ supervisor_notified: true });
               }

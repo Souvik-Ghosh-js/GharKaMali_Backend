@@ -80,7 +80,7 @@ sequelize.authenticate()
   .then(() => {
     require('./services/cron.service');
     server.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Ghar Ka Mali API running on port ${PORT}`);
+      console.log(`🚀 GharKaMali API running on port ${PORT}`);
       console.log(`📚 Swagger docs: http://localhost:${PORT}/api-docs`);
     });
   })

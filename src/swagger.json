@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Ghar Ka Mali API",
+    "title": "GharKaMali API",
     "version": "2.1.0",
     "description": "Complete gardening platform API \u2014 Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` \u2192 `POST /auth/verify-otp` \u2192 use returned `token` as `Bearer <token>`",
     "x-frontend-notes": {

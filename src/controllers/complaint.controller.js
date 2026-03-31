@@ -34,7 +34,7 @@ exports.raiseComplaint = async (req, res) => {
         if (supervisor) {
           await sendWhatsApp(
             supervisor.phone,
-            `⚠️ *Ghar Ka Mali — New Complaint*\nComplaint #${complaint.id} assigned to you.\nType: ${type}\nPriority: ${priority || 'medium'}\nPlease review and resolve in the admin panel.`
+            `⚠️ *GharKaMali — New Complaint*\nComplaint #${complaint.id} assigned to you.\nType: ${type}\nPriority: ${priority || 'medium'}\nPlease review and resolve in the admin panel.`
           );
         }
       }
@@ -44,7 +44,7 @@ exports.raiseComplaint = async (req, res) => {
     if (customer) {
       await sendWhatsApp(
         customer.phone,
-        `✅ *Ghar Ka Mali*\nYour complaint #${complaint.id} has been registered. Our team will review and respond within 24 hours.`
+        `✅ *GharKaMali*\nYour complaint #${complaint.id} has been registered. Our team will review and respond within 24 hours.`
       );
     }
 
@@ -123,7 +123,7 @@ exports.updateComplaint = async (req, res) => {
       if (customer) {
         await sendWhatsApp(
           customer.phone,
-          `✅ *Ghar Ka Mali*\nYour complaint #${complaint.id} has been resolved.\n${resolution_notes ? `Resolution: ${resolution_notes}` : 'Our team has addressed your concern.'}\nThank you for your patience.`
+          `✅ *GharKaMali*\nYour complaint #${complaint.id} has been resolved.\n${resolution_notes ? `Resolution: ${resolution_notes}` : 'Our team has addressed your concern.'}\nThank you for your patience.`
         );
       }
 
@@ -148,7 +148,7 @@ exports.updateComplaint = async (req, res) => {
       if (supervisor) {
         await sendWhatsApp(
           supervisor.phone,
-          `📋 *Ghar Ka Mali*\nComplaint #${complaint.id} has been assigned to you for review. Please address within 24 hours.`
+          `📋 *GharKaMali*\nComplaint #${complaint.id} has been assigned to you for review. Please address within 24 hours.`
         );
       }
     }

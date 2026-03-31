@@ -173,8 +173,8 @@ async function seed() {
       {
         city_name: 'Delhi', slug: 'delhi', state: 'Delhi',
         hero_title: 'Professional Gardening Services in Delhi',
-        hero_description: 'Ghar Ka Mali brings expert gardeners to your doorstep in Delhi. Subscription plans starting ₹999/month.',
-        seo_title: 'Best Gardening Services in Delhi | Ghar Ka Mali',
+        hero_description: 'GharKaMali brings expert gardeners to your doorstep in Delhi. Subscription plans starting ₹999/month.',
+        seo_title: 'Best Gardening Services in Delhi | GharKaMali',
         seo_description: 'Hire professional gardeners in Delhi for terrace gardens, balcony plants, and lawn care. Book online, track in real-time.',
         content: '<h2>Gardening Services in Delhi</h2><p>Delhi\'s climate is perfect for a wide variety of plants. Our trained gardeners cover South Delhi, Noida, Gurugram, and nearby areas.</p>',
         total_gardeners: 2
@@ -183,7 +183,7 @@ async function seed() {
         city_name: 'Mumbai', slug: 'mumbai', state: 'Maharashtra',
         hero_title: 'Professional Gardening Services in Mumbai',
         hero_description: 'Expert gardeners in Mumbai for balcony gardens, terrace farming, and indoor plant care. Starting ₹399/visit.',
-        seo_title: 'Best Gardening Services in Mumbai | Ghar Ka Mali',
+        seo_title: 'Best Gardening Services in Mumbai | GharKaMali',
         seo_description: 'Professional gardeners in Mumbai — Bandra, Andheri, Powai, Thane. Subscription plans and on-demand visits.',
         content: '<h2>Gardening Services in Mumbai</h2><p>Mumbai\'s tropical climate is ideal for lush balcony gardens. Our gardeners are trained in humidity management and salt-air plant care.</p>',
         total_gardeners: 1
@@ -191,8 +191,8 @@ async function seed() {
       {
         city_name: 'Bangalore', slug: 'bangalore', state: 'Karnataka',
         hero_title: 'Professional Gardening Services in Bangalore',
-        hero_description: 'Ghar Ka Mali brings certified gardeners to Bangalore. Perfect weather, perfect gardens.',
-        seo_title: 'Best Gardening Services in Bangalore | Ghar Ka Mali',
+        hero_description: 'GharKaMali brings certified gardeners to Bangalore. Perfect weather, perfect gardens.',
+        seo_title: 'Best Gardening Services in Bangalore | GharKaMali',
         seo_description: 'Hire expert gardeners in Bangalore — Koramangala, Indiranagar, Whitefield. On-demand and subscription plans.',
         content: '<h2>Gardening Services in Bangalore</h2><p>Bangalore\'s year-round mild climate makes it ideal for gardening. Our experts help you grow everything from succulents to vegetable patches.</p>',
         total_gardeners: 0
@@ -201,7 +201,7 @@ async function seed() {
         city_name: 'Hyderabad', slug: 'hyderabad', state: 'Telangana',
         hero_title: 'Professional Gardening Services in Hyderabad',
         hero_description: 'Expert plant care and garden maintenance across Hyderabad. Book your gardener today.',
-        seo_title: 'Best Gardening Services in Hyderabad | Ghar Ka Mali',
+        seo_title: 'Best Gardening Services in Hyderabad | GharKaMali',
         seo_description: 'Trusted gardeners in Hyderabad — Banjara Hills, Jubilee Hills, Gachibowli. Affordable subscription plans.',
         content: '<h2>Gardening Services in Hyderabad</h2><p>Hyderabad\'s semi-arid climate needs expert watering schedules and drought-resistant plants. Our gardeners specialize in water-efficient gardens.</p>',
         total_gardeners: 0
@@ -210,7 +210,7 @@ async function seed() {
         city_name: 'Kolkata', slug: 'kolkata', state: 'West Bengal',
         hero_title: 'Professional Gardening Services in Kolkata',
         hero_description: 'Trained gardeners in Kolkata for terrace gardens, indoor plants, and lawn maintenance.',
-        seo_title: 'Best Gardening Services in Kolkata | Ghar Ka Mali',
+        seo_title: 'Best Gardening Services in Kolkata | GharKaMali',
         seo_description: 'Book expert gardeners in Kolkata — Salt Lake, New Town, Ballygunge. Affordable monthly plans.',
         content: '<h2>Gardening Services in Kolkata</h2><p>Kolkata\'s humid tropical climate supports lush greenery. Our gardeners are experts in monsoon plant care and post-rain recovery.</p>',
         total_gardeners: 0
@@ -233,8 +233,8 @@ async function seed() {
         author_id: admin.id,
         status: 'published',
         city_slug: 'delhi',
-        seo_title: '10 Best Plants for Delhi Balcony Garden | Ghar Ka Mali',
-        seo_description: 'Discover the top 10 plants perfect for Delhi\'s climate — from money plants to bougainvillea. Expert tips from Ghar Ka Mali.',
+        seo_title: '10 Best Plants for Delhi Balcony Garden | GharKaMali',
+        seo_description: 'Discover the top 10 plants perfect for Delhi\'s climate — from money plants to bougainvillea. Expert tips from GharKaMali.',
         published_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 7 days ago
       },
       {
@@ -247,7 +247,7 @@ async function seed() {
         author_id: admin.id,
         status: 'published',
         city_slug: 'mumbai',
-        seo_title: 'Watering Plants in Mumbai Monsoon | Ghar Ka Mali',
+        seo_title: 'Watering Plants in Mumbai Monsoon | GharKaMali',
         seo_description: 'Protect your Mumbai garden during monsoon. Expert advice on drainage, waterlogging, and fungal prevention.',
         published_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
       },
@@ -260,7 +260,7 @@ async function seed() {
         tags: ['terrace-farming', 'vegetables', 'organic', 'urban-gardening'],
         author_id: admin.id,
         status: 'published',
-        seo_title: 'Complete Guide to Terrace Farming in India | Ghar Ka Mali',
+        seo_title: 'Complete Guide to Terrace Farming in India | GharKaMali',
         seo_description: 'Step-by-step guide to growing vegetables on your Indian city terrace. Soil, containers, crops, and seasonal planning.',
         published_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) // 1 day ago
       }

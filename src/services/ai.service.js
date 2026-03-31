@@ -2,7 +2,7 @@ const path = require('path');
 const sharp = require('sharp');
 
 /**
- * Ghar Ka Mali - Embedded Botanical Vision Engine
+ * GharKaMali - Embedded Botanical Vision Engine
  * 100% Local, Offline System for Plant Identification.
  * Uses Signature-based Matching (Color + Texture Analysis) via Sharp.
  */

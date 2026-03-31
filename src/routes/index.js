@@ -608,7 +608,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
 
     // Notify new gardener via WhatsApp
     const { sendWhatsApp } = require('../services/otp.service');
-    await sendWhatsApp(gardener.phone, `🌿 *Ghar Ka Mali*\nHello ${gardener.name}, a booking (${booking.booking_number}) has been assigned to you for ${booking.scheduled_date} at ${booking.scheduled_time || 'morning'}. Please check your app.`);
+    await sendWhatsApp(gardener.phone, `🌿 *GharKaMali*\nHello ${gardener.name}, a booking (${booking.booking_number}) has been assigned to you for ${booking.scheduled_date} at ${booking.scheduled_time || 'morning'}. Please check your app.`);
 
     res.json({ success: true, message: `Booking reassigned to ${gardener.name}`, data: { booking_id: booking.id, old_gardener_id: oldGardenerId, new_gardener_id: gardener_id } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

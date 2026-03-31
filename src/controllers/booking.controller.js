@@ -133,7 +133,7 @@ exports.verifyVisitOtp = async (req, res) => {
     await booking.update({ otp_verified: true, otp_verified_at: new Date(), status: 'in_progress', started_at: new Date() });
 
     const customer = await User.findByPk(booking.customer_id);
-    await sendWhatsApp(customer.phone, `🌿 *Ghar Ka Mali*\nYour garden service has started! Estimated completion: 1-2 hours.`);
+    await sendWhatsApp(customer.phone, `🌿 *GharKaMali*\nYour garden service has started! Estimated completion: 1-2 hours.`);
 
     res.json({ success: true, message: 'Visit started', data: booking });
   } catch (err) {
@@ -154,7 +154,7 @@ exports.updateBookingStatus = async (req, res) => {
       await booking.update({ status: 'failed', gardener_notes: gardener_notes || 'Customer unavailable' });
       const customer = await User.findByPk(booking.customer_id);
       if (customer) {
-        await sendWhatsApp(customer.phone, `⚠️ *Ghar Ka Mali*\nYour gardener arrived for booking ${booking.booking_number} but couldn't reach you. The visit has been marked failed. Please reschedule or contact support.`);
+        await sendWhatsApp(customer.phone, `⚠️ *GharKaMali*\nYour gardener arrived for booking ${booking.booking_number} but couldn't reach you. The visit has been marked failed. Please reschedule or contact support.`);
       }
       return res.json({ success: true, message: 'Booking marked as failed', data: booking });
     }

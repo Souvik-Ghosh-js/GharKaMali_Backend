@@ -46,22 +46,22 @@ const sendWhatsApp = async (phone, message) => {
 // WhatsApp message templates
 const templates = {
   bookingConfirmed: (name, date, time) =>
-    `🌿 *Ghar Ka Mali*\nHello ${name}! Your garden visit is confirmed for *${date}* at *${time}*. Our gardener is on the way! 🌱`,
+    `🌿 *GharKaMali*\nHello ${name}! Your garden visit is confirmed for *${date}* at *${time}*. Our gardener is on the way! 🌱`,
 
   gardenerEnRoute: (name, gardenerName, eta) =>
-    `🚶 *Ghar Ka Mali*\nHi ${name}! Your gardener *${gardenerName}* is on the way. Expected arrival: *${eta} minutes*. Share OTP when they arrive.`,
+    `🚶 *GharKaMali*\nHi ${name}! Your gardener *${gardenerName}* is on the way. Expected arrival: *${eta} minutes*. Share OTP when they arrive.`,
 
   gardenerArrived: (name, otp) =>
-    `✅ *Ghar Ka Mali*\nHi ${name}! Your gardener has arrived. Your OTP is *${otp}*. Please share it to start the service.`,
+    `✅ *GharKaMali*\nHi ${name}! Your gardener has arrived. Your OTP is *${otp}*. Please share it to start the service.`,
 
   visitCompleted: (name, amount) =>
-    `🎉 *Ghar Ka Mali*\nThank you ${name}! Your garden visit is complete. Total: ₹${amount}. Rate your experience in the app!`,
+    `🎉 *GharKaMali*\nThank you ${name}! Your garden visit is complete. Total: ₹${amount}. Rate your experience in the app!`,
 
   subscriptionRenewed: (name, planName, endDate) =>
-    `🔄 *Ghar Ka Mali*\nHi ${name}! Your *${planName}* subscription has been renewed until *${endDate}*. Happy gardening! 🌺`,
+    `🔄 *GharKaMali*\nHi ${name}! Your *${planName}* subscription has been renewed until *${endDate}*. Happy gardening! 🌺`,
 
   welcomeGardener: (name) =>
-    `🌿 *Ghar Ka Mali*\nWelcome ${name}! Your account has been approved. Start accepting jobs from the Gardener App!`
+    `🌿 *GharKaMali*\nWelcome ${name}! Your account has been approved. Start accepting jobs from the Gardener App!`
 };
 
 module.exports = { generateOTP, sendOTP, sendWhatsApp, templates };
