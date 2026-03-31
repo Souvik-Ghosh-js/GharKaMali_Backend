@@ -689,14 +689,22 @@ exports.getAdminCategories = async (req, res) => {
 
 exports.createCategory = async (req, res) => {
   try {
-    const category = await ProductCategory.create(req.body);
+    const data = { ...req.body };
+    if (req.file) {
+      data.image_url = `/uploads/shop/${req.file.filename}`;
+    }
+    const category = await ProductCategory.create(data);
     res.status(201).json({ success: true, data: category });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
 exports.updateCategory = async (req, res) => {
   try {
-    await ProductCategory.update(req.body, { where: { id: req.params.id } });
+    const data = { ...req.body };
+    if (req.file) {
+      data.image_url = `/uploads/shop/${req.file.filename}`;
+    }
+    await ProductCategory.update(data, { where: { id: req.params.id } });
     const category = await ProductCategory.findByPk(req.params.id);
     res.json({ success: true, data: category });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -722,14 +730,22 @@ exports.getAdminProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    const data = { ...req.body };
+    if (req.file) {
+      data.images = [`/uploads/shop/${req.file.filename}`];
+    }
+    const product = await Product.create(data);
     res.status(201).json({ success: true, data: product });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
 exports.updateProduct = async (req, res) => {
   try {
-    await Product.update(req.body, { where: { id: req.params.id } });
+    const data = { ...req.body };
+    if (req.file) {
+      data.images = [`/uploads/shop/${req.file.filename}`];
+    }
+    await Product.update(data, { where: { id: req.params.id } });
     const product = await Product.findByPk(req.params.id);
     res.json({ success: true, data: product });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

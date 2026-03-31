@@ -27,5 +27,6 @@ const uploadWorkProof = multer({ storage: createStorage('work-proof'), fileFilte
 const uploadPlant = multer({ storage: createStorage('plants'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 const uploadBlog = multer({ storage: createStorage('blogs'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 const uploadIdProof = multer({ storage: createStorage('id-proofs'), fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadShop = multer({ storage: createStorage('shop'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
-module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof };
+module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadIdProof, uploadBlog, uploadShop };

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof } = require('../middleware/upload');
+const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof, uploadShop } = require('../middleware/upload');
 const authCtrl = require('../controllers/auth.controller');
 const bookingCtrl = require('../controllers/booking.controller');
 const subscriptionCtrl = require('../controllers/subscription.controller');
@@ -121,13 +121,13 @@ router.get('/admin/plants/history', authenticate, authorize('admin'), contentCtr
 
 // Admin Shop Management
 router.get('/admin/shop/categories', authenticate, authorize('admin'), adminCtrl.getAdminCategories);
-router.post('/admin/shop/categories', authenticate, authorize('admin'), adminCtrl.createCategory);
-router.put('/admin/shop/categories/:id', authenticate, authorize('admin'), adminCtrl.updateCategory);
+router.post('/admin/shop/categories', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.createCategory);
+router.put('/admin/shop/categories/:id', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.updateCategory);
 router.delete('/admin/shop/categories/:id', authenticate, authorize('admin'), adminCtrl.deleteCategory);
 
 router.get('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.getAdminProducts);
-router.post('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.createProduct);
-router.put('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.updateProduct);
+router.post('/admin/shop/products', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.createProduct);
+router.put('/admin/shop/products/:id', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.updateProduct);
 router.delete('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.deleteProduct);
 
 router.get('/admin/shop/orders', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAdminOrders);
@@ -136,8 +136,8 @@ router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin', 'su
 // ─── TAGLINES ────────────────────────────────────────────────────────────────
 router.get('/taglines', taglineCtrl.getActiveTaglines);
 router.get('/admin/taglines', authenticate, authorize('admin'), taglineCtrl.getAdminTaglines);
-router.post('/admin/taglines', authenticate, authorize('admin'), taglineCtrl.createTagline);
-router.put('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.updateTagline);
+router.post('/admin/taglines', authenticate, authorize('admin'), uploadShop.single('image'), taglineCtrl.createTagline);
+router.put('/admin/taglines/:id', authenticate, authorize('admin'), uploadShop.single('image'), taglineCtrl.updateTagline);
 router.delete('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.deleteTagline);
 
 

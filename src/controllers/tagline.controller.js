@@ -15,8 +15,13 @@ exports.getAdminTaglines = async (req, res) => {
 // Admin: Create tagline
 exports.createTagline = async (req, res) => {
   try {
-    const { text, image_url, display_order, is_active } = req.body;
+    const { text, display_order, is_active } = req.body;
     if (!text) return res.status(400).json({ success: false, message: 'Text is required' });
+    
+    let image_url = req.body.image_url;
+    if (req.file) {
+      image_url = `/uploads/shop/${req.file.filename}`;
+    }
     
     const item = await Tagline.create({ text, image_url, display_order, is_active: is_active !== false });
     res.status(201).json({ success: true, data: item });
@@ -31,7 +36,12 @@ exports.updateTagline = async (req, res) => {
     const item = await Tagline.findByPk(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Tagline not found' });
     
-    await item.update(req.body);
+    const data = { ...req.body };
+    if (req.file) {
+      data.image_url = `/uploads/shop/${req.file.filename}`;
+    }
+    
+    await item.update(data);
     res.json({ success: true, data: item });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
