@@ -111,10 +111,11 @@ exports.createOrder = async (req, res) => {
       items, shipping_address, shipping_city, shipping_pincode, notes, zone_id,
       geofence_id,
       // Book a Mali fields
-      book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali
+      book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali,
+      service_bookings
     } = req.body;
     
-    if (!items || !items.length) {
+    if ((!items || !items.length) && (!service_bookings || !service_bookings.length)) {
       return res.status(400).json({ success: false, message: 'Cart is empty' });
     }
 
@@ -127,35 +128,26 @@ exports.createOrder = async (req, res) => {
     let totalAmount = 0;
     const orderItemsData = [];
 
-    // Validate products and calculate total
-    for (const item of items) {
-      const product = await Product.findByPk(item.product_id);
-      if (!product || !product.is_active) {
-        throw new Error(`Product ${item.product_id} is no longer available`);
-      }
-      if (product.stock_quantity < item.quantity) {
-        throw new Error(`Insufficient stock for ${product.name}`);
-      }
-
-      // ── Check location-based availability ──────────────────────────────────
-      if (geofence_id && product.available_geofence_ids && Array.isArray(product.available_geofence_ids) && product.available_geofence_ids.length > 0) {
-        if (!product.available_geofence_ids.map(Number).includes(Number(geofence_id))) {
-          throw new Error(`"${product.name}" is not available for delivery in your area`);
+    // sum product items
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        const product = await Product.findByPk(item.product_id);
+        if (!product || !product.is_active) {
+          throw new Error(`Product ${item.product_id} is no longer available`);
         }
+        const finalPrice = parseFloat(product.price) + productMarkup;
+        const itemTotal = finalPrice * item.quantity;
+        totalAmount += itemTotal;
+        orderItemsData.push({ product_id: product.id, quantity: item.quantity, price: finalPrice });
+        await product.decrement('stock_quantity', { by: item.quantity, transaction: t });
       }
+    }
 
-      const finalPrice = parseFloat(product.price) + productMarkup;
-      const itemTotal = finalPrice * item.quantity;
-      totalAmount += itemTotal;
-
-      orderItemsData.push({
-        product_id: product.id,
-        quantity: item.quantity,
-        price: finalPrice
-      });
-
-      // Optional: Decrement stock
-      await product.decrement('stock_quantity', { by: item.quantity, transaction: t });
+    // sum service bookings
+    if (service_bookings && Array.isArray(service_bookings)) {
+      for (const service of service_bookings) {
+        totalAmount += (parseFloat(service.price) || 0);
+      }
     }
 
     const orderNumber = `GKM-ORD-${Date.now()}`;
@@ -210,6 +202,8 @@ exports.createOrder = async (req, res) => {
         if (Array.isArray(service_bookings) && service_bookings.length > 0) {
           for (const service of service_bookings) {
             const bkgNumber = `GKM-BKG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
+            
             const booking = await Booking.create({
               booking_number: bkgNumber,
               customer_id: req.user.id,
@@ -218,10 +212,12 @@ exports.createOrder = async (req, res) => {
               status: 'pending',
               scheduled_date: service.scheduled_date || new Date().toISOString().split('T')[0],
               scheduled_time: service.scheduled_time || '09:00',
+              otp: otpCode,
               service_address: service.service_address || shipping_address || '',
               service_latitude: service.service_latitude || 0,
               service_longitude: service.service_longitude || 0,
               plant_count: service.plant_count || 5,
+              base_amount: service.price || 0,
               total_amount: service.price || 0,
               customer_notes: service.notes ? `${service.notes}\n(Via Order ${orderNumber})` : `Booked alongside shop order ${orderNumber}.`
             }, { transaction: t });
