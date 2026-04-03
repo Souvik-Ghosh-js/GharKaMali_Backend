@@ -151,6 +151,7 @@ exports.createOrder = async (req, res) => {
     }
 
     const orderNumber = `GKM-ORD-${Date.now()}`;
+    const txnid = `GKM-TXN-${Date.now()}`;
     
     // Create Order
     const order = await Order.create({
@@ -160,20 +161,16 @@ exports.createOrder = async (req, res) => {
       shipping_address,
       shipping_city,
       shipping_pincode,
-      notes
+      notes,
+      status: 'processing',
+      payment_status: 'paid',
+      payment_id: txnid
     }, { transaction: t });
 
     // Create Order Items
     await OrderItem.bulkCreate(
       orderItemsData.map(item => ({ ...item, order_id: order.id })),
       { transaction: t }
-    );
-
-    // ── MOCK PAYMENT: Immediately mark order as paid ─────────────────────────
-    const txnid = `GKM-TXN-${Date.now()}`;
-    await Order.update(
-      { status: 'processing', payment_status: 'paid', payment_id: txnid },
-      { where: { id: order.id } }
     );
 
     // Create a payment audit record
