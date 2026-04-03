@@ -212,7 +212,6 @@ exports.createOrder = async (req, res) => {
               service_latitude: service.service_latitude || 0,
               service_longitude: service.service_longitude || 0,
               plant_count: service.plant_count || 5,
-              order_id: order.id,
               base_amount: service.price || 0,
               total_amount: service.price || 0,
               customer_notes: service.notes ? `${service.notes}\n(Via Order ${orderNumber})` : `Booked alongside shop order ${orderNumber}.`
@@ -241,7 +240,6 @@ exports.createOrder = async (req, res) => {
             service_longitude: 0,
             otp: Math.floor(1000 + Math.random() * 9000).toString(),
             total_amount: 0,
-            order_id: order.id,
             customer_notes: `Booked alongside shop order ${orderNumber}. Please contact customer to confirm visit details.`
           }, { transaction: t });
           
@@ -290,11 +288,6 @@ exports.getMyOrders = async (req, res) => {
           model: OrderItem, 
           as: 'items',
           include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key'] }]
-        },
-        {
-          model: require('../models').Booking,
-          as: 'mali_bookings',
-          attributes: ['id', 'booking_number', 'status', 'scheduled_date', 'scheduled_time']
         }
       ],
       order: [['created_at', 'DESC']]
