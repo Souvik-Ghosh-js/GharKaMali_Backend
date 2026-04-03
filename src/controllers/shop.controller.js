@@ -201,34 +201,65 @@ exports.createOrder = async (req, res) => {
     } catch (_) { /* Non-critical, ignore */ }
 
     // ── Book a Mali if requested ─────────────────────────────────────────────
-    let maliBookingData = null;
+    let maliBookingResults = [];
     if (book_mali) {
       try {
         const { Booking } = require('../models');
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const scheduledDate = scheduled_date_for_mali || tomorrow.toISOString().split('T')[0];
-        const maliAddr = service_address_for_mali || shipping_address || '';
-        const maliBooking = await Booking.create({
-          booking_number: `GKM-BKG-${Date.now()}`,
-          customer_id: req.user.id,
-          zone_id: zone_id_for_mali || null,
-          booking_type: 'ondemand',
-          status: 'pending',
-          scheduled_date: scheduledDate,
-          service_address: maliAddr,
-          service_latitude: 0,
-          service_longitude: 0,
-          total_amount: 0,
-          customer_notes: `Booked alongside shop order ${orderNumber}. Please contact customer to confirm visit details.`
-        });
-        maliBookingData = {
-          booking_number: maliBooking.booking_number,
-          scheduled_date: scheduledDate,
-          status: 'pending',
-          message: 'Your mali booking is confirmed! We will contact you to schedule the exact visit time.'
-        };
-      } catch (_) { /* Non-critical */ }
+        
+        // Handle new array-based service bookings from unified cart
+        if (Array.isArray(service_bookings) && service_bookings.length > 0) {
+          for (const service of service_bookings) {
+            const bkgNumber = `GKM-BKG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const booking = await Booking.create({
+              booking_number: bkgNumber,
+              customer_id: req.user.id,
+              zone_id: service.zone_id || zone_id_for_mali || null,
+              booking_type: 'ondemand',
+              status: 'pending',
+              scheduled_date: service.scheduled_date || new Date().toISOString().split('T')[0],
+              scheduled_time: service.scheduled_time || '09:00',
+              service_address: service.service_address || shipping_address || '',
+              service_latitude: service.service_latitude || 0,
+              service_longitude: service.service_longitude || 0,
+              plant_count: service.plant_count || 5,
+              total_amount: service.price || 0,
+              customer_notes: service.notes ? `${service.notes}\n(Via Order ${orderNumber})` : `Booked alongside shop order ${orderNumber}.`
+            }, { transaction: t });
+            
+            maliBookingResults.push({
+              booking_number: booking.booking_number,
+              status: 'pending'
+            });
+          }
+        } else {
+          // Fallback to legacy single-booking logic
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          const scheduledDate = scheduled_date_for_mali || tomorrow.toISOString().split('T')[0];
+          const maliAddr = service_address_for_mali || shipping_address || '';
+          const maliBooking = await Booking.create({
+            booking_number: `GKM-BKG-${Date.now()}`,
+            customer_id: req.user.id,
+            zone_id: zone_id_for_mali || null,
+            booking_type: 'ondemand',
+            status: 'pending',
+            scheduled_date: scheduledDate,
+            service_address: maliAddr,
+            service_latitude: 0,
+            service_longitude: 0,
+            total_amount: 0,
+            customer_notes: `Booked alongside shop order ${orderNumber}. Please contact customer to confirm visit details.`
+          }, { transaction: t });
+          
+          maliBookingResults.push({
+            booking_number: maliBooking.booking_number,
+            status: 'pending'
+          });
+        }
+      } catch (err) {
+        console.error("Booking Creation Error in Order Controller:", err.message);
+        // We continue since the shop order itself might be valid, but we log the error
+      }
     }
 
     return res.json({
@@ -242,7 +273,7 @@ exports.createOrder = async (req, res) => {
         total_amount: totalAmount,
         payment_status: 'paid',
         txnid,
-        mali_booking: maliBookingData
+        mali_bookings: maliBookingResults
       }
     });
 
