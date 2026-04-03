@@ -129,6 +129,7 @@ const Booking = sequelize.define('Booking', {
   customer_id: { type: DataTypes.INTEGER, allowNull: false },
   gardener_id: { type: DataTypes.INTEGER },
   subscription_id: { type: DataTypes.INTEGER },
+  order_id: { type: DataTypes.INTEGER, references: { model: 'orders', key: 'id' } },
   zone_id: { type: DataTypes.INTEGER },
   booking_type: { type: DataTypes.ENUM('subscription', 'ondemand'), defaultValue: 'ondemand' },
   status: {
@@ -457,6 +458,8 @@ Booking.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 Booking.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 Booking.belongsTo(Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
 Booking.belongsTo(ServiceZone, { foreignKey: 'zone_id', as: 'zone' });
+Booking.belongsTo(Order, { foreignKey: 'order_id', as: 'shopOrder' });
+Order.hasMany(Booking, { foreignKey: 'order_id', as: 'mali_bookings' });
 Booking.hasMany(BookingTracking, { foreignKey: 'booking_id', as: 'tracking' });
 
 Subscription.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
