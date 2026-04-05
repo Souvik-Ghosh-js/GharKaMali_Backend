@@ -129,6 +129,8 @@ exports.getAllSubscriptions = async (req, res) => {
   }
 };
 
+const bookingCtrl = require('./booking.controller');
+
 // Select dates manually
 exports.selectDates = async (req, res) => {
   try {
@@ -174,6 +176,13 @@ exports.selectDates = async (req, res) => {
         totalSurgeAmount += weekendSurgePrice;
       }
 
+      // Check availability for preferred gardener or zone
+      const availableSlots = await bookingCtrl.checkGardenerAvailabilityInternal(d, subscription.preferred_gardener_id, subscription.zone_id);
+      let scheduled_time = '09:00:00';
+      if (availableSlots.length > 0 && !availableSlots.includes('09:00')) {
+        scheduled_time = availableSlots[0] + ':00';
+      }
+
       await Booking.create({
         booking_number: genBookingNumber(),
         customer_id: req.user.id,
@@ -182,8 +191,9 @@ exports.selectDates = async (req, res) => {
         zone_id: subscription.zone_id,
         booking_type: 'subscription',
         status: 'assigned',
+        assigned_at: new Date(),
         scheduled_date: d,
-        scheduled_time: '09:00:00',
+        scheduled_time,
         otp: genVisitOTP(),
         service_address: subscription.service_address,
         service_latitude: subscription.service_latitude,

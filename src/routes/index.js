@@ -25,6 +25,8 @@ router.put('/auth/profile', authenticate, uploadProfile.single('profile_image'),
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
 router.post('/bookings', authenticate, authorize('customer'), bookingCtrl.createBooking);
 router.get('/bookings/my', authenticate, authorize('customer'), bookingCtrl.getMyBookings);
+router.get('/bookings/previous-gardeners', authenticate, authorize('customer'), bookingCtrl.getPreviousGardeners);
+router.get('/bookings/check-availability', bookingCtrl.checkAvailability);
 router.get('/bookings/:id', authenticate, bookingCtrl.getBookingDetail);
 router.post('/bookings/verify-otp', authenticate, authorize('gardener'), bookingCtrl.verifyVisitOtp);
 router.put('/bookings/status',
@@ -614,7 +616,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
     if (!gardener) return res.status(404).json({ success: false, message: 'Gardener not found or inactive' });
 
     const oldGardenerId = booking.gardener_id;
-    await booking.update({ gardener_id, status: 'assigned', reassignment_reason: reason || 'Manual reassignment by admin' });
+    await booking.update({ gardener_id, status: 'assigned', assigned_at: new Date(), reassignment_reason: reason || 'Manual reassignment by admin' });
 
     // Notify new gardener via WhatsApp
     const { sendWhatsApp } = require('../services/otp.service');

@@ -140,6 +140,8 @@ const Booking = sequelize.define('Booking', {
   otp: { type: DataTypes.STRING(6) },
   otp_verified: { type: DataTypes.BOOLEAN, defaultValue: false },
   otp_verified_at: { type: DataTypes.DATE },
+  assigned_at: { type: DataTypes.DATE },
+  en_route_at: { type: DataTypes.DATE },
   started_at: { type: DataTypes.DATE },
   completed_at: { type: DataTypes.DATE },
   gardener_arrived_at: { type: DataTypes.DATE },

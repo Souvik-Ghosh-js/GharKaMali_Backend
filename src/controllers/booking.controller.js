@@ -1,9 +1,96 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
+
+// Get previous gardeners for a customer
+exports.getPreviousGardeners = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+    const previousGardeners = await Booking.findAll({
+      where: { customer_id: customerId, status: 'completed', gardener_id: { [Op.ne]: null } },
+      attributes: [[fn('DISTINCT', col('gardener_id')), 'gardener_id']],
+      include: [
+        { 
+          model: User, as: 'gardener', 
+          attributes: ['id', 'name', 'profile_image'],
+          include: [{ model: GardenerProfile, as: 'gardenerProfile', attributes: ['rating', 'total_jobs'] }]
+        }
+      ],
+      raw: true,
+      nest: true
+    });
+
+    const uniqueGardeners = previousGardeners.map(b => b.gardener).filter(g => g && g.id);
+    res.json({ success: true, data: uniqueGardeners });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Internal function for availability check
+const checkGardenerAvailabilityInternal = async (date, gardener_id, zone_id) => {
+  const standardTimeSlots = ['08:00', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
+  
+  let gardenerIds = [];
+  if (gardener_id) {
+    gardenerIds = [parseInt(gardener_id)];
+  } else if (zone_id) {
+    const gzs = await GardenerZone.findAll({ where: { zone_id } });
+    gardenerIds = gzs.map(gz => gz.gardener_id);
+  } else {
+    return [];
+  }
+
+  if (gardenerIds.length === 0) return [];
+
+  const existingBookings = await Booking.findAll({
+    where: {
+      gardener_id: { [Op.in]: gardenerIds },
+      scheduled_date: date,
+      status: { [Op.notIn]: ['cancelled', 'failed'] }
+    },
+    attributes: ['gardener_id', 'scheduled_time']
+  });
+
+  const isFree = (gId, time) => {
+    const requestedTime = moment(time, 'HH:mm');
+    return !existingBookings.some(b => {
+      if (b.gardener_id !== gId) return false;
+      const bookingTime = moment(b.scheduled_time, 'HH:mm:ss');
+      const diffMinutes = Math.abs(requestedTime.diff(bookingTime, 'minutes'));
+      return diffMinutes < 120;
+    });
+  };
+
+  const availabilityMap = [];
+  if (gardener_id) {
+    const gId = parseInt(gardener_id);
+    standardTimeSlots.forEach(slot => { if (isFree(gId, slot)) availabilityMap.push(slot); });
+  } else {
+    standardTimeSlots.forEach(slot => {
+      if (gardenerIds.some(gId => isFree(gId, slot))) availabilityMap.push(slot);
+    });
+  }
+  return availabilityMap;
+};
+
+exports.checkGardenerAvailabilityInternal = checkGardenerAvailabilityInternal;
+
+// Check availability based on gardener schedules
+exports.checkAvailability = async (req, res) => {
+  try {
+    const { date, gardener_id, zone_id } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'Date is required' });
+
+    const slots = await checkGardenerAvailabilityInternal(date, gardener_id, zone_id);
+    res.json({ success: true, data: slots });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // Generate booking number
 const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;
@@ -52,6 +139,7 @@ exports.createBooking = async (req, res) => {
       zone_id,
       booking_type: 'ondemand',
       status: gardener_id ? 'assigned' : 'pending',
+      assigned_at: gardener_id ? new Date() : null,
       scheduled_date,
       scheduled_time,
       otp,
@@ -161,6 +249,8 @@ exports.updateBookingStatus = async (req, res) => {
 
     const updates = { status };
     if (gardener_notes) updates.gardener_notes = gardener_notes;
+    if (status === 'assigned') updates.assigned_at = new Date();
+    if (status === 'en_route') updates.en_route_at = new Date();
     if (status === 'arrived') updates.gardener_arrived_at = new Date();
     if (status === 'en_route') {
       const customer = await User.findByPk(booking.customer_id);
