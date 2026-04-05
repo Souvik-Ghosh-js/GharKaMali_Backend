@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
-const { User, GardenerProfile } = require('../models');
+const { User, GardenerProfile, Geofence, ServiceZone } = require('../models');
 const { generateToken } = require('../middleware/auth');
 const { generateOTP, sendOTP, sendWhatsApp, templates } = require('../services/otp.service');
 
@@ -111,7 +111,11 @@ exports.getProfile = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password', 'otp', 'otp_expires_at'] },
-      include: req.user.role === 'gardener' ? [{ model: GardenerProfile, as: 'gardenerProfile' }] : []
+      include: [
+        ...(req.user.role === 'gardener' ? [{ model: GardenerProfile, as: 'gardenerProfile' }] : []),
+        { model: Geofence, as: 'geofence' },
+        { model: ServiceZone, as: 'serviceZone' }
+      ]
     });
     res.json({ success: true, data: user });
   } catch (err) {
@@ -122,8 +126,20 @@ exports.getProfile = async (req, res) => {
 // Update profile
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, email, address, city, state, pincode } = req.body;
+    const { name, email, address, city, state, pincode, latitude, longitude } = req.body;
     const updates = { name, email, address, city, state, pincode };
+
+    if (latitude != null && longitude != null) {
+      updates.latitude = parseFloat(latitude);
+      updates.longitude = parseFloat(longitude);
+      
+      const { resolveGeofence } = require('../utils/geo');
+      const gf = await resolveGeofence(updates.latitude, updates.longitude);
+      if (gf) {
+        updates.geofence_id = gf.id;
+        // Optionally update service_zone_id if needed, but geofence_id is prioritized for shop
+      }
+    }
 
     if (req.file) {
       const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
@@ -131,7 +147,13 @@ exports.updateProfile = async (req, res) => {
     }
 
     await User.update(updates, { where: { id: req.user.id } });
-    const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'otp'] } });
+    const user = await User.findByPk(req.user.id, { 
+      attributes: { exclude: ['password', 'otp'] },
+      include: [
+        { model: Geofence, as: 'geofence' },
+        { model: ServiceZone, as: 'serviceZone' }
+      ]
+    });
     res.json({ success: true, message: 'Profile updated', data: user });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -289,18 +289,7 @@ exports.rescheduleBooking = async (req, res) => {
   }
 };
 
-// Check if a point [lat, lng] is inside a polygon using ray-casting algorithm
-function pointInPolygon(lat, lng, polygon) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [yi, xi] = polygon[i];
-    const [yj, xj] = polygon[j];
-    const intersect = ((yi > lat) !== (yj > lat)) &&
-      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
+const { pointInPolygon } = require('../utils/geo');
 
 // Check if location is in a serviceable geofence zone
 exports.checkServiceability = async (req, res) => {
@@ -337,6 +326,7 @@ exports.checkServiceability = async (req, res) => {
           price_per_plant: gf.price_per_plant,
           min_plants: gf.min_plants,
           polygon_vertices: polygon.length,
+          product_markup: gf.product_markup,
         });
       }
     }
@@ -352,4 +342,3 @@ exports.checkServiceability = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-

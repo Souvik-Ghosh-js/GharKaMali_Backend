@@ -35,4 +35,22 @@ const generateToken = (user) => {
   );
 };
 
-module.exports = { authenticate, authorize, generateToken };
+const authenticateOptional = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next();
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const user = await User.findByPk(decoded.id, { attributes: { exclude: ['password', 'otp'] } });
+    if (user && user.is_active) {
+      req.user = user;
+    }
+    next();
+  } catch (error) {
+    next();
+  }
+};
+
+module.exports = { authenticate, authenticateOptional, authorize, generateToken };

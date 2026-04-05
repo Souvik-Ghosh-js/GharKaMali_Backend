@@ -22,11 +22,13 @@ const User = sequelize.define('User', {
   city: { type: DataTypes.STRING(100) },
   state: { type: DataTypes.STRING(100) },
   pincode: { type: DataTypes.STRING(10) },
-  wallet_balance: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-  total_spent: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-  referral_code: { type: DataTypes.STRING(20), unique: true },
-  referred_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
-}, { tableName: 'users' });
+    wallet_balance: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    total_spent: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    referral_code: { type: DataTypes.STRING(20), unique: true },
+    referred_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+    geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
+    service_zone_id: { type: DataTypes.INTEGER, references: { model: 'service_zones', key: 'id' } }
+  }, { tableName: 'users' });
 
 // ─── GARDENER PROFILE ─────────────────────────────────────────────────────────
 const GardenerProfile = sequelize.define('GardenerProfile', {
@@ -509,6 +511,9 @@ Booking.hasMany(BookingAddOn, { foreignKey: 'booking_id', as: 'addons' });
 
 PlantIdentification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasMany(PlantIdentification, { foreignKey: 'user_id', as: 'plantIdentifications' });
+
+User.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+User.belongsTo(ServiceZone, { foreignKey: 'service_zone_id', as: 'serviceZone' });
 
 module.exports = {
   Product,

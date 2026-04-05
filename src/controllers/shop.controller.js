@@ -23,8 +23,9 @@ exports.getProducts = async (req, res) => {
     const where = { is_active: true };
 
     let productMarkup = 0;
-    if (zone_id) {
-      const zone = await Geofence.findByPk(zone_id);
+    const activeZoneId = geofence_id || zone_id || (req.user ? (req.user.geofence_id || req.user.service_zone_id) : null);
+    if (activeZoneId) {
+      const zone = await Geofence.findByPk(activeZoneId);
       if (zone) productMarkup = parseFloat(zone.product_markup) || 0;
     }
 
@@ -59,15 +60,14 @@ exports.getProducts = async (req, res) => {
     });
 
     // ── Location-based availability filter ────────────────────────────────────
-    // Products with null/empty available_geofence_ids are available everywhere.
-    // Products with a list are restricted to those geofence IDs only.
     let filteredItems = items;
-    if (geofence_id) {
-      const gfId = Number(geofence_id);
+    const gfIdForFilter = geofence_id || (req.user ? req.user.geofence_id : null);
+    if (gfIdForFilter) {
+      const gfVal = Number(gfIdForFilter);
       filteredItems = items.filter(p => {
         const ids = p.available_geofence_ids;
         if (!ids || !Array.isArray(ids) || ids.length === 0) return true;
-        return ids.map(Number).includes(gfId);
+        return ids.map(Number).includes(gfVal);
       });
     }
 
@@ -95,7 +95,23 @@ exports.getProductDetail = async (req, res) => {
       include: [{ model: ProductCategory, as: 'category' }]
     });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
-    res.json({ success: true, data: product });
+
+    let json = product.toJSON();
+    const { zone_id, geofence_id } = req.query;
+    const activeZoneId = geofence_id || zone_id || (req.user ? (req.user.geofence_id || req.user.service_zone_id) : null);
+    if (activeZoneId) {
+      const zone = await Geofence.findByPk(activeZoneId);
+      if (zone) {
+        const productMarkup = parseFloat(zone.product_markup) || 0;
+        if (productMarkup > 0) {
+          json.price = parseFloat(json.price) + productMarkup;
+          json.mrp = json.mrp ? parseFloat(json.mrp) + productMarkup : null;
+          json.location_markup = productMarkup;
+        }
+      }
+    }
+
+    res.json({ success: true, data: json });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -120,8 +136,9 @@ exports.createOrder = async (req, res) => {
     }
 
     let productMarkup = 0;
-    if (zone_id) {
-      const zone = await Geofence.findByPk(zone_id);
+    const activeZoneId = geofence_id || zone_id || req.user.geofence_id || req.user.service_zone_id;
+    if (activeZoneId) {
+      const zone = await Geofence.findByPk(activeZoneId);
       if (zone) productMarkup = parseFloat(zone.product_markup) || 0;
     }
 

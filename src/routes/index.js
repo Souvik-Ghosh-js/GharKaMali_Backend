@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authenticateOptional, authorize } = require('../middleware/auth');
 const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof, uploadShop } = require('../middleware/upload');
 const authCtrl = require('../controllers/auth.controller');
 const bookingCtrl = require('../controllers/booking.controller');
@@ -60,9 +60,9 @@ router.get('/cities', contentCtrl.getCityPages);
 router.get('/cities/:slug', contentCtrl.getCityPage);
 
 // ── SHOP / MARKETPLACE ────────────────────────────────────────────────────────
-router.get('/shop/categories', shopCtrl.getCategories);
-router.get('/shop/products', shopCtrl.getProducts);
-router.get('/shop/products/:id', shopCtrl.getProductDetail);
+router.get('/shop/categories', authenticateOptional, shopCtrl.getCategories);
+router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
+router.get('/shop/products/:id', authenticateOptional, shopCtrl.getProductDetail);
 router.post('/shop/orders', authenticate, authorize('customer'), shopCtrl.createOrder);
 router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
 
