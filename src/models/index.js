@@ -261,6 +261,8 @@ const Payment = sequelize.define('Payment', {
   status: { type: DataTypes.ENUM('pending', 'success', 'failed', 'refunded'), defaultValue: 'pending' },
   payment_method: { type: DataTypes.STRING(50) },
   transaction_id: { type: DataTypes.STRING(100) },
+  txn_id: { type: DataTypes.STRING(100) },
+  payment_for: { type: DataTypes.STRING(100) },
   gateway_response: { type: DataTypes.JSON },
   notes: { type: DataTypes.TEXT }
 }, { tableName: 'payments' });
@@ -493,6 +495,9 @@ SLABreach.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 BookingAddOn.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 BookingAddOn.belongsTo(AddOnService, { foreignKey: 'addon_id', as: 'addon' });
 Booking.hasMany(BookingAddOn, { foreignKey: 'booking_id', as: 'addons' });
+
+PlantIdentification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(PlantIdentification, { foreignKey: 'user_id', as: 'plantIdentifications' });
 
 module.exports = {
   Product,
