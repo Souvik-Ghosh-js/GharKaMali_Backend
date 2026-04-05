@@ -1,5 +1,7 @@
 const axios = require('axios');
-const { PlantIdentification, Blog, CityPage, User } = require('../models');
+const fs = require('fs');
+const path = require('path');
+const { PlantIdentification, Blog, CityPage, User, Booking, Notification, GardenerProfile } = require('../models');
 const { Op } = require('sequelize');
 
 // ── PLANTOPEDIA ───────────────────────────────────────────────────────────────
@@ -192,7 +194,6 @@ exports.upsertCityPage = async (req, res) => {
 // ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 exports.getNotifications = async (req, res) => {
   try {
-    const { Notification } = require('../models');
     const notifs = await Notification.findAll({
       where: { user_id: req.user.id },
       order: [['created_at', 'DESC']],
@@ -217,7 +218,6 @@ exports.markNotificationRead = async (req, res) => {
 // ── SUPERVISOR ────────────────────────────────────────────────────────────────
 exports.getSupervisorDashboard = async (req, res) => {
   try {
-    const { GardenerProfile } = require('../models');
     const myGardeners = await GardenerProfile.findAll({
       where: { supervisor_id: req.user.id },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone', 'is_active', 'city'] }]
@@ -227,6 +227,20 @@ exports.getSupervisorDashboard = async (req, res) => {
     const completedToday = await Booking.count({ where: { gardener_id: { [Op.in]: gardenerIds }, status: 'completed', completed_at: { [Op.gte]: new Date(new Date().setHours(0, 0, 0, 0)) } } });
 
     res.json({ success: true, data: { myGardeners, stats: { todayJobs, completedToday, totalGardeners: myGardeners.length } } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── PRIVACY POLICY ────────────────────────────────────────────────────────────
+exports.getPrivacyPolicy = (req, res) => {
+  try {
+    const filePath = path.join(__dirname, '../../PRIVACY_POLICY.md');
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: 'Privacy policy file not found' });
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    res.json({ success: true, data: { content, last_updated: '2026-04-05' } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

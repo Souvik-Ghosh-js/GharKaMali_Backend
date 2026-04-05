@@ -59,6 +59,9 @@ router.get('/blogs/:slug', contentCtrl.getBlogBySlug);
 router.get('/cities', contentCtrl.getCityPages);
 router.get('/cities/:slug', contentCtrl.getCityPage);
 
+// ── PRIVACY POLICY ────────────────────────────────────────────────────────────
+router.get('/privacy-policy', contentCtrl.getPrivacyPolicy);
+
 // ── SHOP / MARKETPLACE ────────────────────────────────────────────────────────
 router.get('/shop/categories', authenticateOptional, shopCtrl.getCategories);
 router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
@@ -154,8 +157,20 @@ router.delete('/admin/taglines/:id', authenticate, authorize('admin'), taglineCt
 router.get('/admin/maintenance/sync-db', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { sequelize } = require('../models');
+    
+    // Fix zero dates in key tables that might block sync
+    const tables = ['users', 'products', 'orders', 'payments', 'bookings'];
+    for (const table of tables) {
+      try {
+        await sequelize.query(`UPDATE ${table} SET created_at = NOW() WHERE CAST(created_at AS CHAR) = '0000-00-00 00:00:00' OR created_at IS NULL`);
+        await sequelize.query(`UPDATE ${table} SET updated_at = NOW() WHERE CAST(updated_at AS CHAR) = '0000-00-00 00:00:00' OR updated_at IS NULL`);
+      } catch (e) {
+        console.log(`Failed to fix dates for ${table}:`, e.message);
+      }
+    }
+
     await sequelize.sync({ alter: true });
-    res.json({ success: true, message: 'Database schema synchronized successfully' });
+    res.json({ success: true, message: 'Database schema synchronized successfully and legacy dates fixed.' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
