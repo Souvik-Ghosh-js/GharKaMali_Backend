@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
-const { Payment, User, Booking, Subscription, Order } = require('../models');
+const { Payment, User, Booking, Subscription, Order, ServicePlan } = require('../models');
 
 // ── PayU Configuration ─────────────────────────────────────────────────────
 const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'gtKFFx';
