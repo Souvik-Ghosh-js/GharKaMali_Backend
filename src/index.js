@@ -75,7 +75,7 @@ io.on('connection', (socket) => {
 sequelize.authenticate()
   .then(() => {
     console.log('✅ Database connected');
-    return sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
+    return sequelize.sync({ alter: true });
   })
   .then(() => {
     require('./services/cron.service');

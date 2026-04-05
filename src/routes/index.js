@@ -151,6 +151,16 @@ router.put('/admin/taglines/:id', authenticate, authorize('admin'), uploadShop.s
 router.delete('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.deleteTagline);
 
 
+router.get('/admin/maintenance/sync-db', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { sequelize } = require('../models');
+    await sequelize.sync({ alter: true });
+    res.json({ success: true, message: 'Database schema synchronized successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
 
 // ── PAYMENTS (PayU) ───────────────────────────────────────────────────────────
