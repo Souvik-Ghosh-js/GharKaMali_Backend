@@ -315,14 +315,53 @@ exports.createSupervisor = async (req, res) => {
   }
 };
 
+exports.updateSupervisor = async (req, res) => {
+  try {
+    const { name, phone, email, password, gardener_ids } = req.body;
+    const user = await User.findByPk(req.params.id);
+    if (!user || user.role !== 'supervisor') return res.status(404).json({ success: false, message: 'Supervisor not found' });
+    
+    const updates = { name, phone, email };
+    if (password) updates.password = await bcrypt.hash(password, 10);
+    await user.update(updates);
+
+    if (Array.isArray(gardener_ids)) {
+      // Clear old assignments and set new ones for the selected gardeners
+      await GardenerProfile.update({ supervisor_id: null }, { where: { supervisor_id: user.id } });
+      if (gardener_ids.length > 0) {
+        await GardenerProfile.update({ supervisor_id: user.id }, { where: { user_id: { [Op.in]: gardener_ids } } });
+      }
+    }
+
+    res.json({ success: true, message: 'Supervisor updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.getSupervisors = async (req, res) => {
   try {
     const supervisors = await User.findAll({
       where: { role: 'supervisor', is_active: true },
       attributes: { exclude: ['password', 'otp'] },
+      include: [
+        { 
+          model: GardenerProfile, 
+          as: 'team', 
+          include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }] 
+        }
+      ],
       order: [['created_at', 'DESC']]
     });
-    res.json({ success: true, data: supervisors });
+    
+    // Virtual field for team size
+    const results = supervisors.map(s => {
+      const data = s.toJSON();
+      data.team_size = s.team?.length || 0;
+      return data;
+    });
+
+    res.json({ success: true, data: results });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

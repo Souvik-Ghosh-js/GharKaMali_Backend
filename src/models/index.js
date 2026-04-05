@@ -456,6 +456,7 @@ OrderItem.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
 GardenerProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 GardenerProfile.belongsTo(User, { foreignKey: 'supervisor_id', as: 'supervisor' });
 User.hasOne(GardenerProfile, { foreignKey: 'user_id', as: 'gardenerProfile' });
+User.hasMany(GardenerProfile, { foreignKey: 'supervisor_id', as: 'team' });
 
 Booking.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 Booking.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });

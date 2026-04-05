@@ -95,6 +95,7 @@ router.delete('/admin/geofence/:id', authenticate, authorize('admin'), adminCtrl
 
 router.get('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.getSupervisors);
 router.post('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.createSupervisor);
+router.put('/admin/supervisors/:id', authenticate, authorize('admin'), adminCtrl.updateSupervisor);
 
 router.get('/admin/zones', authenticate, authorize('admin'), adminCtrl.getZones);
 router.post('/admin/zones', authenticate, authorize('admin'), adminCtrl.createZone);
