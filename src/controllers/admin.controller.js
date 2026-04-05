@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { Op, fn, col, literal, sequelize } = require('sequelize');
 const db = require('../config/database');
-const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem } = require('../models');
+const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
@@ -643,6 +643,42 @@ exports.updateGardener = async (req, res) => {
     }
     
     res.json({ success: true, message: 'Gardener updated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.getAdminFaqs = async (req, res) => {
+  try {
+    const faqs = await Faq.findAll({ order: [['display_order', 'ASC'], ['category', 'ASC']] });
+    res.json({ success: true, data: faqs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.getPublicFaqs = async (req, res) => {
+  try {
+    const faqs = await Faq.findAll({ where: { is_active: true }, order: [['display_order', 'ASC'], ['category', 'ASC']] });
+    res.json({ success: true, data: faqs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.createFaq = async (req, res) => {
+  try {
+    const faq = await Faq.create(req.body);
+    res.status(201).json({ success: true, data: faq });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.updateFaq = async (req, res) => {
+  try {
+    await Faq.update(req.body, { where: { id: req.params.id } });
+    const faq = await Faq.findByPk(req.params.id);
+    res.json({ success: true, data: faq });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+exports.deleteFaq = async (req, res) => {
+  try {
+    await Faq.destroy({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'FAQ deleted permanently' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 

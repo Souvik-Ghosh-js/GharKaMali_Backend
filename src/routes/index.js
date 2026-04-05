@@ -138,6 +138,13 @@ router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin', 'su
 
 // ─── TAGLINES ────────────────────────────────────────────────────────────────
 router.get('/taglines', taglineCtrl.getActiveTaglines);
+
+// ─── FAQS ────────────────────────────────────────────────────────────────────
+router.get('/faqs', adminCtrl.getPublicFaqs);
+router.get('/admin/faqs', authenticate, authorize('admin'), adminCtrl.getAdminFaqs);
+router.post('/admin/faqs', authenticate, authorize('admin'), adminCtrl.createFaq);
+router.put('/admin/faqs/:id', authenticate, authorize('admin'), adminCtrl.updateFaq);
+router.delete('/admin/faqs/:id', authenticate, authorize('admin'), adminCtrl.deleteFaq);
 router.get('/admin/taglines', authenticate, authorize('admin'), taglineCtrl.getAdminTaglines);
 router.post('/admin/taglines', authenticate, authorize('admin'), uploadShop.single('image'), taglineCtrl.createTagline);
 router.put('/admin/taglines/:id', authenticate, authorize('admin'), uploadShop.single('image'), taglineCtrl.updateTagline);

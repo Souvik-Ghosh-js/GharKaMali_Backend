@@ -444,6 +444,16 @@ const Tagline = sequelize.define('Tagline', {
   display_order: { type: DataTypes.INTEGER, defaultValue: 0 }
 }, { tableName: 'taglines', underscored: true });
 
+// ─── FAQ MODEL ────────────────────────────────────────────────────────────────
+const Faq = sequelize.define('Faq', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  question: { type: DataTypes.TEXT, allowNull: false },
+  answer: { type: DataTypes.TEXT, allowNull: false },
+  category: { type: DataTypes.STRING(100), defaultValue: 'General' },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  display_order: { type: DataTypes.INTEGER, defaultValue: 0 }
+}, { tableName: 'faqs', underscored: true });
+
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
 ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
@@ -528,6 +538,7 @@ module.exports = {
   CityPage,
   Payment,
   PriceHikeLog,
-  Tagline
+  Tagline,
+  Faq
 };
 
