@@ -301,6 +301,11 @@ exports.updateBookingStatus = async (req, res) => {
         completed_jobs: 1,
         total_earnings: updates.total_amount || booking.total_amount
       }, { where: { user_id: req.user.id } });
+
+      // If subscription booking, increment used visits
+      if (booking.booking_type === 'subscription' && booking.subscription_id) {
+        await Subscription.increment('visits_used', { where: { id: booking.subscription_id } });
+      }
     }
 
     await booking.update(updates);
