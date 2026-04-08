@@ -155,9 +155,17 @@ exports.createBooking = async (req, res) => {
     // Send WhatsApp notification
     const customer = await User.findByPk(req.user.id);
     await sendWhatsApp(customer.phone, templates.bookingConfirmed(customer.name, scheduled_date, scheduled_time || 'Morning'));
-    if (customer.fcm_token && gardener_id) {
+    
+    if (gardener_id) {
       const g = await User.findByPk(gardener_id);
-      await notify.bookingAssigned(customer.fcm_token, booking.booking_number, g?.name || 'Gardener');
+      // Notify customer
+      if (customer.fcm_token) {
+        await notify.bookingAssigned(customer.fcm_token, booking.booking_number, g?.name || 'Gardener');
+      }
+      // Notify gardener
+      if (g?.fcm_token) {
+        await notify.newJobAssigned(g.fcm_token, booking.booking_number, service_address, scheduled_date);
+      }
     }
 
     res.status(201).json({ success: true, message: 'Booking created', data: booking });
@@ -272,7 +280,8 @@ exports.updateBookingStatus = async (req, res) => {
         const extraAmt = extra_plants * (zone ? parseFloat(zone.price_per_plant) : 15);
         updates.extra_plants = extra_plants;
         updates.extra_amount = extraAmt;
-        updates.total_amount = booking.base_amount + extraAmt;
+        // FIX: Increment current total_amount instead of resetting it (preserves add-ons)
+        updates.total_amount = parseFloat(booking.total_amount) + extraAmt;
       }
 
       // Handle work proof images
@@ -284,11 +293,14 @@ exports.updateBookingStatus = async (req, res) => {
 
       const customer = await User.findByPk(booking.customer_id);
       await sendWhatsApp(customer.phone, templates.visitCompleted(customer.name, updates.total_amount || booking.total_amount));
-      const cust2 = await User.findByPk(booking.customer_id);
-      if (cust2?.fcm_token) await notify.visitCompleted(cust2.fcm_token, booking.booking_number, updates.total_amount || booking.total_amount);
+      if (customer?.fcm_token) await notify.visitCompleted(customer.fcm_token, booking.booking_number, updates.total_amount || booking.total_amount);
 
-      // Update gardener stats
-      await GardenerProfile.increment({ total_jobs: 1, completed_jobs: 1 }, { where: { user_id: req.user.id } });
+      // Update gardener stats: increment jobs AND earnings
+      await GardenerProfile.increment({ 
+        total_jobs: 1, 
+        completed_jobs: 1,
+        total_earnings: updates.total_amount || booking.total_amount
+      }, { where: { user_id: req.user.id } });
     }
 
     await booking.update(updates);

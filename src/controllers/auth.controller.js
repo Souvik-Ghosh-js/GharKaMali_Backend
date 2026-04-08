@@ -91,8 +91,16 @@ exports.gardenerRegister = async (req, res) => {
 
     const referralCode = `GKM${phone.slice(-6)}`;
     const user = await User.create({ name, phone, email, role: 'gardener', is_active: true, is_approved: false, referral_code: referralCode });
-
     const profile = await GardenerProfile.create({ user_id: user.id, experience_years: experience_years || 0, bio: bio || '' });
+
+    // Suggest service zones (will be verified/active after admin approval)
+    if (service_zone_ids) {
+      const { GardenerZone } = require('../models');
+      const zoneIds = Array.isArray(service_zone_ids) ? service_zone_ids : [service_zone_ids];
+      for (const zid of zoneIds) {
+        await GardenerZone.create({ gardener_id: user.id, zone_id: zid });
+      }
+    }
 
     if (req.files) {
       const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
@@ -100,7 +108,7 @@ exports.gardenerRegister = async (req, res) => {
       if (req.files.id_proof) await profile.update({ id_proof_image: `${baseUrl}/uploads/id-proofs/${req.files.id_proof[0].filename}` });
     }
 
-    res.status(201).json({ success: true, message: 'Registration submitted. Awaiting admin approval.', data: { user_id: user.id } });
+    res.status(201).json({ success: true, message: 'Registration submitted. Awaiting admin approval.', data: { user_id: user.id, suggested_zones: service_zone_ids } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

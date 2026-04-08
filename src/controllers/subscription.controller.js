@@ -183,15 +183,16 @@ exports.selectDates = async (req, res) => {
         scheduled_time = availableSlots[0] + ':00';
       }
 
-      await Booking.create({
+      const gardenerId = subscription.preferred_gardener_id || null;
+      const booking = await Booking.create({
         booking_number: genBookingNumber(),
         customer_id: req.user.id,
-        gardener_id: subscription.preferred_gardener_id || null,
+        gardener_id: gardenerId,
         subscription_id: subscription.id,
         zone_id: subscription.zone_id,
         booking_type: 'subscription',
-        status: 'assigned',
-        assigned_at: new Date(),
+        status: gardenerId ? 'assigned' : 'pending',
+        assigned_at: gardenerId ? new Date() : null,
         scheduled_date: d,
         scheduled_time,
         otp: genVisitOTP(),
@@ -203,6 +204,15 @@ exports.selectDates = async (req, res) => {
         extra_amount: extraAmount,
         total_amount: baseAmountPerVisit + extraAmount
       });
+
+      // Notify gardener if assigned
+      if (gardenerId) {
+        const { notify } = require('../services/push.service');
+        const g = await User.findByPk(gardenerId);
+        if (g?.fcm_token) {
+          await notify.newJobAssigned(g.fcm_token, booking.booking_number, subscription.service_address, d);
+        }
+      }
     }
 
     res.json({

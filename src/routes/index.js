@@ -651,9 +651,23 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
     const oldGardenerId = booking.gardener_id;
     await booking.update({ gardener_id, status: 'assigned', assigned_at: new Date(), reassignment_reason: reason || 'Manual reassignment by admin' });
 
-    // Notify new gardener via WhatsApp
+    // Notify gardeners via Push & WhatsApp
     const { sendWhatsApp } = require('../services/otp.service');
+    const { notify } = require('../services/push.service');
+    
+    // Notify new gardener
     await sendWhatsApp(gardener.phone, `🌿 *GharKaMali*\nHello ${gardener.name}, a booking (${booking.booking_number}) has been assigned to you for ${booking.scheduled_date} at ${booking.scheduled_time || 'morning'}. Please check your app.`);
+    if (gardener.fcm_token) {
+      await notify.newJobAssigned(gardener.fcm_token, booking.booking_number, booking.service_address, booking.scheduled_date);
+    }
+
+    // Notify old gardener if reassigned away
+    if (oldGardenerId && oldGardenerId !== gardener_id) {
+      const oldG = await User.findByPk(oldGardenerId);
+      if (oldG?.fcm_token) {
+        await notify.jobCancelled(oldG.fcm_token, booking.booking_number, 'Job has been reassigned to another gardener.');
+      }
+    }
 
     res.json({ success: true, message: `Booking reassigned to ${gardener.name}`, data: { booking_id: booking.id, old_gardener_id: oldGardenerId, new_gardener_id: gardener_id } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
