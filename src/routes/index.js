@@ -1052,7 +1052,8 @@ router.get('/social-proof', async (req, res) => {
         TIMESTAMPDIFF(HOUR, b.created_at, NOW()) as hours_ago
       FROM bookings b
       JOIN users u ON b.customer_id = u.id
-      LEFT JOIN service_plans sp ON b.plan_id = sp.id
+      LEFT JOIN subscriptions sub ON b.subscription_id = sub.id
+      LEFT JOIN service_plans sp ON sub.plan_id = sp.id
       WHERE b.status IN ('completed','assigned','in_progress','en_route')
         AND u.city IS NOT NULL AND u.city != ''
         AND b.created_at >= DATE_SUB(NOW(), INTERVAL 72 HOUR)
