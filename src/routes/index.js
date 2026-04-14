@@ -1017,17 +1017,30 @@ router.get('/social-proof', async (req, res) => {
     const { SystemSetting } = require('../models');
     const db = require('../config/database');
 
-    // Check if social proof is enabled (default enabled if setting doesn't exist)
+    // Check if social proof is enabled
     const setting = await SystemSetting.findOne({ where: { key: 'social_proof_enabled' } });
     if (setting && setting.value === 'false') {
       return res.json({ success: true, data: { enabled: false, items: [] } });
     }
 
     // Get config settings
-    const intervalSetting = await SystemSetting.findOne({ where: { key: 'social_proof_interval' } });
-    const interval = intervalSetting ? parseInt(intervalSetting.value) || 8000 : 8000; // ms between toasts
+    const [intervalSetting, delaySetting, durationSetting, maxItemsSetting, bookingTemplateSetting, visitorTemplateSetting] = await Promise.all([
+      SystemSetting.findOne({ where: { key: 'social_proof_interval' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_delay' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_duration' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_max_items' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_booking_template' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_visitor_template' } }),
+    ]);
 
-    // Fetch recent bookings with customer info
+    const interval = intervalSetting ? parseInt(intervalSetting.value) || 8000 : 8000;
+    const delay = delaySetting ? parseInt(delaySetting.value) || 5000 : 5000;
+    const duration = durationSetting ? parseInt(durationSetting.value) || 5000 : 5000;
+    const maxItems = maxItemsSetting ? parseInt(maxItemsSetting.value) || 10 : 10;
+    const bookingTemplate = bookingTemplateSetting ? bookingTemplateSetting.value : '{name} from {city} just booked {service}';
+    const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '10+ people are viewing this page right now';
+
+    // Fetch recent bookings
     const rows = await db.query(`
       SELECT 
         SUBSTRING_INDEX(u.name, ' ', 1) as first_name,
@@ -1042,28 +1055,59 @@ router.get('/social-proof', async (req, res) => {
       LEFT JOIN service_plans sp ON b.plan_id = sp.id
       WHERE b.status IN ('completed','assigned','in_progress','en_route')
         AND u.city IS NOT NULL AND u.city != ''
-        AND b.created_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
+        AND b.created_at >= DATE_SUB(NOW(), INTERVAL 72 HOUR)
       ORDER BY b.created_at DESC
-      LIMIT 15
-    `, { type: db.QueryTypes.SELECT });
+      LIMIT :limit
+    `, { 
+      replacements: { limit: maxItems },
+      type: db.QueryTypes.SELECT 
+    });
 
     const items = rows.map(r => {
       let timeAgo;
       if (r.mins_ago < 2) timeAgo = 'just now';
-      else if (r.mins_ago < 60) timeAgo = `${r.mins_ago} mins ago`;
+      else if (r.mins_ago < 60) timeAgo = `${r.mins_ago}m ago`;
       else if (r.hours_ago < 24) timeAgo = `${r.hours_ago}h ago`;
       else timeAgo = 'yesterday';
 
+      // Format message
+      let message = bookingTemplate
+        .replace('{name}', r.first_name || 'Someone')
+        .replace('{city}', r.city)
+        .replace('{service}', r.service)
+        .replace('{time}', timeAgo);
+
       return {
-        name: r.first_name || 'Someone',
-        city: r.city,
-        service: r.service,
+        type: 'booking',
+        message,
         time_ago: timeAgo,
-        status: r.status,
+        data: {
+          name: r.first_name,
+          city: r.city,
+          service: r.service
+        }
       };
     });
 
-    res.json({ success: true, data: { enabled: true, interval, items } });
+    // Add visitor count notification if template is set
+    if (visitorTemplate && visitorTemplate.trim() !== '') {
+      items.push({
+        type: 'visitor',
+        message: visitorTemplate,
+        time_ago: 'live'
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      data: { 
+        enabled: true, 
+        interval, 
+        delay, 
+        duration, 
+        items: items.sort(() => Math.random() - 0.5) // Randomize order for variety
+      } 
+    });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
