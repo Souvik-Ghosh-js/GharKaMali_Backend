@@ -23,7 +23,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const limiter = rateLimit({ windowMs: 50 * 60 * 1000, max: 1000 });
 app.use('/api/', limiter);
 
 const otpLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { success: false, message: 'Too many OTP requests' } });
