@@ -726,3 +726,474 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+
+// ── BOOKING LOGS TIMELINE ─────────────────────────────────────────────────────
+router.get('/admin/bookings/:id/logs', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { BookingLog, User } = require('../models');
+    const logs = await BookingLog.findAll({
+      where: { booking_id: req.params.id },
+      include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'role'] }],
+      order: [['created_at', 'ASC']]
+    });
+    res.json({ success: true, data: logs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── TIP FEATURE ───────────────────────────────────────────────────────────────
+router.post('/bookings/:id/tip', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Tip, Booking, GardenerProfile, User } = require('../models');
+    const { amount } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Tip amount must be positive' });
+
+    const booking = await Booking.findOne({ where: { id: req.params.id, customer_id: req.user.id, status: 'completed' } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Completed booking not found' });
+    if (!booking.gardener_id) return res.status(400).json({ success: false, message: 'No gardener assigned to this booking' });
+
+    // Check wallet balance
+    const customer = await User.findByPk(req.user.id);
+    if (parseFloat(customer.wallet_balance) < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient wallet balance for tip' });
+    }
+
+    const tip = await Tip.create({
+      booking_id: booking.id,
+      customer_id: req.user.id,
+      gardener_id: booking.gardener_id,
+      amount
+    });
+
+    // Deduct from customer wallet
+    await User.decrement({ wallet_balance: amount }, { where: { id: req.user.id } });
+    // Credit to gardener earnings
+    await GardenerProfile.increment({ total_earnings: amount }, { where: { user_id: booking.gardener_id } });
+
+    res.json({ success: true, message: `Tip of ₹${amount} sent to gardener`, data: tip });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── GARDENER WITHDRAWAL ───────────────────────────────────────────────────────
+router.post('/gardener/withdraw', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { WithdrawalRequest, GardenerProfile } = require('../models');
+    const { amount } = req.body;
+    if (!amount || amount < 100) return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₹100' });
+
+    const profile = await GardenerProfile.findOne({ where: { user_id: req.user.id } });
+    if (!profile) return res.status(404).json({ success: false, message: 'Profile not found' });
+
+    if (parseFloat(profile.total_earnings) - parseFloat(profile.pending_earnings || 0) < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient available earnings' });
+    }
+
+    const request = await WithdrawalRequest.create({
+      gardener_id: req.user.id,
+      amount,
+      bank_account: profile.bank_account,
+      bank_ifsc: profile.bank_ifsc,
+      bank_name: profile.bank_name
+    });
+
+    // Mark earnings as pending
+    await GardenerProfile.increment({ pending_earnings: amount }, { where: { user_id: req.user.id } });
+
+    res.status(201).json({ success: true, message: 'Withdrawal request submitted', data: request });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/gardener/withdrawals', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { WithdrawalRequest } = require('../models');
+    const requests = await WithdrawalRequest.findAll({
+      where: { gardener_id: req.user.id },
+      order: [['created_at', 'DESC']]
+    });
+    res.json({ success: true, data: requests });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/admin/withdrawals', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { WithdrawalRequest, User } = require('../models');
+    const { status, page = 1, limit = 20 } = req.query;
+    const where = {};
+    if (status) where.status = status;
+    const { count, rows } = await WithdrawalRequest.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'city'] },
+        { model: User, as: 'processor', attributes: ['id', 'name'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit), offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { requests: rows, total: count } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.put('/admin/withdrawals/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { WithdrawalRequest, GardenerProfile } = require('../models');
+    const { status, admin_notes } = req.body;
+    const request = await WithdrawalRequest.findByPk(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Request already processed' });
+
+    const updates = { status, admin_notes, processed_by: req.user.id };
+    if (status === 'processed') {
+      updates.processed_at = new Date();
+      // Deduct from total earnings and pending earnings
+      await GardenerProfile.decrement({ total_earnings: request.amount, pending_earnings: request.amount }, { where: { user_id: request.gardener_id } });
+    } else if (status === 'rejected') {
+      // Release pending earnings
+      await GardenerProfile.decrement({ pending_earnings: request.amount }, { where: { user_id: request.gardener_id } });
+    }
+
+    await request.update(updates);
+    res.json({ success: true, message: `Withdrawal ${status}`, data: request });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── REVIEWS MANAGEMENT ────────────────────────────────────────────────────────
+router.get('/reviews', async (req, res) => {
+  try {
+    const { Review, User } = require('../models');
+    const { status = 'approved', page = 1, limit = 20 } = req.query;
+    const { count, rows } = await Review.findAndCountAll({
+      where: { status },
+      include: [
+        { model: User, as: 'customer', attributes: ['id', 'name', 'city', 'profile_image'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit), offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { reviews: rows, total: count } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/bookings/:id/review', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Review, Booking } = require('../models');
+    const { rating, comment } = req.body;
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+
+    const booking = await Booking.findOne({ where: { id: req.params.id, customer_id: req.user.id, status: 'completed' } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Completed booking not found' });
+
+    const existing = await Review.findOne({ where: { booking_id: booking.id, customer_id: req.user.id } });
+    if (existing) return res.status(400).json({ success: false, message: 'Review already submitted for this booking' });
+
+    const review = await Review.create({
+      customer_id: req.user.id,
+      booking_id: booking.id,
+      gardener_id: booking.gardener_id,
+      rating,
+      comment
+    });
+    res.status(201).json({ success: true, message: 'Review submitted for approval', data: review });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/admin/reviews', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Review, User, Booking } = require('../models');
+    const { status, page = 1, limit = 20 } = req.query;
+    const where = {};
+    if (status) where.status = status;
+    const { count, rows } = await Review.findAndCountAll({
+      where,
+      include: [
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'city'] },
+        { model: User, as: 'gardener', attributes: ['id', 'name'] },
+        { model: Booking, as: 'booking', attributes: ['id', 'booking_number'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit), offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { reviews: rows, total: count } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.put('/admin/reviews/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Review } = require('../models');
+    const { status, admin_notes } = req.body;
+    await Review.update({ status, admin_notes }, { where: { id: req.params.id } });
+    const review = await Review.findByPk(req.params.id);
+    res.json({ success: true, message: `Review ${status}`, data: review });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN GLOBAL SEARCH ───────────────────────────────────────────────────────
+router.get('/admin/search', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { User, Booking, Order } = require('../models');
+    const { Op } = require('sequelize');
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.status(400).json({ success: false, message: 'Search query must be at least 2 characters' });
+
+    const searchTerm = `%${q}%`;
+    const [customers, gardeners, bookings, orders] = await Promise.all([
+      User.findAll({ where: { role: 'customer', [Op.or]: [{ name: { [Op.like]: searchTerm } }, { phone: { [Op.like]: searchTerm } }, { email: { [Op.like]: searchTerm } }] }, attributes: ['id', 'name', 'phone', 'city'], limit: 5 }),
+      User.findAll({ where: { role: 'gardener', [Op.or]: [{ name: { [Op.like]: searchTerm } }, { phone: { [Op.like]: searchTerm } }] }, attributes: ['id', 'name', 'phone', 'city'], limit: 5 }),
+      Booking.findAll({ where: { [Op.or]: [{ booking_number: { [Op.like]: searchTerm } }] }, attributes: ['id', 'booking_number', 'status', 'scheduled_date'], limit: 5 }),
+      Order.findAll({ where: { [Op.or]: [{ order_number: { [Op.like]: searchTerm } }] }, attributes: ['id', 'order_number', 'status', 'total_amount'], limit: 5 })
+    ]);
+
+    res.json({
+      success: true,
+      data: { customers, gardeners, bookings, orders, total: customers.length + gardeners.length + bookings.length + orders.length }
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── ADMIN EXPORT REPORTS (CSV) ────────────────────────────────────────────────
+router.get('/admin/reports/export', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const db = require('../config/database');
+    const { type = 'bookings', format = 'csv' } = req.query;
+
+    let query = '';
+    let filename = '';
+    switch (type) {
+      case 'bookings':
+        query = `SELECT b.id, b.booking_number, b.status, b.scheduled_date, b.scheduled_time,
+          b.total_amount, b.payment_status, b.plant_count, b.service_address,
+          c.name as customer_name, c.phone as customer_phone,
+          g.name as gardener_name, b.created_at, b.completed_at
+          FROM bookings b
+          LEFT JOIN users c ON b.customer_id = c.id
+          LEFT JOIN users g ON b.gardener_id = g.id
+          ORDER BY b.created_at DESC`;
+        filename = 'bookings_report';
+        break;
+      case 'orders':
+        query = `SELECT o.id, o.order_number, o.status, o.payment_status, o.total_amount,
+          o.shipping_address, o.shipping_city, o.tracking_number,
+          u.name as customer_name, u.phone as customer_phone, o.created_at
+          FROM orders o LEFT JOIN users u ON o.customer_id = u.id
+          ORDER BY o.created_at DESC`;
+        filename = 'orders_report';
+        break;
+      case 'earnings':
+        query = `SELECT u.id, u.name, u.phone, u.city,
+          gp.total_earnings, gp.pending_earnings, gp.completed_jobs, gp.total_jobs, gp.rating
+          FROM users u JOIN gardener_profiles gp ON u.id = gp.user_id
+          WHERE u.role='gardener' ORDER BY gp.total_earnings DESC`;
+        filename = 'gardener_earnings';
+        break;
+      case 'customers':
+        query = `SELECT id, name, phone, email, city, state, wallet_balance, total_spent, created_at
+          FROM users WHERE role='customer' ORDER BY created_at DESC`;
+        filename = 'customers_report';
+        break;
+      default:
+        return res.status(400).json({ success: false, message: 'Invalid report type. Use: bookings, orders, earnings, customers' });
+    }
+
+    const rows = await db.query(query, { type: db.QueryTypes.SELECT });
+    if (rows.length === 0) return res.status(404).json({ success: false, message: 'No data found' });
+
+    // Generate CSV
+    const headers = Object.keys(rows[0]);
+    const csvLines = [headers.join(',')];
+    for (const row of rows) {
+      csvLines.push(headers.map(h => {
+        const val = row[h] !== null && row[h] !== undefined ? String(row[h]).replace(/"/g, '""') : '';
+        return `"${val}"`;
+      }).join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}_${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvLines.join('\n'));
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SOCIAL PROOF ──────────────────────────────────────────────────────────────
+router.get('/social-proof', async (req, res) => {
+  try {
+    const { SystemSetting } = require('../models');
+    const db = require('../config/database');
+
+    // Check if social proof is enabled (default enabled if setting doesn't exist)
+    const setting = await SystemSetting.findOne({ where: { key: 'social_proof_enabled' } });
+    if (setting && setting.value === 'false') {
+      return res.json({ success: true, data: { enabled: false, items: [] } });
+    }
+
+    // Get config settings
+    const intervalSetting = await SystemSetting.findOne({ where: { key: 'social_proof_interval' } });
+    const interval = intervalSetting ? parseInt(intervalSetting.value) || 8000 : 8000; // ms between toasts
+
+    // Fetch recent bookings with customer info
+    const rows = await db.query(`
+      SELECT 
+        SUBSTRING_INDEX(u.name, ' ', 1) as first_name,
+        u.city,
+        COALESCE(sp.name, 'Gardening Visit') as service,
+        b.status,
+        b.created_at,
+        TIMESTAMPDIFF(MINUTE, b.created_at, NOW()) as mins_ago,
+        TIMESTAMPDIFF(HOUR, b.created_at, NOW()) as hours_ago
+      FROM bookings b
+      JOIN users u ON b.customer_id = u.id
+      LEFT JOIN service_plans sp ON b.plan_id = sp.id
+      WHERE b.status IN ('completed','assigned','in_progress','en_route')
+        AND u.city IS NOT NULL AND u.city != ''
+        AND b.created_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
+      ORDER BY b.created_at DESC
+      LIMIT 15
+    `, { type: db.QueryTypes.SELECT });
+
+    const items = rows.map(r => {
+      let timeAgo;
+      if (r.mins_ago < 2) timeAgo = 'just now';
+      else if (r.mins_ago < 60) timeAgo = `${r.mins_ago} mins ago`;
+      else if (r.hours_ago < 24) timeAgo = `${r.hours_ago}h ago`;
+      else timeAgo = 'yesterday';
+
+      return {
+        name: r.first_name || 'Someone',
+        city: r.city,
+        service: r.service,
+        time_ago: timeAgo,
+        status: r.status,
+      };
+    });
+
+    res.json({ success: true, data: { enabled: true, interval, items } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── CONTACT FORM ──────────────────────────────────────────────────────────────
+router.post('/contact', async (req, res) => {
+  try {
+    const { ContactMessage } = require('../models');
+    const { name, email, phone, message } = req.body;
+    if (!name || !message) return res.status(400).json({ success: false, message: 'Name and message are required' });
+    const msg = await ContactMessage.create({ name, email, phone, message });
+    res.status(201).json({ success: true, message: 'Message received! We will get back to you soon.', data: { id: msg.id } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { ContactMessage } = require('../models');
+    const { page = 1, limit = 20 } = req.query;
+    const { count, rows } = await ContactMessage.findAndCountAll({
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit), offset: (page - 1) * limit
+    });
+    res.json({ success: true, data: { messages: rows, total: count } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SYSTEM SETTINGS ───────────────────────────────────────────────────────────
+router.get('/settings/:key', async (req, res) => {
+  try {
+    const { SystemSetting } = require('../models');
+    const setting = await SystemSetting.findOne({ where: { key: req.params.key } });
+    res.json({ success: true, data: setting ? setting.value : null });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/admin/settings', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { SystemSetting } = require('../models');
+    const settings = await SystemSetting.findAll({ order: [['key', 'ASC']] });
+    res.json({ success: true, data: settings });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.put('/admin/settings/:key', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { SystemSetting } = require('../models');
+    const { value } = req.body;
+    const [setting, created] = await SystemSetting.findOrCreate({
+      where: { key: req.params.key },
+      defaults: { value, updated_by: req.user.id }
+    });
+    if (!created) await setting.update({ value, updated_by: req.user.id });
+    res.json({ success: true, message: `Setting '${req.params.key}' updated`, data: setting });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SHOP ORDER TRACKING ENHANCEMENT ──────────────────────────────────────────
+router.put('/admin/shop/orders/:id/tracking', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { Order } = require('../models');
+    const { tracking_number, tracking_url, status } = req.body;
+    const updates = {};
+    if (tracking_number !== undefined) updates.tracking_number = tracking_number;
+    if (tracking_url !== undefined) updates.tracking_url = tracking_url;
+    if (status) updates.status = status;
+    await Order.update(updates, { where: { id: req.params.id } });
+    const order = await Order.findByPk(req.params.id);
+    res.json({ success: true, message: 'Order tracking updated', data: order });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── LOCATION-BASED PRODUCT AVAILABILITY ──────────────────────────────────────
+router.get('/admin/product-zone-prices', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { ProductZonePrice, Product, Geofence } = require('../models');
+    const prices = await ProductZonePrice.findAll({
+      include: [
+        { model: Product, as: 'product', attributes: ['id', 'name', 'price'] },
+        { model: Geofence, as: 'zone', attributes: ['id', 'name', 'city'] }
+      ],
+      order: [['product_id', 'ASC'], ['geofence_id', 'ASC']]
+    });
+    res.json({ success: true, data: prices });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/admin/product-zone-prices', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { ProductZonePrice } = require('../models');
+    const { product_id, geofence_id, price, mrp, is_available } = req.body;
+    const [pzp, created] = await ProductZonePrice.findOrCreate({
+      where: { product_id, geofence_id },
+      defaults: { price, mrp, is_available: is_available !== false }
+    });
+    if (!created) await pzp.update({ price, mrp, is_available: is_available !== false });
+    res.json({ success: true, data: pzp });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/admin/product-zone-prices/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { ProductZonePrice } = require('../models');
+    await ProductZonePrice.destroy({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Zone price removed' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── SUPERVISOR-GARDENER ASSIGNMENT ───────────────────────────────────────────
+router.post('/admin/supervisors/:id/gardeners', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { GardenerProfile, User } = require('../models');
+    const { gardener_ids } = req.body; // Array of gardener user IDs to assign
+    if (!Array.isArray(gardener_ids)) return res.status(400).json({ success: false, message: 'gardener_ids must be an array' });
+
+    // Verify supervisor exists
+    const supervisor = await User.findOne({ where: { id: req.params.id, role: 'supervisor' } });
+    if (!supervisor) return res.status(404).json({ success: false, message: 'Supervisor not found' });
+
+    const { Op } = require('sequelize');
+    // Assign gardeners to this supervisor
+    await GardenerProfile.update({ supervisor_id: parseInt(req.params.id) }, { where: { user_id: { [Op.in]: gardener_ids } } });
+
+    res.json({ success: true, message: `${gardener_ids.length} gardener(s) assigned to ${supervisor.name}` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/admin/supervisors/:id/gardeners/:gardener_id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { GardenerProfile } = require('../models');
+    await GardenerProfile.update({ supervisor_id: null }, { where: { user_id: req.params.gardener_id, supervisor_id: req.params.id } });
+    res.json({ success: true, message: 'Gardener removed from supervisor' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});

@@ -375,6 +375,7 @@ const Geofence = sequelize.define('Geofence', {
   price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  surge_multiplier: { type: DataTypes.DECIMAL(4, 2), defaultValue: 1.00 },
   created_by: { type: DataTypes.INTEGER }
 }, { tableName: 'geofences', underscored: true });
 
@@ -425,6 +426,8 @@ const Order = sequelize.define('Order', {
   shipping_address: { type: DataTypes.TEXT, allowNull: false },
   shipping_city: { type: DataTypes.STRING(100) },
   shipping_pincode: { type: DataTypes.STRING(15) },
+  tracking_number: { type: DataTypes.STRING(100) },
+  tracking_url: { type: DataTypes.STRING(500) },
   notes: { type: DataTypes.TEXT }
 }, { tableName: 'orders' });
 
@@ -455,6 +458,83 @@ const Faq = sequelize.define('Faq', {
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   display_order: { type: DataTypes.INTEGER, defaultValue: 0 }
 }, { tableName: 'faqs', underscored: true });
+
+// ─── BOOKING LOG ──────────────────────────────────────────────────────────────
+const BookingLog = sequelize.define('BookingLog', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  event_type: {
+    type: DataTypes.ENUM('created', 'assigned', 'en_route', 'arrived', 'otp_sent', 'otp_accepted', 'in_progress', 'completed', 'cancelled', 'failed', 'reassigned', 'rescheduled'),
+    allowNull: false
+  },
+  actor_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  actor_role: { type: DataTypes.STRING(20) },
+  meta: { type: DataTypes.JSON },
+  description: { type: DataTypes.TEXT }
+}, { tableName: 'booking_logs', underscored: true, updatedAt: false });
+
+// ─── WITHDRAWAL REQUEST ───────────────────────────────────────────────────────
+const WithdrawalRequest = sequelize.define('WithdrawalRequest', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  status: { type: DataTypes.ENUM('pending', 'approved', 'rejected', 'processed'), defaultValue: 'pending' },
+  bank_account: { type: DataTypes.STRING(30) },
+  bank_ifsc: { type: DataTypes.STRING(15) },
+  bank_name: { type: DataTypes.STRING(100) },
+  admin_notes: { type: DataTypes.TEXT },
+  processed_at: { type: DataTypes.DATE },
+  processed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
+}, { tableName: 'withdrawal_requests', underscored: true });
+
+// ─── REVIEW ───────────────────────────────────────────────────────────────────
+const Review = sequelize.define('Review', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  rating: { type: DataTypes.INTEGER, allowNull: false },
+  comment: { type: DataTypes.TEXT },
+  status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
+  admin_notes: { type: DataTypes.TEXT }
+}, { tableName: 'reviews', underscored: true });
+
+// ─── TIP ──────────────────────────────────────────────────────────────────────
+const Tip = sequelize.define('Tip', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false }
+}, { tableName: 'tips', underscored: true });
+
+// ─── PRODUCT ZONE PRICE ───────────────────────────────────────────────────────
+const ProductZonePrice = sequelize.define('ProductZonePrice', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  product_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'products', key: 'id' } },
+  geofence_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'geofences', key: 'id' } },
+  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  mrp: { type: DataTypes.DECIMAL(10, 2) },
+  is_available: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'product_zone_prices', underscored: true });
+
+// ─── CONTACT MESSAGE ──────────────────────────────────────────────────────────
+const ContactMessage = sequelize.define('ContactMessage', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false },
+  email: { type: DataTypes.STRING(100) },
+  phone: { type: DataTypes.STRING(15) },
+  message: { type: DataTypes.TEXT, allowNull: false },
+  is_read: { type: DataTypes.BOOLEAN, defaultValue: false }
+}, { tableName: 'contact_messages', underscored: true });
+
+// ─── SYSTEM SETTING ───────────────────────────────────────────────────────────
+const SystemSetting = sequelize.define('SystemSetting', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  key: { type: DataTypes.STRING(100), allowNull: false, unique: true },
+  value: { type: DataTypes.TEXT },
+  updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
+}, { tableName: 'system_settings', underscored: true });
 
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
@@ -515,6 +595,31 @@ User.hasMany(PlantIdentification, { foreignKey: 'user_id', as: 'plantIdentificat
 User.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 User.belongsTo(ServiceZone, { foreignKey: 'service_zone_id', as: 'serviceZone' });
 
+// BookingLog associations
+BookingLog.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+BookingLog.belongsTo(User, { foreignKey: 'actor_id', as: 'actor' });
+Booking.hasMany(BookingLog, { foreignKey: 'booking_id', as: 'logs' });
+
+// WithdrawalRequest associations
+WithdrawalRequest.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+WithdrawalRequest.belongsTo(User, { foreignKey: 'processed_by', as: 'processor' });
+
+// Review associations
+Review.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+Review.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Review.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
+// Tip associations
+Tip.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+Tip.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+Tip.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+
+// ProductZonePrice associations
+ProductZonePrice.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
+ProductZonePrice.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'zone' });
+Product.hasMany(ProductZonePrice, { foreignKey: 'product_id', as: 'zonePrices' });
+Geofence.hasMany(ProductZonePrice, { foreignKey: 'geofence_id', as: 'productPrices' });
+
 module.exports = {
   Product,
   ProductCategory,
@@ -544,6 +649,13 @@ module.exports = {
   Payment,
   PriceHikeLog,
   Tagline,
-  Faq
+  Faq,
+  BookingLog,
+  WithdrawalRequest,
+  Review,
+  Tip,
+  ProductZonePrice,
+  ContactMessage,
+  SystemSetting
 };
 

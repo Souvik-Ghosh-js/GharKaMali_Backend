@@ -1,9 +1,16 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
+
+// Helper: create booking log entry
+const logBookingEvent = async (booking_id, event_type, actor_id, actor_role, meta, description) => {
+  try {
+    await BookingLog.create({ booking_id, event_type, actor_id, actor_role, meta, description });
+  } catch (e) { console.error('BookingLog error:', e.message); }
+};
 
 // Get previous gardeners for a customer
 exports.getPreviousGardeners = async (req, res) => {
@@ -101,7 +108,7 @@ const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 // Create booking (on-demand)
 exports.createBooking = async (req, res) => {
   try {
-    const { zone_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id } = req.body;
+    const { zone_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id, payment_method } = req.body;
 
     // Use Geofence for pricing if available
     const zone = await Geofence.findByPk(zone_id);
@@ -111,9 +118,18 @@ exports.createBooking = async (req, res) => {
     const minPlants = zone.min_plants || 1;
     const pricePerPlant = parseFloat(zone.price_per_plant) || 0;
     const basePrice = parseFloat(zone.base_price) || 0;
+    const surge = parseFloat(zone.surge_multiplier) || 1.0;
 
     const extraPlants = Math.max(0, pCount - minPlants);
-    const baseAmount = basePrice + (extraPlants * pricePerPlant);
+    const baseAmount = (basePrice + (extraPlants * pricePerPlant)) * surge;
+
+    // Wallet payment: check balance before confirming
+    if (payment_method === 'wallet') {
+      const customer = await User.findByPk(req.user.id);
+      if (parseFloat(customer.wallet_balance) < baseAmount) {
+        return res.status(400).json({ success: false, message: `Insufficient wallet balance. Required: ₹${baseAmount.toFixed(2)}, Available: ₹${parseFloat(customer.wallet_balance).toFixed(2)}` });
+      }
+    }
 
     // Find best gardener
     let gardener_id = null;
@@ -149,8 +165,21 @@ exports.createBooking = async (req, res) => {
       plant_count: plant_count || 1,
       base_amount: baseAmount,
       total_amount: baseAmount,
-      customer_notes
+      customer_notes,
+      payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
     });
+
+    // Deduct wallet balance if wallet payment
+    if (payment_method === 'wallet') {
+      await User.decrement({ wallet_balance: baseAmount }, { where: { id: req.user.id } });
+      await User.increment({ total_spent: baseAmount }, { where: { id: req.user.id } });
+    }
+
+    // Log booking creation
+    await logBookingEvent(booking.id, 'created', req.user.id, 'customer', { zone_id, payment_method: payment_method || 'online', surge_multiplier: surge }, `Booking ${booking.booking_number} created`);
+    if (gardener_id) {
+      await logBookingEvent(booking.id, 'assigned', null, 'system', { gardener_id }, 'Auto-assigned to gardener');
+    }
 
     // Send WhatsApp notification
     const customer = await User.findByPk(req.user.id);
@@ -228,6 +257,8 @@ exports.verifyVisitOtp = async (req, res) => {
 
     await booking.update({ otp_verified: true, otp_verified_at: new Date(), status: 'in_progress', started_at: new Date() });
 
+    await logBookingEvent(booking.id, 'otp_accepted', req.user.id, 'gardener', null, 'OTP verified, service started');
+
     const customer = await User.findByPk(booking.customer_id);
     await sendWhatsApp(customer.phone, `🌿 *GharKaMali*\nYour garden service has started! Estimated completion: 1-2 hours.`);
 
@@ -261,12 +292,15 @@ exports.updateBookingStatus = async (req, res) => {
     if (status === 'en_route') updates.en_route_at = new Date();
     if (status === 'arrived') updates.gardener_arrived_at = new Date();
     if (status === 'en_route') {
+      await logBookingEvent(booking.id, 'en_route', req.user.id, 'gardener', null, 'Gardener is on the way');
       const customer = await User.findByPk(booking.customer_id);
       const gardener = await User.findByPk(req.user.id);
       await sendWhatsApp(customer.phone, templates.gardenerEnRoute(customer.name, gardener.name, '15'));
       if (customer.fcm_token) await notify.gardenerEnRoute(customer.fcm_token, gardener.name, booking.booking_number);
     }
     if (status === 'arrived') {
+      await logBookingEvent(booking.id, 'arrived', req.user.id, 'gardener', null, 'Gardener arrived at location');
+      await logBookingEvent(booking.id, 'otp_sent', null, 'system', { otp: booking.otp }, 'OTP sent to customer');
       const customer = await User.findByPk(booking.customer_id);
       await sendWhatsApp(customer.phone, templates.gardenerArrived(customer.name, booking.otp));
       if (customer.fcm_token) await notify.gardenerArrived(customer.fcm_token, booking.otp, booking.booking_number);
@@ -306,6 +340,10 @@ exports.updateBookingStatus = async (req, res) => {
       if (booking.booking_type === 'subscription' && booking.subscription_id) {
         await Subscription.increment('visits_used', { where: { id: booking.subscription_id } });
       }
+    }
+
+    if (status === 'completed') {
+      await logBookingEvent(booking.id, 'completed', req.user.id, 'gardener', { total_amount: updates.total_amount || booking.total_amount }, 'Service completed');
     }
 
     await booking.update(updates);
@@ -403,6 +441,8 @@ exports.cancelBooking = async (req, res) => {
     }
 
     await booking.update({ status: 'cancelled', cancellation_reason: reason });
+
+    await logBookingEvent(booking.id, 'cancelled', req.user.id, req.user.role, { reason }, `Booking cancelled: ${reason || 'No reason'}`);
 
     if (booking.gardener_id) {
       await GardenerProfile.increment({ cancelled_jobs: 1 }, { where: { user_id: booking.gardener_id } });
