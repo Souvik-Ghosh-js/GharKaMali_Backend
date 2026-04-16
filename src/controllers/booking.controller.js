@@ -430,6 +430,34 @@ exports.getGardenerLocation = async (req, res) => {
   }
 };
 
+// Get booking audit logs
+exports.getBookingLogs = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const booking = await Booking.findByPk(id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+    // Access control: customers can only see their own booking logs
+    if (req.user.role === 'customer' && booking.customer_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+    // Gardeners can only see logs for their own jobs
+    if (req.user.role === 'gardener' && booking.gardener_id !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const logs = await BookingLog.findAll({
+      where: { booking_id: id },
+      include: [{ model: User, as: 'actor', attributes: ['id', 'name', 'role'], required: false }],
+      order: [['created_at', 'ASC']]
+    });
+
+    res.json({ success: true, data: logs });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // Cancel booking
 exports.cancelBooking = async (req, res) => {
   try {
