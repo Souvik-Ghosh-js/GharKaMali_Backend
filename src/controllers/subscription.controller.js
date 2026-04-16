@@ -64,7 +64,11 @@ exports.getMySubscriptions = async (req, res) => {
       where: { customer_id: req.user.id },
       include: [
         { model: ServicePlan, as: 'plan' },
-        { model: Booking, as: 'bookings', attributes: ['id', 'scheduled_date', 'status'] }
+        { 
+          model: Booking, as: 'bookings', 
+          attributes: ['id', 'booking_number', 'scheduled_date', 'status', 'gardener_id'],
+          include: [{ model: User, as: 'gardener', attributes: ['id', 'name', 'profile_image'] }]
+        }
       ],
       order: [['created_at', 'DESC']]
     });
