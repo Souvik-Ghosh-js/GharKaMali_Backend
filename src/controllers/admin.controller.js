@@ -320,7 +320,7 @@ exports.updateSupervisor = async (req, res) => {
     const { name, phone, email, password, gardener_ids } = req.body;
     const user = await User.findByPk(req.params.id);
     if (!user || user.role !== 'supervisor') return res.status(404).json({ success: false, message: 'Supervisor not found' });
-    
+
     const updates = { name, phone, email };
     if (password) updates.password = await bcrypt.hash(password, 10);
     await user.update(updates);
@@ -345,15 +345,15 @@ exports.getSupervisors = async (req, res) => {
       where: { role: 'supervisor', is_active: true },
       attributes: { exclude: ['password', 'otp'] },
       include: [
-        { 
-          model: GardenerProfile, 
-          as: 'team', 
-          include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }] 
+        {
+          model: GardenerProfile,
+          as: 'team',
+          include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }]
         }
       ],
       order: [['created_at', 'DESC']]
     });
-    
+
     // Virtual field for team size
     const results = supervisors.map(s => {
       const data = s.toJSON();
@@ -605,9 +605,9 @@ exports.getUtilizationReport = async (req, res) => {
       ? (utilization.reduce((s, g) => s + Number(g.utilization_pct || 0), 0) / utilization.length).toFixed(1)
       : 0;
 
-    const overloaded   = utilization.filter(g => Number(g.utilization_pct) > 80).length;
+    const overloaded = utilization.filter(g => Number(g.utilization_pct) > 80).length;
     const underutilized = utilization.filter(g => Number(g.utilization_pct) < 30).length;
-    const optimal      = utilization.filter(g => Number(g.utilization_pct) >= 30 && Number(g.utilization_pct) <= 80).length;
+    const optimal = utilization.filter(g => Number(g.utilization_pct) >= 30 && Number(g.utilization_pct) <= 80).length;
 
     res.json({
       success: true,
@@ -635,13 +635,13 @@ exports.updateGardener = async (req, res) => {
     const { supervisor_id, is_active } = req.body;
     const gardener = await User.findByPk(req.params.id);
     if (!gardener || gardener.role !== 'gardener') return res.status(404).json({ success: false, message: 'Gardener not found' });
-    
+
     if (is_active !== undefined) await gardener.update({ is_active });
-    
+
     if (supervisor_id !== undefined) {
       await GardenerProfile.update({ supervisor_id: supervisor_id || null }, { where: { user_id: gardener.id } });
     }
-    
+
     res.json({ success: true, message: 'Gardener updated' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
@@ -843,7 +843,7 @@ exports.getAdminOrders = async (req, res) => {
     const { status, page = 1, limit = 20, search } = req.query;
     const where = {};
     if (status) where.status = status;
-    
+
     if (search) {
       const searchConditions = [
         { order_number: { [Op.like]: `%${search}%` } },
@@ -873,8 +873,8 @@ exports.getAdminOrders = async (req, res) => {
       },
       include: [
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'city', 'address'] },
-        { 
-          model: OrderItem, 
+        {
+          model: OrderItem,
           as: 'items',
           include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key', 'price', 'mrp'] }]
         }

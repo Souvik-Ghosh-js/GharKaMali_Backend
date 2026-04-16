@@ -110,6 +110,19 @@ exports.getBlogBySlug = async (req, res) => {
   }
 };
 
+exports.getBlogCategories = async (req, res) => {
+  try {
+    const { sequelize } = require('../models');
+    const categories = await Blog.findAll({
+      attributes: [[sequelize.fn('DISTINCT', sequelize.col('category')), 'category']],
+      where: { status: 'published', category: { [Op.ne]: null } }
+    });
+    res.json({ success: true, data: categories.map(c => c.category) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.createBlog = async (req, res) => {
   try {
     const { title, content, excerpt, category, tags, seo_title, seo_description, city_slug, status } = req.body;

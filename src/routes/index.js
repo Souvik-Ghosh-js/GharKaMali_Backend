@@ -66,6 +66,7 @@ router.get('/plants/history', authenticate, contentCtrl.getMyPlantHistory);
 
 // ── BLOGS ─────────────────────────────────────────────────────────────────────
 router.get('/blogs', contentCtrl.getBlogs);
+router.get('/blogs/categories', contentCtrl.getBlogCategories);
 router.get('/blogs/:slug', contentCtrl.getBlogBySlug);
 
 // ── CITY PAGES ────────────────────────────────────────────────────────────────
