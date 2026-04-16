@@ -5,7 +5,9 @@
       "Bash(node --check src/models/index.js)",
       "Bash(node --check src/swagger.json)",
       "Bash(node -e \"JSON.parse\\(require\\(''fs''\\).readFileSync\\(''src/swagger.json'',''utf8''\\)\\); console.log\\(''swagger JSON valid''\\)\")",
-      "Bash(ssh -i /tmp/lightsail.pem -o StrictHostKeyChecking=no ubuntu@13.201.162.125 \"cd /var/www/gharkamali && git fetch origin main && git reset --hard origin/main && pm2 restart gharkamali-backend && sleep 2 && curl -s https://gkm.gobt.in/health\")"
+      "Bash(ssh -i /tmp/lightsail.pem -o StrictHostKeyChecking=no ubuntu@13.201.162.125 \"cd /var/www/gharkamali && git fetch origin main && git reset --hard origin/main && pm2 restart gharkamali-backend && sleep 2 && curl -s https://gkm.gobt.in/health\")",
+      "Bash(grep -l \"AdminAPI\\\\.\" /c/GharKaMali/gharkamali-admin-dashboard/src/app/**/page.tsx)",
+      "Bash(grep -l \"bookingLogs\\\\|priceHike\\\\|contacts\\\\|withdrawals\\\\|productZonePrice\\\\|global.*search\" /c/GharKaMali/gharkamali-admin-dashboard/src/app/**/page.tsx)"
     ]
   }
 }

@@ -28,6 +28,7 @@ router.get('/bookings/my', authenticate, authorize('customer'), bookingCtrl.getM
 router.get('/bookings/previous-gardeners', authenticate, authorize('customer'), bookingCtrl.getPreviousGardeners);
 router.get('/bookings/check-availability', bookingCtrl.checkAvailability);
 router.get('/bookings/:id', authenticate, bookingCtrl.getBookingDetail);
+router.get('/bookings/:id/logs', authenticate, bookingCtrl.getBookingLogs);
 router.post('/bookings/verify-otp', authenticate, authorize('gardener'), bookingCtrl.verifyVisitOtp);
 router.put('/bookings/status',
   authenticate, authorize('gardener'),
@@ -46,6 +47,18 @@ router.post('/subscriptions', authenticate, authorize('customer'), subscriptionC
 router.get('/subscriptions/my', authenticate, authorize('customer'), subscriptionCtrl.getMySubscriptions);
 router.put('/subscriptions/:id/cancel', authenticate, authorize('customer'), subscriptionCtrl.cancelSubscription);
 router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer'), subscriptionCtrl.selectDates);
+
+// ── CONTACT ───────────────────────────────────────────────────────────────────
+router.post('/contact', async (req, res) => {
+  try {
+    const { name, phone, email, message } = req.body;
+    const { ContactMessage } = require('../models');
+    const contact = await ContactMessage.create({ name, email, phone, message });
+    res.status(201).json({ success: true, data: contact, message: 'Message received successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ── PLANTOPEDIA ───────────────────────────────────────────────────────────────
 router.post('/plants/identify', authenticate, uploadPlant.single('image'), contentCtrl.identifyPlant);
@@ -117,6 +130,107 @@ router.post('/admin/rewards', authenticate, authorize('admin'), adminCtrl.create
 router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewardPenalties);
 
 router.post('/admin/price-hike', authenticate, authorize('admin'), adminCtrl.triggerPriceHike);
+
+// ── ADMIN GARDENER ZONE ASSIGNMENT ────────────────────────────────────────────
+router.post('/admin/gardeners/:id/zones', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { GardenerZone } = require('../models');
+    const { zone_ids } = req.body;
+    await GardenerZone.destroy({ where: { gardener_id: req.params.id } });
+    for (const zid of zone_ids || []) {
+      await GardenerZone.create({ gardener_id: req.params.id, zone_id: zid });
+    }
+    res.json({ success: true, message: 'Zones assigned' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── ADMIN GLOBAL SEARCH ───────────────────────────────────────────────────────
+router.get('/admin/search', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json({ success: true, data: { users: [], bookings: [] } });
+    const { User, Booking } = require('../models');
+    const { Op } = require('sequelize');
+    const users = await User.findAll({
+      where: {
+        [Op.or]: [
+          { name: { [Op.like]: `%${q}%` } },
+          { phone: { [Op.like]: `%${q}%` } },
+          { email: { [Op.like]: `%${q}%` } }
+        ]
+      },
+      limit: 10
+    });
+    const bookings = await Booking.findAll({
+      where: { booking_number: { [Op.like]: `%${q}%` } },
+      limit: 10
+    });
+    res.json({ success: true, data: { users, bookings } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── ADMIN TAGS ───────────────────────────────────────────────────────────────
+router.get('/admin/tags', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Tag } = require('../models');
+    const tags = await Tag.findAll({ order: [['name', 'ASC']] });
+    res.json({ success: true, data: tags });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/admin/tags', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Tag } = require('../models');
+    const tag = await Tag.create(req.body);
+    res.status(201).json({ success: true, data: tag });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/admin/tags/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Tag } = require('../models');
+    await Tag.update(req.body, { where: { id: req.params.id } });
+    const tag = await Tag.findByPk(req.params.id);
+    res.json({ success: true, data: tag });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/admin/tags/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Tag } = require('../models');
+    await Tag.destroy({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Tag deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── ADMIN CONTACTS ───────────────────────────────────────────────────────────
+router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { ContactMessage } = require('../models');
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    const { count, rows } = await ContactMessage.findAndCountAll({
+      limit: parseInt(limit),
+      offset,
+      order: [['created_at', 'DESC']]
+    });
+    res.json({ success: true, data: rows, pagination: { total: count, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(count / limit) } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // Admin blog/content management
 router.post('/admin/blogs', authenticate, authorize('admin'), uploadBlog.single('featured_image'), contentCtrl.createBlog);

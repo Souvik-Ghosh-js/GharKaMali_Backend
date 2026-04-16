@@ -449,6 +449,15 @@ const Tagline = sequelize.define('Tagline', {
   display_order: { type: DataTypes.INTEGER, defaultValue: 0 }
 }, { tableName: 'taglines', underscored: true });
 
+// ─── TAG ──────────────────────────────────────────────────────────────────────
+const Tag = sequelize.define('Tag', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false, unique: true },
+  description: { type: DataTypes.TEXT },
+  color: { type: DataTypes.STRING(7), defaultValue: '#22c55e' }, // Hex color
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'tags', underscored: true });
+
 // ─── FAQ MODEL ────────────────────────────────────────────────────────────────
 const Faq = sequelize.define('Faq', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -649,6 +658,7 @@ module.exports = {
   Payment,
   PriceHikeLog,
   Tagline,
+  Tag,
   Faq,
   BookingLog,
   WithdrawalRequest,
