@@ -279,6 +279,35 @@ exports.createOrder = async (req, res) => {
 
     await t.commit();
 
+    // ── NOTIFY ─────────────────────────────────────────────────────────────
+    const notificationService = require('../services/notification.service');
+    
+    // Notify User
+    await notificationService.notifyUser(req.user.id, {
+      title: '📦 Order Placed!',
+      body: `Your order ${order.order_number} has been received and is processing.`,
+      type: 'success',
+      data: { order_id: order.id }
+    });
+
+    // Notify Admins
+    await notificationService.notifyAdmins({
+      title: '🛒 New Shop Order',
+      body: `Order ${order.order_number} received from ${req.user.name}. Total: ₹${totalAmount}`,
+      type: 'success',
+      data: { order_id: order.id }
+    });
+
+    // Notify about each booking if created
+    for (const bRef of maliBookingResults) {
+      await notificationService.notifyAdmins({
+        title: '🌿 New Service Booking',
+        body: `Booking ${bRef.booking_number} created via Shop Order ${order.order_number}`,
+        type: 'info',
+        data: { booking_number: bRef.booking_number }
+      });
+    }
+
     return res.json({
       success: true,
       message: book_mali

@@ -181,14 +181,16 @@ const BookingTracking = sequelize.define('BookingTracking', {
 // ─── NOTIFICATION ─────────────────────────────────────────────────────────────
 const Notification = sequelize.define('Notification', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  user_id: { type: DataTypes.INTEGER, allowNull: false },
+  user_id: { type: DataTypes.INTEGER, allowNull: true },
+  target_role: { type: DataTypes.ENUM('admin', 'customer', 'gardener', 'all', 'user'), defaultValue: 'user' },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
   title: { type: DataTypes.STRING(200), allowNull: false },
   body: { type: DataTypes.TEXT, allowNull: false },
   type: { type: DataTypes.STRING(50) },
   data: { type: DataTypes.JSON },
   is_read: { type: DataTypes.BOOLEAN, defaultValue: false },
   read_at: { type: DataTypes.DATE }
-}, { tableName: 'notifications' });
+}, { tableName: 'notifications', underscored: true });
 
 // ─── REWARD / PENALTY ─────────────────────────────────────────────────────────
 const RewardPenalty = sequelize.define('RewardPenalty', {

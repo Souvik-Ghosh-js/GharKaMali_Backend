@@ -320,6 +320,9 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
   }
 });
 
+// Send Broadcast Notification
+router.post('/admin/notifications/broadcast', authenticate, authorize('admin'), adminCtrl.sendBroadcastNotification);
+
 module.exports = router;
 
 // ── PAYMENTS (PayU) ───────────────────────────────────────────────────────────

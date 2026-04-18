@@ -58,9 +58,28 @@ const { Server } = require('socket.io');
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// Socket.io for real-time tracking
+// Socket.io for real-time tracking & notifications
+const notificationService = require('./services/notification.service');
+notificationService.init(io);
+
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
+
+  // Room Management
+  socket.on('join-user', (userId) => {
+    socket.join(`user-${userId}`);
+    console.log(`Socket ${socket.id} joined user-${userId}`);
+  });
+
+  socket.on('join-admins', () => {
+    socket.join('admins');
+    console.log(`Socket ${socket.id} joined admins room`);
+  });
+
+  socket.on('join-geofence', (geofenceId) => {
+    socket.join(`geofence-${geofenceId}`);
+    console.log(`Socket ${socket.id} joined geofence-${geofenceId}`);
+  });
 
   socket.on('join-booking', (bookingId) => socket.join(`booking-${bookingId}`));
 

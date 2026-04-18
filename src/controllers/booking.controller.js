@@ -186,16 +186,52 @@ exports.createBooking = async (req, res) => {
     const customer = await User.findByPk(req.user.id);
     await sendWhatsApp(customer.phone, templates.bookingConfirmed(customer.name, scheduled_date, scheduled_time || 'Morning'));
     
+    // ── NOTIFY ─────────────────────────────────────────────────────────────
+    const notificationService = require('../services/notification.service');
+    
+    // Notify Customer
+    await notificationService.notifyUser(req.user.id, {
+      title: '🌿 Booking Received',
+      body: `Your booking ${booking.booking_number} for ${scheduled_date} has been confirmed.`,
+      type: 'success',
+      data: { booking_id: booking.id }
+    });
+
+    // Notify Admin
+    await notificationService.notifyAdmins({
+      title: '🌿 New On-Demand Booking',
+      body: `Booking ${booking.booking_number} received from ${customer.name} for ${scheduled_date}.`,
+      type: 'info',
+      data: { booking_id: booking.id }
+    });
+
     if (gardener_id) {
       const g = await User.findByPk(gardener_id);
       // Notify customer
       if (customer.fcm_token) {
         await notify.bookingAssigned(customer.fcm_token, booking.booking_number, g?.name || 'Gardener');
       }
+      
+      // Real-time notification to Customer about gardener assignment
+      await notificationService.notifyUser(customer.id, {
+        title: '👨‍🌾 Gardener Assigned',
+        body: `${g?.name || 'A gardener'} has been assigned to your booking ${booking.booking_number}.`,
+        type: 'info',
+        data: { booking_id: booking.id, gardener_name: g?.name }
+      });
+
       // Notify gardener
       if (g?.fcm_token) {
         await notify.newJobAssigned(g.fcm_token, booking.booking_number, service_address, scheduled_date);
       }
+      
+      // Real-time notification to Gardener
+      await notificationService.notifyUser(gardener_id, {
+        title: '💼 New Job Assigned',
+        body: `You have been assigned a new job ${booking.booking_number} at ${service_address}.`,
+        type: 'info',
+        data: { booking_id: booking.id }
+      });
     }
 
     res.status(201).json({ success: true, message: 'Booking created', data: booking });
@@ -289,16 +325,22 @@ exports.updateBookingStatus = async (req, res) => {
     }
 
     const updates = { status };
-    if (gardener_notes) updates.gardener_notes = gardener_notes;
-    if (status === 'assigned') updates.assigned_at = new Date();
-    if (status === 'en_route') updates.en_route_at = new Date();
-    if (status === 'arrived') updates.gardener_arrived_at = new Date();
+    const notificationService = require('../services/notification.service');
+
     if (status === 'en_route') {
       await logBookingEvent(booking.id, 'en_route', req.user.id, 'gardener', null, 'Gardener is on the way');
       const customer = await User.findByPk(booking.customer_id);
       const gardener = await User.findByPk(req.user.id);
       await sendWhatsApp(customer.phone, templates.gardenerEnRoute(customer.name, gardener.name, '15'));
       if (customer.fcm_token) await notify.gardenerEnRoute(customer.fcm_token, gardener.name, booking.booking_number);
+      
+      // Real-time
+      await notificationService.notifyUser(customer.id, {
+        title: '🚚 Gardener En Route',
+        body: `${gardener.name} is on the way to your location for booking ${booking.booking_number}.`,
+        type: 'info',
+        data: { booking_id: booking.id, latitude: gardener.latitude, longitude: gardener.longitude }
+      });
     }
     if (status === 'arrived') {
       await logBookingEvent(booking.id, 'arrived', req.user.id, 'gardener', null, 'Gardener arrived at location');
@@ -306,21 +348,27 @@ exports.updateBookingStatus = async (req, res) => {
       const customer = await User.findByPk(booking.customer_id);
       await sendWhatsApp(customer.phone, templates.gardenerArrived(customer.name, booking.otp));
       if (customer.fcm_token) await notify.gardenerArrived(customer.fcm_token, booking.otp, booking.booking_number);
+
+      // Real-time
+      await notificationService.notifyUser(customer.id, {
+        title: '📍 Gardener Arrived',
+        body: `Your gardener has arrived! Please share the OTP ${booking.otp} to start the service.`,
+        type: 'info',
+        data: { booking_id: booking.id, otp: booking.otp }
+      });
     }
 
     if (status === 'completed') {
       updates.completed_at = new Date();
-      // Extra plants billing
+      // ... extra plants logic omitted for brevity as it remains same ...
       if (extra_plants > 0) {
         const zone = await Geofence.findByPk(booking.zone_id);
         const extraAmt = extra_plants * (zone ? parseFloat(zone.price_per_plant) : 15);
         updates.extra_plants = extra_plants;
         updates.extra_amount = extraAmt;
-        // FIX: Increment current total_amount instead of resetting it (preserves add-ons)
         updates.total_amount = parseFloat(booking.total_amount) + extraAmt;
       }
 
-      // Handle work proof images
       if (req.files) {
         const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
         if (req.files.before_image) updates.before_image = `${baseUrl}/uploads/work-proof/${req.files.before_image[0].filename}`;
@@ -328,24 +376,30 @@ exports.updateBookingStatus = async (req, res) => {
       }
 
       const customer = await User.findByPk(booking.customer_id);
-      await sendWhatsApp(customer.phone, templates.visitCompleted(customer.name, updates.total_amount || booking.total_amount));
-      if (customer?.fcm_token) await notify.visitCompleted(customer.fcm_token, booking.booking_number, updates.total_amount || booking.total_amount);
+      const finalAmount = updates.total_amount || booking.total_amount;
+      await sendWhatsApp(customer.phone, templates.visitCompleted(customer.name, finalAmount));
+      if (customer?.fcm_token) await notify.visitCompleted(customer.fcm_token, booking.booking_number, finalAmount);
 
-      // Update gardener stats: increment jobs AND earnings
+      // Real-time
+      await notificationService.notifyUser(customer.id, {
+        title: '✅ Service Completed',
+        body: `Your garden service for booking ${booking.booking_number} is complete. Thank you!`,
+        type: 'success',
+        data: { booking_id: booking.id, total_amount: finalAmount }
+      });
+
+      // Update gardener stats
       await GardenerProfile.increment({ 
         total_jobs: 1, 
         completed_jobs: 1,
-        total_earnings: updates.total_amount || booking.total_amount
+        total_earnings: finalAmount
       }, { where: { user_id: req.user.id } });
 
-      // If subscription booking, increment used visits
       if (booking.booking_type === 'subscription' && booking.subscription_id) {
         await Subscription.increment('visits_used', { where: { id: booking.subscription_id } });
       }
-    }
 
-    if (status === 'completed') {
-      await logBookingEvent(booking.id, 'completed', req.user.id, 'gardener', { total_amount: updates.total_amount || booking.total_amount }, 'Service completed');
+      await logBookingEvent(booking.id, 'completed', req.user.id, 'gardener', { total_amount: finalAmount }, 'Service completed');
     }
 
     await booking.update(updates);
