@@ -185,7 +185,7 @@ exports.getAnalytics = async (req, res) => {
         SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing_orders,
         SUM(CASE WHEN status = 'shipped'    THEN 1 ELSE 0 END) as shipped_orders,
         SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) as pending_orders
-      FROM orders o WHERE o.created_at >= :since ${gfId ? 'AND (o.geofence_id = :gfId OR (o.geofence_id IS NULL AND o.shipping_city = :city))' : ''}
+      FROM orders o WHERE o.created_at >= :since ${orderCond}
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const topProducts = await db.query(`
@@ -212,7 +212,7 @@ exports.getAnalytics = async (req, res) => {
 
     const shopOrdersByCity = await db.query(`
       SELECT shipping_city as city, COUNT(id) as total, SUM(total_amount) as revenue
-      FROM orders o WHERE o.created_at >= :since ${gfId ? 'AND (o.geofence_id = :gfId OR (o.geofence_id IS NULL AND o.shipping_city = :city))' : ''}
+      FROM orders o WHERE o.created_at >= :since ${orderCond}
       GROUP BY shipping_city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
