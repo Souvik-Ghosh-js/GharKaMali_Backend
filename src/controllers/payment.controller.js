@@ -113,6 +113,99 @@ exports.paymentCallback = async (req, res) => {
   }
 };
 
+// PayU success/failure aliases or separate handlers
+exports.paymentSuccess = async (req, res) => {
+  return exports.paymentCallback(req, res);
+};
+
+exports.paymentFailure = async (req, res) => {
+  return exports.paymentCallback(req, res);
+};
+
+// Get my payments
+exports.getMyPayments = async (req, res) => {
+  try {
+    const payments = await Payment.findAll({
+      where: { user_id: req.user.id },
+      order: [['created_at', 'DESC']]
+    });
+    res.json({ success: true, data: payments });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Check payment status
+exports.checkPaymentStatus = async (req, res) => {
+  try {
+    const { txnid } = req.params;
+    const payment = await Payment.findOne({ where: { transaction_id: txnid } });
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+    res.json({ success: true, data: payment });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Reschedule booking (if payment adjustment needed)
+exports.rescheduleBooking = async (req, res) => {
+  try {
+    const { booking_id, new_date, new_time } = req.body;
+    const booking = await Booking.findOne({ where: { id: booking_id, customer_id: req.user.id } });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    
+    await booking.update({ scheduled_date: new_date, scheduled_time: new_time });
+    res.json({ success: true, message: 'Booking rescheduled successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Check serviceability
+exports.checkServiceability = async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    if (!lat || !lng) return res.status(400).json({ success: false, message: 'Latitude and longitude are required' });
+    
+    const { Geofence } = require('../models');
+    const zones = await Geofence.findAll({ where: { is_active: true } });
+    // Simple radius check or use a proper library if available
+    // For now, return all active zones as a placeholder or implement point-in-polygon
+    res.json({ success: true, data: zones });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get all payments (Admin)
+exports.getAllPayments = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const where = {};
+    if (status) where.status = status;
+
+    const { count, rows } = await Payment.findAndCountAll({
+      where,
+      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+
+    res.json({
+      success: true,
+      data: {
+        items: rows,
+        total: count,
+        page: parseInt(page),
+        pages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // Wallet topup initiate
 exports.walletTopup = async (req, res) => {
   try {
