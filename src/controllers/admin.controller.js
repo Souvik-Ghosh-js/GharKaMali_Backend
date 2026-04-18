@@ -98,7 +98,7 @@ exports.getAnalytics = async (req, res) => {
       JOIN users cu ON cu.id = b.customer_id
       LEFT JOIN geofences g ON b.geofence_id = g.id
       WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL) ${bookingCond}
-      GROUP BY COALESCE(g.name, cu.city), cu.city ORDER BY total DESC
+      GROUP BY g.id, g.name, cu.city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingsByCity = await db.query(`
@@ -121,7 +121,7 @@ exports.getAnalytics = async (req, res) => {
       LEFT JOIN service_plans sp ON s.plan_id = sp.id
       JOIN users cu ON cu.id = s.customer_id
       WHERE s.created_at >= :since ${subscriptionCond}
-      GROUP BY s.plan_id ORDER BY count DESC
+      GROUP BY s.plan_id, sp.name ORDER BY count DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingStatusDist = await db.query(`
@@ -160,7 +160,7 @@ exports.getAnalytics = async (req, res) => {
       FROM bookings b 
       JOIN users cu ON cu.id = b.customer_id
       LEFT JOIN geofences g ON b.geofence_id = g.id
-      WHERE b.rating IS NOT NULL ${bookingCond} GROUP BY COALESCE(g.name, cu.city)
+      WHERE b.rating IS NOT NULL ${bookingCond} GROUP BY g.id, g.name, cu.city
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const completionStats = await db.query(`
@@ -192,7 +192,7 @@ exports.getAnalytics = async (req, res) => {
       JOIN products p ON oi.product_id = p.id
       JOIN orders o ON oi.order_id = o.id
       WHERE o.created_at >= :since AND o.payment_status = 'paid' ${orderCond}
-      GROUP BY oi.product_id ORDER BY total_sold DESC LIMIT 5
+      GROUP BY oi.product_id, p.name, p.icon_key ORDER BY total_sold DESC LIMIT 5
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const shopOrdersByZone = await db.query(`
@@ -204,7 +204,7 @@ exports.getAnalytics = async (req, res) => {
       FROM orders o 
       LEFT JOIN geofences g ON o.geofence_id = g.id
       WHERE o.created_at >= :since ${orderCond}
-      GROUP BY COALESCE(g.name, o.shipping_city), o.shipping_city ORDER BY total DESC
+      GROUP BY g.id, g.name, o.shipping_city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const shopOrdersByCity = await db.query(`
@@ -219,7 +219,7 @@ exports.getAnalytics = async (req, res) => {
       JOIN service_plans sp ON s.plan_id = sp.id
       JOIN users cu ON cu.id = s.customer_id
       WHERE s.status = 'active' ${subscriptionCond}
-      GROUP BY s.plan_id ORDER BY active_count DESC
+      GROUP BY s.plan_id, sp.name, sp.price ORDER BY active_count DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const subscriptionsByZone = await db.query(`
@@ -231,7 +231,7 @@ exports.getAnalytics = async (req, res) => {
       JOIN users cu ON cu.id = s.customer_id
       LEFT JOIN geofences g ON s.geofence_id = g.id
       WHERE s.created_at >= :since ${subscriptionCond}
-      GROUP BY COALESCE(g.name, cu.city) ORDER BY count DESC
+      GROUP BY g.id, g.name, cu.city ORDER BY count DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // 7. Financial Summary
