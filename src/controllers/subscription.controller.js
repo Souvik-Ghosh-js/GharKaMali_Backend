@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const { Subscription, ServicePlan, User, Booking, ServiceZone } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const moment = require('moment');
+const bookingCtrl = require('./booking.controller');
 
 const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;

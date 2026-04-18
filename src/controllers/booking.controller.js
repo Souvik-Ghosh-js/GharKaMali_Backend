@@ -45,7 +45,7 @@ const checkGardenerAvailabilityInternal = async (date, gardener_id, zone_id) => 
   if (gardener_id) {
     gardenerIds = [parseInt(gardener_id)];
   } else if (zone_id) {
-    const gzs = await GardenerZone.findAll({ where: { geofence_id: zone_id } });
+    const gzs = await GardenerZone.findAll({ where: { zone_id } });
     gardenerIds = gzs.map(gz => gz.gardener_id);
   } else {
     return [];
