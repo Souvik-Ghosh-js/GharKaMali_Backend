@@ -153,6 +153,7 @@ exports.createBooking = async (req, res) => {
       customer_id: req.user.id,
       gardener_id,
       zone_id,
+      geofence_id: zone_id, // Map the selected geofence ID
       booking_type: 'ondemand',
       status: gardener_id ? 'assigned' : 'pending',
       assigned_at: gardener_id ? new Date() : null,

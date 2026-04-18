@@ -132,16 +132,39 @@ router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewa
 
 router.post('/admin/price-hike', authenticate, authorize('admin'), adminCtrl.triggerPriceHike);
 
-// ── ADMIN GARDENER ZONE ASSIGNMENT ────────────────────────────────────────────
-router.post('/admin/gardeners/:id/zones', authenticate, authorize('admin'), async (req, res) => {
+// ── ADMIN GARDENER GEOFENCE ASSIGNMENT ─────────────────────────────────────────
+router.get('/admin/gardeners/:id/zones', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { GardenerZone, Geofence } = require('../models');
+    const zones = await GardenerZone.findAll({
+      where: { gardener_id: req.params.id },
+      include: [{ model: Geofence, as: 'geofence' }]
+    });
+    res.json({ success: true, data: zones });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/admin/gardeners/:id/zones', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
     const { GardenerZone } = require('../models');
-    const { zone_ids } = req.body;
+    const { geofence_ids } = req.body;
     await GardenerZone.destroy({ where: { gardener_id: req.params.id } });
-    for (const zid of zone_ids || []) {
-      await GardenerZone.create({ gardener_id: req.params.id, zone_id: zid });
+    for (const gid of geofence_ids || []) {
+      await GardenerZone.create({ gardener_id: req.params.id, geofence_id: gid });
     }
-    res.json({ success: true, message: 'Zones assigned' });
+    res.json({ success: true, message: 'Geofences assigned successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/admin/gardeners/:id/zones/:geofence_id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { GardenerZone } = require('../models');
+    await GardenerZone.destroy({ where: { gardener_id: req.params.id, geofence_id: req.params.geofence_id } });
+    res.json({ success: true, message: 'Geofence association removed' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

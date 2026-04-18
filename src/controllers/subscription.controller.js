@@ -31,6 +31,7 @@ exports.subscribe = async (req, res) => {
       customer_id: req.user.id,
       plan_id,
       zone_id,
+      geofence_id: zone_id, // Map selected zone/geofence
       preferred_gardener_id,
       status: 'active',
       start_date: startDate,
@@ -106,8 +107,11 @@ exports.cancelSubscription = async (req, res) => {
 // Admin: get all subscriptions
 exports.getAllSubscriptions = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, search } = req.query;
+    const { page = 1, limit = 20, status, search, geofence_id, zone_id } = req.query;
     const where = status ? { status } : {};
+    
+    if (geofence_id) where.geofence_id = geofence_id;
+    else if (zone_id) where.zone_id = zone_id;
     
     if (search) {
       where[Op.or] = [
@@ -120,7 +124,9 @@ exports.getAllSubscriptions = async (req, res) => {
       where,
       include: [
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'email'] },
-        { model: ServicePlan, as: 'plan', attributes: ['id', 'name', 'price'] }
+        { model: ServicePlan, as: 'plan', attributes: ['id', 'name', 'price'] },
+        { model: ServiceZone, as: 'zone', attributes: ['id', 'name', 'city'] },
+        { model: Geofence, as: 'geofence', attributes: ['id', 'name', 'city'] }
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
@@ -194,6 +200,7 @@ exports.selectDates = async (req, res) => {
         gardener_id: gardenerId,
         subscription_id: subscription.id,
         zone_id: subscription.zone_id,
+        geofence_id: subscription.geofence_id || subscription.zone_id,
         booking_type: 'subscription',
         status: gardenerId ? 'assigned' : 'pending',
         assigned_at: gardenerId ? new Date() : null,

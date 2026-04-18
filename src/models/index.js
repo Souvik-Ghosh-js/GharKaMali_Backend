@@ -77,8 +77,8 @@ const ServiceZone = sequelize.define('ServiceZone', {
 const GardenerZone = sequelize.define('GardenerZone', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   gardener_id: { type: DataTypes.INTEGER, allowNull: false },
-  zone_id: { type: DataTypes.INTEGER, allowNull: false }
-}, { tableName: 'gardener_zones' });
+  geofence_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'geofences', key: 'id' } }
+}, { tableName: 'gardener_zones', underscored: true });
 
 // ─── SERVICE PLAN ─────────────────────────────────────────────────────────────
 const ServicePlan = sequelize.define('ServicePlan', {
@@ -116,6 +116,7 @@ const Subscription = sequelize.define('Subscription', {
   visits_used: { type: DataTypes.INTEGER, defaultValue: 0 },
   visits_total: { type: DataTypes.INTEGER, allowNull: false },
   amount_paid: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
   service_address: { type: DataTypes.TEXT },
   service_latitude: { type: DataTypes.DECIMAL(10, 8) },
   service_longitude: { type: DataTypes.DECIMAL(11, 8) },
@@ -163,7 +164,8 @@ const Booking = sequelize.define('Booking', {
   cancellation_reason: { type: DataTypes.TEXT },
   rating: { type: DataTypes.INTEGER },
   review: { type: DataTypes.TEXT },
-  rated_at: { type: DataTypes.DATE }
+  rated_at: { type: DataTypes.DATE },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'bookings' });
 
 // ─── BOOKING TRACKING ─────────────────────────────────────────────────────────
@@ -431,6 +433,7 @@ const Order = sequelize.define('Order', {
   service_longitude: { type: DataTypes.DECIMAL(11, 8) },
   tracking_number: { type: DataTypes.STRING(100) },
   tracking_url: { type: DataTypes.STRING(500) },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
   notes: { type: DataTypes.TEXT }
 }, { tableName: 'orders' });
 
@@ -574,9 +577,9 @@ Subscription.belongsTo(User, { foreignKey: 'preferred_gardener_id', as: 'preferr
 Subscription.hasMany(Booking, { foreignKey: 'subscription_id', as: 'bookings' });
 
 GardenerZone.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
-GardenerZone.belongsTo(ServiceZone, { foreignKey: 'zone_id', as: 'zone' });
-User.hasMany(GardenerZone, { foreignKey: 'gardener_id', as: 'assignedZones' });
-ServiceZone.hasMany(GardenerZone, { foreignKey: 'zone_id', as: 'gardenerAssignments' });
+GardenerZone.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+User.hasMany(GardenerZone, { foreignKey: 'gardener_id', as: 'assignedGeofences' });
+Geofence.hasMany(GardenerZone, { foreignKey: 'geofence_id', as: 'gardenerAssignments' });
 
 RewardPenalty.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -606,6 +609,10 @@ User.hasMany(PlantIdentification, { foreignKey: 'user_id', as: 'plantIdentificat
 
 User.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 User.belongsTo(ServiceZone, { foreignKey: 'service_zone_id', as: 'serviceZone' });
+
+Booking.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofenceRef' });
+Subscription.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofenceRef' });
+Order.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofenceRef' });
 
 // BookingLog associations
 BookingLog.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
