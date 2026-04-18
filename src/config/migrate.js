@@ -60,6 +60,8 @@ const tables = [
     total_spent     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     referral_code   VARCHAR(20)   UNIQUE,
     referred_by     INT,
+    geofence_id     INT,
+    service_zone_id INT,
     created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (referred_by) REFERENCES users(id) ON DELETE SET NULL,
@@ -99,6 +101,71 @@ const tables = [
     INDEX idx_gp_available    (is_available)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  // ── WITHDRAWAL REQUESTS ────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS withdrawal_requests (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    gardener_id   INT           NOT NULL,
+    amount        DECIMAL(10,2) NOT NULL,
+    status        ENUM('pending','approved','rejected','processed') NOT NULL DEFAULT 'pending',
+    bank_account  VARCHAR(30),
+    bank_ifsc     VARCHAR(15),
+    bank_name     VARCHAR(100),
+    admin_notes   TEXT,
+    processed_at  DATETIME,
+    processed_by  INT,
+    geofence_id   INT,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (gardener_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (processed_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // ── REVIEWS ─────────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS reviews (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id   INT           NOT NULL,
+    booking_id    INT,
+    gardener_id   INT,
+    rating        INT           NOT NULL,
+    comment       TEXT,
+    status        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    admin_notes   TEXT,
+    geofence_id   INT,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES users(id)    ON DELETE CASCADE,
+    FOREIGN KEY (booking_id)  REFERENCES bookings(id) ON DELETE SET NULL,
+    FOREIGN KEY (gardener_id) REFERENCES users(id)    ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // ── TIPS ────────────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS tips (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    booking_id    INT           NOT NULL,
+    customer_id   INT           NOT NULL,
+    gardener_id   INT           NOT NULL,
+    amount        DECIMAL(10,2) NOT NULL,
+    geofence_id   INT,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id)  REFERENCES bookings(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES users(id)    ON DELETE CASCADE,
+    FOREIGN KEY (gardener_id) REFERENCES users(id)    ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // ── CONTACT MESSAGES ────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS contact_messages (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(100)  NOT NULL,
+    email         VARCHAR(100),
+    phone         VARCHAR(15),
+    message       TEXT          NOT NULL,
+    is_read       TINYINT(1)    NOT NULL DEFAULT 0,
+    geofence_id   INT,
+    created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   // ── SERVICE ZONES ──────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS service_zones (
     id                   INT AUTO_INCREMENT PRIMARY KEY,
@@ -126,6 +193,7 @@ const tables = [
     id           INT AUTO_INCREMENT PRIMARY KEY,
     gardener_id  INT NOT NULL,
     zone_id      INT NOT NULL,
+    geofence_id  INT,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (gardener_id) REFERENCES users(id)         ON DELETE CASCADE,
@@ -179,6 +247,7 @@ const tables = [
     plant_count           INT          NOT NULL DEFAULT 1,
     notes                 TEXT,
     payment_id            VARCHAR(100),
+    geofence_id           INT,
     created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id)           REFERENCES users(id)         ON DELETE CASCADE,
@@ -228,6 +297,7 @@ const tables = [
     rating              INT,
     review              TEXT,
     rated_at            DATETIME,
+    geofence_id         INT,
     created_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id)     REFERENCES users(id)         ON DELETE CASCADE,
@@ -257,9 +327,10 @@ const tables = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
   // ── NOTIFICATIONS ──────────────────────────────────────────────────────────
-  `CREATE TABLE IF NOT EXISTS notifications (
+  `CREATE TABLE notifications (
     id         INT AUTO_INCREMENT PRIMARY KEY,
-    user_id    INT          NOT NULL,
+    target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') NOT NULL DEFAULT 'user',
+    geofence_id INT,
     title      VARCHAR(200) NOT NULL,
     body       TEXT         NOT NULL,
     type       VARCHAR(50),
@@ -269,8 +340,10 @@ const tables = [
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (geofence_id) REFERENCES geofences(id) ON DELETE SET NULL,
     INDEX idx_notif_user    (user_id),
-    INDEX idx_notif_is_read (is_read)
+    INDEX idx_notif_is_read (is_read),
+    INDEX idx_notif_geofence (geofence_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
   // ── REWARD / PENALTY ───────────────────────────────────────────────────────
@@ -284,6 +357,7 @@ const tables = [
     booking_id  INT,
     status      ENUM('pending','applied','reversed') NOT NULL DEFAULT 'pending',
     applied_at  DATETIME,
+    geofence_id INT,
     created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (gardener_id) REFERENCES users(id)    ON DELETE CASCADE,
@@ -306,6 +380,7 @@ const tables = [
     sunlight_requirement VARCHAR(100),
     confidence_score    DECIMAL(5,2),
     raw_response        JSON,
+    geofence_id         INT,
     created_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -373,6 +448,7 @@ const tables = [
     payment_for      VARCHAR(100),
     gateway_response JSON,
     notes            TEXT,
+    geofence_id      INT,
     created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id)         REFERENCES users(id)         ON DELETE CASCADE,
@@ -435,6 +511,7 @@ const tables = [
     resolution_notes TEXT,
     resolved_at      DATETIME,
     resolved_by      INT,
+    geofence_id      INT,
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (booking_id)  REFERENCES bookings(id) ON DELETE SET NULL,
