@@ -108,10 +108,11 @@ const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 // Create booking (on-demand)
 exports.createBooking = async (req, res) => {
   try {
-    const { zone_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id, payment_method } = req.body;
+    const { zone_id, geofence_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id, payment_method } = req.body;
 
+    const activeZoneId = geofence_id || zone_id;
     // Use Geofence for pricing if available
-    const zone = await Geofence.findByPk(zone_id);
+    const zone = await Geofence.findByPk(activeZoneId);
     if (!zone) return res.status(404).json({ success: false, message: 'Service zone not found' });
 
     const pCount = parseInt(plant_count) || 1;
@@ -152,8 +153,8 @@ exports.createBooking = async (req, res) => {
       booking_number: genBookingNumber(),
       customer_id: req.user.id,
       gardener_id,
-      zone_id,
-      geofence_id: zone_id, // Map the selected geofence ID
+      zone_id: activeZoneId,
+      geofence_id: activeZoneId, // Map the selected geofence ID
       booking_type: 'ondemand',
       status: gardener_id ? 'assigned' : 'pending',
       assigned_at: gardener_id ? new Date() : null,
@@ -177,7 +178,7 @@ exports.createBooking = async (req, res) => {
     }
 
     // Log booking creation
-    await logBookingEvent(booking.id, 'created', req.user.id, 'customer', { zone_id, payment_method: payment_method || 'online', surge_multiplier: surge }, `Booking ${booking.booking_number} created`);
+    await logBookingEvent(booking.id, 'created', req.user.id, 'customer', { zone_id: activeZoneId, payment_method: payment_method || 'online', surge_multiplier: surge }, `Booking ${booking.booking_number} created`);
     if (gardener_id) {
       await logBookingEvent(booking.id, 'assigned', null, 'system', { gardener_id }, 'Auto-assigned to gardener');
     }
