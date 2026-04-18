@@ -267,6 +267,11 @@ exports.getAnalytics = async (req, res) => {
         activeGardeners: activeGardeners[0]?.count || 0,
         activeSubscriptions: activeSubscriptions[0]?.count || 0,
         selectedCity: cityFilter || null,
+        _debug: {
+          cityFilter,
+          userCityCounts: await db.query('SELECT city, COUNT(*) as count FROM users GROUP BY city', { type: db.QueryTypes.SELECT }),
+          orderCityCounts: await db.query('SELECT shipping_city, COUNT(*) as count FROM orders GROUP BY shipping_city', { type: db.QueryTypes.SELECT })
+        }
       }
     });
   } catch (err) {
