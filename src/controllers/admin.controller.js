@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { Op, fn, col, literal, sequelize } = require('sequelize');
 const db = require('../config/database');
-const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq } = require('../models');
+const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq, Geofence, GardenerZone, Review, Complaint, PlantIdentification } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
@@ -63,11 +63,11 @@ exports.getAnalytics = async (req, res) => {
       const gf = await Geofence.findByPk(gfId);
       if (gf) cityFilter = gf.city;
       
-      // Hybrid logic: Match explicit geofence_id OR match city for legacy records
-      bookingCond = `AND (b.geofence_id = :gfId OR (b.geofence_id IS NULL AND cu.city = :city))`;
-      subscriptionCond = `AND (s.geofence_id = :gfId OR (s.geofence_id IS NULL AND cu.city = :city))`;
-      orderCond = `AND (o.geofence_id = :gfId OR (o.geofence_id IS NULL AND o.shipping_city = :city))`;
-      userCond = `AND (u.geofence_id = :gfId OR (u.geofence_id IS NULL AND u.city = :city))`;
+      // Hybrid logic: Match explicit geofence_id OR match legacy zone_id OR match city for legacy records
+      bookingCond = `AND (b.geofence_id = :gfId OR b.zone_id = :gfId OR (b.geofence_id IS NULL AND b.zone_id IS NULL AND cu.city = :city))`;
+      subscriptionCond = `AND (s.geofence_id = :gfId OR s.zone_id = :gfId OR (s.geofence_id IS NULL AND s.zone_id IS NULL AND cu.city = :city))`;
+      orderCond = `AND (o.geofence_id = :gfId OR o.zone_id = :gfId OR (o.geofence_id IS NULL AND o.zone_id IS NULL AND o.shipping_city = :city))`;
+      userCond = `AND (u.geofence_id = :gfId OR u.service_zone_id = :gfId OR (u.geofence_id IS NULL AND u.service_zone_id IS NULL AND u.city = :city))`;
     }
 
     const rp = { since, city: cityFilter, gfId };
@@ -90,15 +90,16 @@ exports.getAnalytics = async (req, res) => {
     // 2. Geographic Distribution
     const bookingsByZone = await db.query(`
       SELECT 
-        COALESCE(g.name, cu.city) as zone,
+        COALESCE(g.name, sz.name, cu.city) as zone,
         cu.city, 
         COUNT(b.id) as total, 
         SUM(b.total_amount) as revenue
       FROM bookings b 
       JOIN users cu ON cu.id = b.customer_id
       LEFT JOIN geofences g ON b.geofence_id = g.id
-      WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL) ${bookingCond}
-      GROUP BY g.id, g.name, cu.city ORDER BY total DESC
+      LEFT JOIN service_zones sz ON b.zone_id = sz.id
+      WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL OR b.zone_id IS NOT NULL) ${bookingCond}
+      GROUP BY g.id, g.name, sz.id, sz.name, cu.city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingsByCity = await db.query(`
@@ -135,7 +136,7 @@ exports.getAnalytics = async (req, res) => {
       SELECT u.name, gp.rating, gp.completed_jobs, gp.total_earnings
       FROM users u JOIN gardener_profiles gp ON u.id = gp.user_id
       WHERE u.role = 'gardener' AND u.is_active = 1
-      ${gfId ? 'AND (u.geofence_id = :gfId OR (u.geofence_id IS NULL AND u.city = :city))' : ''}
+      ${gfId ? 'AND (u.geofence_id = :gfId OR u.service_zone_id = :gfId OR (u.geofence_id IS NULL AND u.service_zone_id IS NULL AND u.city = :city))' : ''}
       ORDER BY gp.rating DESC, gp.completed_jobs DESC LIMIT 5
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
@@ -156,11 +157,12 @@ exports.getAnalytics = async (req, res) => {
 
     // 5. Detailed Rating & Completion
     const ratingByZone = await db.query(`
-      SELECT COALESCE(g.name, cu.city) as zone, AVG(b.rating) as avg_rating
+      SELECT COALESCE(g.name, sz.name, cu.city) as zone, AVG(b.rating) as avg_rating
       FROM bookings b 
       JOIN users cu ON cu.id = b.customer_id
       LEFT JOIN geofences g ON b.geofence_id = g.id
-      WHERE b.rating IS NOT NULL ${bookingCond} GROUP BY g.id, g.name, cu.city
+      LEFT JOIN service_zones sz ON b.zone_id = sz.id
+      WHERE b.rating IS NOT NULL ${bookingCond} GROUP BY g.id, g.name, sz.id, sz.name, cu.city
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const completionStats = await db.query(`
@@ -197,14 +199,15 @@ exports.getAnalytics = async (req, res) => {
 
     const shopOrdersByZone = await db.query(`
       SELECT
-        COALESCE(g.name, o.shipping_city, 'Unknown') as zone,
+        COALESCE(g.name, sz.name, o.shipping_city, 'Unknown') as zone,
         COALESCE(o.shipping_city, 'Unknown') as city,
         COUNT(o.id) as total,
         SUM(o.total_amount) as revenue
       FROM orders o 
       LEFT JOIN geofences g ON o.geofence_id = g.id
+      LEFT JOIN service_zones sz ON o.zone_id = sz.id
       WHERE o.created_at >= :since ${orderCond}
-      GROUP BY g.id, g.name, o.shipping_city ORDER BY total DESC
+      GROUP BY g.id, g.name, sz.id, sz.name, o.shipping_city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const shopOrdersByCity = await db.query(`
@@ -224,14 +227,15 @@ exports.getAnalytics = async (req, res) => {
 
     const subscriptionsByZone = await db.query(`
       SELECT
-        COALESCE(g.name, cu.city, 'Unknown') as zone,
+        COALESCE(g.name, sz.name, cu.city, 'Unknown') as zone,
         COUNT(s.id) as count,
         SUM(s.amount_paid) as revenue
       FROM subscriptions s
       JOIN users cu ON cu.id = s.customer_id
       LEFT JOIN geofences g ON s.geofence_id = g.id
+      LEFT JOIN service_zones sz ON s.zone_id = sz.id
       WHERE s.created_at >= :since ${subscriptionCond}
-      GROUP BY g.id, g.name, cu.city ORDER BY count DESC
+      GROUP BY g.id, g.name, sz.id, sz.name, cu.city ORDER BY count DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // 7. Financial Summary
@@ -240,7 +244,7 @@ exports.getAnalytics = async (req, res) => {
       `  (SELECT COALESCE(SUM(b.total_amount), 0) FROM bookings b JOIN users cu ON cu.id = b.customer_id`,
       `    WHERE b.status="completed" AND b.created_at >= :since ${bookingCond}) as booking_revenue,`,
       `  (SELECT COALESCE(SUM(total_amount), 0) FROM orders o`,
-      `    WHERE payment_status="paid" AND created_at >= :since ${gfId ? 'AND (o.geofence_id = :gfId OR (o.geofence_id IS NULL AND o.shipping_city = :city))' : ''}) as shop_revenue,`,
+      `    WHERE payment_status="paid" AND created_at >= :since ${orderCond}) as shop_revenue,`,
       `  (SELECT COALESCE(SUM(s.amount_paid), 0) FROM subscriptions s JOIN users cu ON cu.id = s.customer_id`,
       `    WHERE s.created_at >= :since ${subscriptionCond}) as subscription_revenue`,
     ].filter(Boolean).join('\n'), { replacements: rp, type: db.QueryTypes.SELECT });
@@ -248,7 +252,7 @@ exports.getAnalytics = async (req, res) => {
     const activeGardeners = await db.query(`
       SELECT COUNT(*) as count FROM users u
       WHERE u.role = "gardener" AND u.is_active = 1 AND u.is_approved = 1
-      ${gfId ? 'AND (u.geofence_id = :gfId OR (u.geofence_id IS NULL AND u.city = :city))' : ''}
+      ${userCond}
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const activeSubscriptions = await db.query(`
