@@ -1,51 +1,11 @@
+const { User, Booking, Payment, Subscription, ServicePlan, Order } = require('../models');
+const { PAYU_KEY, PAYU_SALT, PAYU_URL, BASE_URL } = process.env;
 const crypto = require('crypto');
-const axios = require('axios');
-const { Payment, User, Booking, Subscription, Order, ServicePlan } = require('../models');
-
-// ── PayU Configuration ─────────────────────────────────────────────────────
-const PAYU_KEY = process.env.PAYU_MERCHANT_KEY || 'gtKFFx';
-const PAYU_SALT = process.env.PAYU_MERCHANT_SALT || '4R38lvwiV57FwVpsgOvTXBdLE4tHUXFW';
-const PAYU_BASE = process.env.PAYU_MODE === 'production'
-  ? 'https://secure.payu.in/_payment'
-  : 'https://test.payu.in/_payment';
-
-const MOCK_PAYMENT = true; // Set to true to bypass PayU and simulate success
-
-// Generate SHA512 hash for PayU
-const generateHash = (params) => {
-  // Formula: key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5|udf6|SALT
-  // Based on your image, PayU Biz test gateway expects exactly 7 pipes after the email
-  const key = String(params.key).trim();
-  const txnid = String(params.txnid).trim();
-  const amount = String(params.amount).trim();
-  const productinfo = String(params.productinfo).trim();
-  const firstname = String(params.firstname).trim();
-  const email = String(params.email).trim();
-  
-  const str = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||${PAYU_SALT}`;
-  return crypto.createHash('sha512').update(str).digest('hex');
-};
-
-// Verify hash on response
-const verifyHash = (params) => {
-  const key = String(params.key).trim();
-  const status = String(params.status).trim();
-  const amount = String(params.amount).trim();
-  const txnid = String(params.txnid).trim();
-  const productinfo = String(params.productinfo).trim();
-  const firstname = String(params.firstname).trim();
-  const email = String(params.email).trim();
-
-  // SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
-  const str = `${PAYU_SALT}|${status}|||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
-  const computed = crypto.createHash('sha512').update(str).digest('hex');
-  return computed === params.hash;
-};
 
 // Initiate payment — returns form data to post to PayU
 exports.initiatePayment = async (req, res) => {
   try {
-    const { type, booking_id, subscription_id, amount } = req.body;
+    const { type, booking_id, subscription_id, amount, geofence_id } = req.body;
     const user = await User.findByPk(req.user.id);
 
     const txnid = `GKM${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -73,6 +33,7 @@ exports.initiatePayment = async (req, res) => {
       user_id: req.user.id,
       booking_id: booking_id || null,
       subscription_id: subscription_id || null,
+      geofence_id: geofence_id || req.body.geofence_id || null,
       amount: paymentAmount,
       type,
       status: 'pending',
@@ -88,256 +49,79 @@ exports.initiatePayment = async (req, res) => {
       firstname: user.name,
       email: user.email || `${user.phone}@gharkamali.com`,
       phone: user.phone,
-      surl: `${process.env.BASE_URL}/api/payments/success`,
-      furl: `${process.env.BASE_URL}/api/payments/failure`,
+      surl: `${BASE_URL}/api/payments/callback`,
+      furl: `${BASE_URL}/api/payments/callback`,
+      hash: ''
     };
-    params.hash = generateHash(params);
 
-    // MOCK BYPASS: If active, simulate success immediately
-    if (MOCK_PAYMENT) {
-      try {
-        console.log(`[MOCK] Processing payment for TXN: ${txnid}, Type: ${type}`);
-        
-        // Simulate success callback logic
-        await payment.update({ 
-          status: 'success', 
-          payment_method: 'mock',
-          gateway_response: { note: 'Bypassed via Mock Payment' } 
-        });
-        
-        if (payment.booking_id) {
-          console.log(`[MOCK] Updating booking ${payment.booking_id} status to paid`);
-          await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
-        }
-        if (payment.subscription_id) {
-          console.log(`[MOCK] Activating subscription ${payment.subscription_id}`);
-          await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
-        }
-        if (payment.type === 'wallet_topup') {
-          console.log(`[MOCK] Incrementing wallet for user ${payment.user_id} by ${payment.amount}`);
-          await User.increment({ wallet_balance: parseFloat(payment.amount) }, { where: { id: payment.user_id } });
-        }
-        if (payment.type === 'order' && req.body.order_id) {
-          const order = await Order.findByPk(req.body.order_id);
-          if (order) {
-            console.log(`[MOCK] Updating order ${order.id} status to paid`);
-            await order.update({ status: 'processing', payment_status: 'paid', payment_id: txnid });
-          }
-        }
-
-        return res.json({
-          success: true,
-          data: {
-            mock_success: true,
-            txnid,
-            amount: params.amount,
-            frontend_redirect: `/payment/success?txnid=${txnid}&amount=${params.amount}`
-          }
-        });
-      } catch (mockErr) {
-        console.error('[MOCK ERROR]', mockErr);
-        throw mockErr; // Let the outer catch handle it
-      }
-    }
+    // Generate Hash: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
+    const hashString = `${params.key}|${params.txnid}|${params.amount}|${params.productinfo}|${params.firstname}|${params.email}|||||||||||${PAYU_SALT}`;
+    params.hash = crypto.createHash('sha512').update(hashString).digest('hex');
 
     res.json({
       success: true,
       data: {
-        payment_id: payment.id,
-        payu_url: PAYU_BASE,
-        params,
+        payu_url: PAYU_URL,
+        params
       }
     });
+
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// PayU success callback
-exports.paymentSuccess = async (req, res) => {
+// PayU Callback
+exports.paymentCallback = async (req, res) => {
+  const { txnid, status, hash, amount } = req.body;
+
   try {
-    const params = req.body;
-    if (!verifyHash(params)) {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment/failure?reason=hash_mismatch`);
-    }
+    const payment = await Payment.findOne({ where: { transaction_id: txnid } });
+    if (!payment) return res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=failed&reason=payment_not_found`);
 
-    const payment = await Payment.findOne({ where: { transaction_id: params.txnid } });
-    if (!payment) return res.redirect(`${process.env.FRONTEND_URL}/payment/failure?reason=not_found`);
+    // Verify hash
+    const hashString = `${PAYU_SALT}|${status}|||||||||||${req.body.email}|${req.body.firstname}|${req.body.productinfo}|${req.body.amount}|${txnid}|${PAYU_KEY}`;
+    const expectedHash = crypto.createHash('sha512').update(hashString).digest('hex');
 
-    await payment.update({
-      status: 'success',
-      gateway_response: params,
-      payment_method: params.mode || 'payu'
-    });
+    if (status === 'success') {
+      await payment.update({ status: 'paid', metadata: JSON.stringify(req.body) });
 
-    // Update booking or subscription status
-    if (payment.booking_id) {
-      await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
-    }
-    if (payment.subscription_id) {
-      await Subscription.update({ status: 'active' }, { where: { id: payment.subscription_id } });
-    }
-    // Shop Order
-    if (payment.type === 'order') {
-      const orderId = payment.gateway_response ? payment.gateway_response.udf1 : null;
-      if (orderId) {
-        await Order.update({ status: 'processing', payment_status: 'paid' }, { where: { id: orderId } });
+      // If it's a wallet topup
+      if (payment.type === 'wallet_topup') {
+        const user = await User.findByPk(payment.user_id);
+        await user.update({ wallet_balance: Number(user.wallet_balance || 0) + Number(payment.amount) });
       }
+
+      // If it's a booking
+      if (payment.booking_id) {
+        await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
+      }
+
+      // If it's a subscription
+      if (payment.subscription_id) {
+        await Subscription.update({ status: 'active', payment_status: 'paid' }, { where: { id: payment.subscription_id } });
+      }
+
+      res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=success&txnid=${txnid}`);
+    } else {
+      await payment.update({ status: 'failed', metadata: JSON.stringify(req.body) });
+      res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=failed&txnid=${txnid}`);
     }
-    // Wallet topup
-    if (payment.type === 'wallet_topup') {
-      await User.increment({ wallet_balance: payment.amount }, { where: { id: payment.user_id } });
-    }
-
-    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
-    res.redirect(`${frontendUrl}/payment/success?txnid=${params.txnid}&amount=${params.amount}`);
   } catch (err) {
-    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
-    res.redirect(`${frontendUrl}/payment/failure?reason=error`);
-  }
-};
-
-// PayU failure callback
-exports.paymentFailure = async (req, res) => {
-  try {
-    const params = req.body;
-    const payment = await Payment.findOne({ where: { transaction_id: params.txnid } });
-    if (payment) await payment.update({ status: 'failed', gateway_response: params });
-    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
-    res.redirect(`${frontendUrl}/payment/failure?reason=payment_failed`);
-  } catch (err) {
-    const frontendUrl = process.env.FRONTEND_URL || 'https://gkmapp.netlify.app';
-    res.redirect(`${frontendUrl}/payment/failure?reason=error`);
-  }
-};
-
-// Check payment status
-exports.checkPaymentStatus = async (req, res) => {
-  try {
-    const payment = await Payment.findOne({
-      where: { transaction_id: req.params.txnid, user_id: req.user.id }
-    });
-    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
-    res.json({ success: true, data: payment });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// Get my payments
-exports.getMyPayments = async (req, res) => {
-  try {
-    const { page = 1, limit = 20 } = req.query;
-    const { count, rows } = await Payment.findAndCountAll({
-      where: { user_id: req.user.id },
-      order: [['created_at', 'DESC']],
-      limit: parseInt(limit),
-      offset: (page - 1) * limit
-    });
-    res.json({ success: true, data: { payments: rows, total: count, page: parseInt(page) } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('Payment Callback Error:', err);
+    res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=error&message=${err.message}`);
   }
 };
 
 // Wallet topup initiate
 exports.walletTopup = async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, geofence_id } = req.body;
     if (!amount || amount < 100) return res.status(400).json({ success: false, message: 'Minimum topup is ₹100' });
     req.body.type = 'wallet_topup';
     req.body.amount = amount;
+    req.body.geofence_id = geofence_id;
     return exports.initiatePayment(req, res);
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// Admin: get all payments
-exports.getAllPayments = async (req, res) => {
-  try {
-    const { page = 1, limit = 20, status, type } = req.query;
-    const where = {};
-    if (status) where.status = status;
-    if (type) where.type = type;
-    const { count, rows } = await Payment.findAndCountAll({
-      where,
-      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }],
-      order: [['created_at', 'DESC']],
-      limit: parseInt(limit),
-      offset: (page - 1) * limit
-    });
-    res.json({ success: true, data: { payments: rows, total: count } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// Reschedule booking
-exports.rescheduleBooking = async (req, res) => {
-  try {
-    const { booking_id, new_date, new_time } = req.body;
-    const booking = await Booking.findOne({ where: { id: booking_id, customer_id: req.user.id } });
-    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (!['pending', 'assigned'].includes(booking.status)) {
-      return res.status(400).json({ success: false, message: 'Cannot reschedule booking in current status' });
-    }
-    await booking.update({ scheduled_date: new_date, scheduled_time: new_time || booking.scheduled_time });
-    res.json({ success: true, message: 'Booking rescheduled', data: booking });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-const { pointInPolygon } = require('../utils/geo');
-
-// Check if location is in a serviceable geofence zone
-exports.checkServiceability = async (req, res) => {
-  try {
-    const { latitude, longitude } = req.query;
-    const lat = parseFloat(latitude);
-    const lng = parseFloat(longitude);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({ success: false, message: 'Valid latitude and longitude are required' });
-    }
-
-    const { Geofence } = require('../models');
-    const geofences = await Geofence.findAll({ where: { is_active: true } });
-
-    const matched = [];
-    for (const gf of geofences) {
-      let polygon = [];
-      try {
-        polygon = typeof gf.polygon_coords === 'string'
-          ? JSON.parse(gf.polygon_coords)
-          : (gf.polygon_coords || []);
-      } catch { continue; }
-
-      if (polygon.length < 3) continue;
-
-      if (pointInPolygon(lat, lng, polygon)) {
-        matched.push({
-          id: gf.id,
-          name: gf.name,
-          city: gf.city,
-          state: gf.state,
-          base_price: gf.base_price,
-          price_per_plant: gf.price_per_plant,
-          min_plants: gf.min_plants,
-          polygon_vertices: polygon.length,
-          product_markup: gf.product_markup,
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      data: {
-        serviceable: matched.length > 0,
-        zones: matched,
-      }
-    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

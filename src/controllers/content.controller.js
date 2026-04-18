@@ -39,7 +39,12 @@ exports.identifyPlant = async (req, res) => {
       plantData.description = "Identification in progress. We're analyzing the unique patterns of your plant's leaves.";
     }
 
-    const record = await PlantIdentification.create({ user_id: req.user.id, image_url: imageUrl, ...plantData });
+    const record = await PlantIdentification.create({ 
+      user_id: req.user.id, 
+      geofence_id: req.body.geofence_id || null,
+      image_url: imageUrl, 
+      ...plantData 
+    });
     res.json({ success: true, data: record });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

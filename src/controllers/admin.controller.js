@@ -222,6 +222,18 @@ exports.getAnalytics = async (req, res) => {
       GROUP BY s.plan_id ORDER BY active_count DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
+    const subscriptionsByZone = await db.query(`
+      SELECT
+        COALESCE(g.name, cu.city, 'Unknown') as zone,
+        COUNT(s.id) as count,
+        SUM(s.amount_paid) as revenue
+      FROM subscriptions s
+      JOIN users cu ON cu.id = s.customer_id
+      LEFT JOIN geofences g ON s.geofence_id = g.id
+      WHERE s.created_at >= :since ${subscriptionCond}
+      GROUP BY COALESCE(g.name, cu.city) ORDER BY count DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
+
     // 7. Financial Summary
     const revenueBreakdown = await db.query([
       'SELECT',
@@ -266,6 +278,7 @@ exports.getAnalytics = async (req, res) => {
         shopOrdersByZone,
         shopOrdersByCity,
         subscriptionsByPlan,
+        subscriptionsByZone,
         revenueBreakdown: revenueBreakdown[0] || { booking_revenue: 0, shop_revenue: 0, subscription_revenue: 0 },
         activeGardeners: activeGardeners[0]?.count || 0,
         activeSubscriptions: activeSubscriptions[0]?.count || 0,

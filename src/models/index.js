@@ -216,7 +216,8 @@ const PlantIdentification = sequelize.define('PlantIdentification', {
   fertilizer_tips: { type: DataTypes.TEXT },
   sunlight_requirement: { type: DataTypes.STRING(100) },
   confidence_score: { type: DataTypes.DECIMAL(5, 2) },
-  raw_response: { type: DataTypes.JSON }
+  raw_response: { type: DataTypes.JSON },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'plant_identifications' });
 
 // ─── BLOG ─────────────────────────────────────────────────────────────────────
@@ -268,7 +269,8 @@ const Payment = sequelize.define('Payment', {
   txn_id: { type: DataTypes.STRING(100) },
   payment_for: { type: DataTypes.STRING(100) },
   gateway_response: { type: DataTypes.JSON },
-  notes: { type: DataTypes.TEXT }
+  notes: { type: DataTypes.TEXT },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'payments' });
 
 // ─── PRICE HIKE LOG ───────────────────────────────────────────────────────────
@@ -312,7 +314,8 @@ const Complaint = sequelize.define('Complaint', {
   priority: { type: DataTypes.ENUM('low','medium','high'), defaultValue: 'medium' },
   resolution_notes: { type: DataTypes.TEXT },
   resolved_at:   { type: DataTypes.DATE },
-  resolved_by:   { type: DataTypes.INTEGER }
+  resolved_by:   { type: DataTypes.INTEGER },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'complaints' });
 
 
@@ -499,7 +502,8 @@ const WithdrawalRequest = sequelize.define('WithdrawalRequest', {
   bank_name: { type: DataTypes.STRING(100) },
   admin_notes: { type: DataTypes.TEXT },
   processed_at: { type: DataTypes.DATE },
-  processed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
+  processed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'withdrawal_requests', underscored: true });
 
 // ─── REVIEW ───────────────────────────────────────────────────────────────────
@@ -511,7 +515,8 @@ const Review = sequelize.define('Review', {
   rating: { type: DataTypes.INTEGER, allowNull: false },
   comment: { type: DataTypes.TEXT },
   status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
-  admin_notes: { type: DataTypes.TEXT }
+  admin_notes: { type: DataTypes.TEXT },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'reviews', underscored: true });
 
 // ─── TIP ──────────────────────────────────────────────────────────────────────
@@ -520,7 +525,8 @@ const Tip = sequelize.define('Tip', {
   booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
   gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
-  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false }
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'tips', underscored: true });
 
 // ─── PRODUCT ZONE PRICE ───────────────────────────────────────────────────────
@@ -540,7 +546,8 @@ const ContactMessage = sequelize.define('ContactMessage', {
   email: { type: DataTypes.STRING(100) },
   phone: { type: DataTypes.STRING(15) },
   message: { type: DataTypes.TEXT, allowNull: false },
-  is_read: { type: DataTypes.BOOLEAN, defaultValue: false }
+  is_read: { type: DataTypes.BOOLEAN, defaultValue: false },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'contact_messages', underscored: true });
 
 // ─── SYSTEM SETTING ───────────────────────────────────────────────────────────
@@ -632,6 +639,14 @@ Review.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 Tip.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 Tip.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 Tip.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+
+Review.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+Tip.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+Complaint.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+Payment.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+PlantIdentification.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+ContactMessage.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+WithdrawalRequest.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 
 // ProductZonePrice associations
 ProductZonePrice.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });

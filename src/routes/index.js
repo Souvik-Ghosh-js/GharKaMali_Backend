@@ -51,9 +51,9 @@ router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer
 // ── CONTACT ───────────────────────────────────────────────────────────────────
 router.post('/contact', async (req, res) => {
   try {
-    const { name, phone, email, message } = req.body;
+    const { name, phone, email, message, geofence_id } = req.body;
     const { ContactMessage } = require('../models');
-    const contact = await ContactMessage.create({ name, email, phone, message });
+    const contact = await ContactMessage.create({ name, email, phone, message, geofence_id });
     res.status(201).json({ success: true, data: contact, message: 'Message received successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -905,6 +905,7 @@ router.post('/bookings/:id/tip', authenticate, authorize('customer'), async (req
       booking_id: booking.id,
       customer_id: req.user.id,
       gardener_id: booking.gardener_id,
+      geofence_id: req.body.geofence_id || booking.geofence_id,
       amount
     });
 
@@ -933,6 +934,7 @@ router.post('/gardener/withdraw', authenticate, authorize('gardener'), async (re
 
     const request = await WithdrawalRequest.create({
       gardener_id: req.user.id,
+      geofence_id: req.body.geofence_id || null,
       amount,
       bank_account: profile.bank_account,
       bank_ifsc: profile.bank_ifsc,
@@ -1032,6 +1034,7 @@ router.post('/bookings/:id/review', authenticate, authorize('customer'), async (
       customer_id: req.user.id,
       booking_id: booking.id,
       gardener_id: booking.gardener_id,
+      geofence_id: req.body.geofence_id || booking.geofence_id,
       rating,
       comment
     });
@@ -1260,9 +1263,9 @@ router.get('/social-proof', async (req, res) => {
 router.post('/contact', async (req, res) => {
   try {
     const { ContactMessage } = require('../models');
-    const { name, email, phone, message } = req.body;
+    const { name, email, phone, message, geofence_id } = req.body;
     if (!name || !message) return res.status(400).json({ success: false, message: 'Name and message are required' });
-    const msg = await ContactMessage.create({ name, email, phone, message });
+    const msg = await ContactMessage.create({ name, email, phone, message, geofence_id });
     res.status(201).json({ success: true, message: 'Message received! We will get back to you soon.', data: { id: msg.id } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

@@ -19,6 +19,7 @@ exports.raiseComplaint = async (req, res) => {
       booking_id:  booking_id || null,
       customer_id: req.user.id,
       gardener_id,
+      geofence_id: req.body.geofence_id || null,
       type,
       description,
       priority:    priority || 'medium',
