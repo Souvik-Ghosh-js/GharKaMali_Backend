@@ -20,8 +20,8 @@ exports.getPreviousGardeners = async (req, res) => {
       where: { customer_id: customerId, status: 'completed', gardener_id: { [Op.ne]: null } },
       attributes: [[fn('DISTINCT', col('gardener_id')), 'gardener_id']],
       include: [
-        { 
-          model: User, as: 'gardener', 
+        {
+          model: User, as: 'gardener',
           attributes: ['id', 'name', 'profile_image'],
           include: [{ model: GardenerProfile, as: 'gardenerProfile', attributes: ['rating', 'total_jobs'] }]
         }
@@ -40,7 +40,7 @@ exports.getPreviousGardeners = async (req, res) => {
 // Internal function for availability check
 const checkGardenerAvailabilityInternal = async (date, gardener_id, zone_id) => {
   const standardTimeSlots = ['08:00', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
-  
+
   let gardenerIds = [];
   if (gardener_id) {
     gardenerIds = [parseInt(gardener_id)];
@@ -89,10 +89,10 @@ exports.checkGardenerAvailabilityInternal = checkGardenerAvailabilityInternal;
 // Check availability based on gardener schedules
 exports.checkAvailability = async (req, res) => {
   try {
-    const { date, gardener_id, zone_id } = req.query;
+    const { date, gardener_id, geofence_id } = req.query;
     if (!date) return res.status(400).json({ success: false, message: 'Date is required' });
 
-    const slots = await checkGardenerAvailabilityInternal(date, gardener_id, zone_id);
+    const slots = await checkGardenerAvailabilityInternal(date, gardener_id, geofence_id);
     res.json({ success: true, data: slots });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -186,10 +186,10 @@ exports.createBooking = async (req, res) => {
     // Send WhatsApp notification
     const customer = await User.findByPk(req.user.id);
     await sendWhatsApp(customer.phone, templates.bookingConfirmed(customer.name, scheduled_date, scheduled_time || 'Morning'));
-    
+
     // ── NOTIFY ─────────────────────────────────────────────────────────────
     const notificationService = require('../services/notification.service');
-    
+
     // Notify Customer
     await notificationService.notifyUser(req.user.id, {
       title: '🌿 Booking Received',
@@ -212,7 +212,7 @@ exports.createBooking = async (req, res) => {
       if (customer.fcm_token) {
         await notify.bookingAssigned(customer.fcm_token, booking.booking_number, g?.name || 'Gardener');
       }
-      
+
       // Real-time notification to Customer about gardener assignment
       await notificationService.notifyUser(customer.id, {
         title: '👨‍🌾 Gardener Assigned',
@@ -225,7 +225,7 @@ exports.createBooking = async (req, res) => {
       if (g?.fcm_token) {
         await notify.newJobAssigned(g.fcm_token, booking.booking_number, service_address, scheduled_date);
       }
-      
+
       // Real-time notification to Gardener
       await notificationService.notifyUser(gardener_id, {
         title: '💼 New Job Assigned',
@@ -334,7 +334,7 @@ exports.updateBookingStatus = async (req, res) => {
       const gardener = await User.findByPk(req.user.id);
       await sendWhatsApp(customer.phone, templates.gardenerEnRoute(customer.name, gardener.name, '15'));
       if (customer.fcm_token) await notify.gardenerEnRoute(customer.fcm_token, gardener.name, booking.booking_number);
-      
+
       // Real-time
       await notificationService.notifyUser(customer.id, {
         title: '🚚 Gardener En Route',
@@ -390,8 +390,8 @@ exports.updateBookingStatus = async (req, res) => {
       });
 
       // Update gardener stats
-      await GardenerProfile.increment({ 
-        total_jobs: 1, 
+      await GardenerProfile.increment({
+        total_jobs: 1,
         completed_jobs: 1,
         total_earnings: finalAmount
       }, { where: { user_id: req.user.id } });
