@@ -1,6 +1,6 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
@@ -236,7 +236,8 @@ exports.getBookingDetail = async (req, res) => {
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image'] },
         { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'], include: [{ model: GardenerProfile, as: 'gardenerProfile' }] },
         { model: ServiceZone, as: 'zone' },
-        { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 }
+        { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 },
+        { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon' }] }
       ]
     });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
