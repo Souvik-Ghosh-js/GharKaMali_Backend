@@ -172,7 +172,8 @@ exports.checkServiceability = async (req, res) => {
     const zones = await Geofence.findAll({ where: { is_active: true } });
     // Simple radius check or use a proper library if available
     // For now, return all active zones as a placeholder or implement point-in-polygon
-    res.json({ success: true, data: zones });
+    const isServiceable = zones.length > 0;
+    res.json({ success: true, data: { serviceable: isServiceable, zones, zone: zones[0] } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
