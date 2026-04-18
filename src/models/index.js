@@ -416,6 +416,7 @@ const Order = sequelize.define('Order', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   order_number: { type: DataTypes.STRING(50), unique: true },
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  zone_id: { type: DataTypes.INTEGER, references: { model: 'service_zones', key: 'id' } },
   total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   status: { 
     type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'),
@@ -426,6 +427,8 @@ const Order = sequelize.define('Order', {
   shipping_address: { type: DataTypes.TEXT, allowNull: false },
   shipping_city: { type: DataTypes.STRING(100) },
   shipping_pincode: { type: DataTypes.STRING(15) },
+  service_latitude: { type: DataTypes.DECIMAL(10, 8) },
+  service_longitude: { type: DataTypes.DECIMAL(11, 8) },
   tracking_number: { type: DataTypes.STRING(100) },
   tracking_url: { type: DataTypes.STRING(500) },
   notes: { type: DataTypes.TEXT }

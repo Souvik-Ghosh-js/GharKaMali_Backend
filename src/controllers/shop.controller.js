@@ -125,7 +125,7 @@ exports.createOrder = async (req, res) => {
   try {
     const {
       items, shipping_address, shipping_city, shipping_pincode, notes, zone_id,
-      geofence_id,
+      geofence_id, service_latitude, service_longitude,
       // Book a Mali fields
       book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali,
       service_bookings
@@ -174,10 +174,13 @@ exports.createOrder = async (req, res) => {
     const order = await Order.create({
       order_number: orderNumber,
       customer_id: req.user.id,
+      zone_id: activeZoneId,
       total_amount: totalAmount,
       shipping_address,
       shipping_city,
       shipping_pincode,
+      service_latitude: service_latitude || null,
+      service_longitude: service_longitude || null,
       notes,
       status: 'processing',
       payment_status: 'paid',

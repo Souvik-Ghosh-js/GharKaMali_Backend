@@ -154,8 +154,8 @@ exports.getAnalytics = async (req, res) => {
         SUM(CASE WHEN status='processing'  THEN 1 ELSE 0 END) as processing_orders,
         SUM(CASE WHEN status='shipped'     THEN 1 ELSE 0 END) as shipped_orders,
         SUM(CASE WHEN status='pending'     THEN 1 ELSE 0 END) as pending_orders
-      FROM orders WHERE created_at >= :since
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      FROM orders WHERE created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
+    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
 
     // ── NEW: Top selling products ──────────────────────────────────────────
     const topProducts = await db.query(`
@@ -165,8 +165,22 @@ exports.getAnalytics = async (req, res) => {
       FROM order_items oi
       JOIN products p ON oi.product_id = p.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.created_at >= :since AND o.payment_status = 'paid'
+      WHERE o.created_at >= :since AND o.payment_status = 'paid' ${zone_id ? 'AND o.zone_id = :zone_id' : ''}
       GROUP BY oi.product_id ORDER BY total_sold DESC LIMIT 10
+    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+
+    // ── NEW: Shop orders by zone ───────────────────────────────────────────
+    const shopOrdersByZone = await db.query(`
+      SELECT sz.name as zone, sz.city, COUNT(o.id) as total, SUM(o.total_amount) as revenue
+      FROM orders o LEFT JOIN service_zones sz ON o.zone_id = sz.id
+      WHERE o.created_at >= :since GROUP BY o.zone_id ORDER BY total DESC
+    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+
+    // ── NEW: Shop orders by city ───────────────────────────────────────────
+    const shopOrdersByCity = await db.query(`
+      SELECT sz.city, COUNT(o.id) as total, SUM(o.total_amount) as revenue
+      FROM orders o LEFT JOIN service_zones sz ON o.zone_id = sz.id
+      WHERE o.created_at >= :since GROUP BY sz.city ORDER BY total DESC
     `, { replacements: { since }, type: db.QueryTypes.SELECT });
 
     // ── NEW: Active subscriptions by plan ──────────────────────────────────
@@ -210,6 +224,8 @@ exports.getAnalytics = async (req, res) => {
         avgRating: avgRatingRow[0]?.avg_rating || null,
         shopOrdersStats: shopOrdersStats[0] || {},
         topProducts,
+        shopOrdersByZone,
+        shopOrdersByCity,
         subscriptionsByPlan,
         revenueBreakdown: revenueBreakdown[0] || {},
         activeGardeners: activeGardeners[0]?.count || 0,
