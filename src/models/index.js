@@ -582,7 +582,7 @@ Booking.hasMany(BookingTracking, { foreignKey: 'booking_id', as: 'tracking' });
 
 Subscription.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 Subscription.belongsTo(ServicePlan, { foreignKey: 'plan_id', as: 'plan' });
-Subscription.belongsTo(User, { foreignKey: 'preferred_gardener_id', as: 'preferredGardener' });
+Subscription.belongsTo(User, { foreignKey: 'preferred_gardener_id', as: 'gardener' });
 Subscription.hasMany(Booking, { foreignKey: 'subscription_id', as: 'bookings' });
 
 GardenerZone.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
