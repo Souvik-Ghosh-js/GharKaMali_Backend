@@ -322,6 +322,8 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE payments ADD COLUMN geofence_id INT"); } catch(e){}
     try { await sequelize.query("ALTER TABLE plant_identifications ADD COLUMN geofence_id INT"); } catch(e){}
     try { await sequelize.query("ALTER TABLE contact_messages ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE bookings ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE subscriptions ADD COLUMN geofence_id INT"); } catch(e){}
 
     await sequelize.sync({ alter: true });
     res.json({ success: true, message: 'Database schema synchronized successfully and legacy dates fixed.' });
