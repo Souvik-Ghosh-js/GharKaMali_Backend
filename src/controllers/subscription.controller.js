@@ -77,7 +77,85 @@ exports.subscribe = async (req, res) => {
   }
 };
 
-// ... (getMySubscriptions, cancelSubscription, getAllSubscriptions remain unchanged) ...
+// Get my subscriptions
+exports.getMySubscriptions = async (req, res) => {
+  try {
+    const subscriptions = await Subscription.findAll({
+      where: { customer_id: req.user.id },
+      include: [
+        { model: ServicePlan, as: 'plan' },
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'] }
+      ],
+      order: [['created_at', 'DESC']]
+    });
+    res.json({ success: true, data: subscriptions });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Cancel subscription
+exports.cancelSubscription = async (req, res) => {
+  try {
+    const subscription = await Subscription.findOne({
+      where: { id: req.params.id, customer_id: req.user.id }
+    });
+
+    if (!subscription) return res.status(404).json({ success: false, message: 'Subscription not found' });
+    if (subscription.status === 'cancelled') return res.status(400).json({ success: false, message: 'Subscription already cancelled' });
+
+    await subscription.update({ status: 'cancelled', auto_renew: false });
+
+    // Cancel future pending bookings for this subscription
+    await Booking.update(
+      { status: 'cancelled', cancellation_reason: 'Subscription cancelled by user' },
+      { 
+        where: { 
+          subscription_id: subscription.id, 
+          status: 'pending',
+          scheduled_date: { [Op.gt]: moment().format('YYYY-MM-DD') }
+        } 
+      }
+    );
+
+    res.json({ success: true, message: 'Subscription cancelled successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get all subscriptions (Admin)
+exports.getAllSubscriptions = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 20 } = req.query;
+    const where = {};
+    if (status) where.status = status;
+
+    const { count, rows } = await Subscription.findAndCountAll({
+      where,
+      include: [
+        { model: ServicePlan, as: 'plan' },
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'email'] },
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone'] }
+      ],
+      order: [['created_at', 'DESC']],
+      limit: parseInt(limit),
+      offset: (page - 1) * limit
+    });
+
+    res.json({ 
+      success: true, 
+      data: { 
+        items: rows, 
+        total: count,
+        page: parseInt(page),
+        pages: Math.ceil(count / limit)
+      } 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // Select dates manually
 exports.selectDates = async (req, res) => {
