@@ -312,6 +312,16 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE geofences ADD COLUMN surge_multiplier DECIMAL(4, 2) DEFAULT 1.00"); } catch(e){}
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100)"); } catch(e){}
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch(e){}
+    // Add columns causing 500 errors on the remote API due to sync failures
+    try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE withdrawal_requests ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE reviews ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE tips ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE complaints ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE payments ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE plant_identifications ADD COLUMN geofence_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE contact_messages ADD COLUMN geofence_id INT"); } catch(e){}
 
     await sequelize.sync({ alter: true });
     res.json({ success: true, message: 'Database schema synchronized successfully and legacy dates fixed.' });

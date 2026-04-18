@@ -164,7 +164,8 @@ exports.rescheduleBooking = async (req, res) => {
 // Check serviceability
 exports.checkServiceability = async (req, res) => {
   try {
-    const { lat, lng } = req.query;
+    const lat = req.query.lat || req.query.latitude;
+    const lng = req.query.lng || req.query.longitude;
     if (!lat || !lng) return res.status(400).json({ success: false, message: 'Latitude and longitude are required' });
     
     const { Geofence } = require('../models');
