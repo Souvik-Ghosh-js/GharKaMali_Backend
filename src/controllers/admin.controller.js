@@ -98,7 +98,7 @@ exports.getAnalytics = async (req, res) => {
       JOIN users cu ON cu.id = b.customer_id
       LEFT JOIN geofences g ON b.geofence_id = g.id
       WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL) ${bookingCond}
-      GROUP BY COALESCE(g.name, cu.city) ORDER BY total DESC
+      GROUP BY COALESCE(g.name, cu.city), cu.city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingsByCity = await db.query(`
@@ -204,7 +204,7 @@ exports.getAnalytics = async (req, res) => {
       FROM orders o 
       LEFT JOIN geofences g ON o.geofence_id = g.id
       WHERE o.created_at >= :since ${orderCond}
-      GROUP BY COALESCE(g.name, o.shipping_city) ORDER BY total DESC
+      GROUP BY COALESCE(g.name, o.shipping_city), o.shipping_city ORDER BY total DESC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const shopOrdersByCity = await db.query(`
