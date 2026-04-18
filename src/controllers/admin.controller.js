@@ -46,104 +46,132 @@ exports.getDashboard = async (req, res) => {
 // ── ANALYTICS ─────────────────────────────────────────────────────────────────
 exports.getAnalytics = async (req, res) => {
   try {
-    const { period = '30', zone_id } = req.query;
+    const { period = '30', zone_id, geofence_id } = req.query;
     const days = parseInt(period);
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const bookingWhere = { created_at: { [Op.gte]: since } };
-    if (zone_id) bookingWhere.zone_id = zone_id;
+    // ── Resolve city from geofence (new system) or legacy zone_id ──────────
+    let cityFilter = null;
+    const gfId = geofence_id || zone_id;
+    if (gfId) {
+      const { Geofence } = require('../models');
+      const gf = await Geofence.findByPk(gfId);
+      if (gf) cityFilter = gf.city;
+    }
 
-    // Revenue by day (with booking count)
+    // Snippets injected per query based on whether a city is selected
+    const bookingCityJoin   = cityFilter ? `JOIN users cu ON cu.id = b.customer_id` : '';
+    const bookingCityCond   = cityFilter ? `AND cu.city = :city` : '';
+    const orderCityCond     = cityFilter ? `AND o.shipping_city = :city` : '';
+    const flatOrderCityCond = cityFilter ? `AND shipping_city = :city` : '';
+    const rp = { since, city: cityFilter };
+
+    // Revenue by day
     const revenueByDay = await db.query(`
-      SELECT DATE(created_at) as date, SUM(total_amount) as revenue, COUNT(*) as bookings
-      FROM bookings WHERE status='completed' AND created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
-      GROUP BY DATE(created_at) ORDER BY date ASC
-    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+      SELECT DATE(b.created_at) as date, SUM(b.total_amount) as revenue, COUNT(*) as bookings
+      FROM bookings b ${bookingCityJoin}
+      WHERE b.status='completed' AND b.created_at >= :since ${bookingCityCond}
+      GROUP BY DATE(b.created_at) ORDER BY date ASC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // Bookings by day (all statuses, for volume chart)
+    // Bookings by day (all statuses)
     const bookingsByDay = await db.query(`
-      SELECT DATE(created_at) as date, COUNT(*) as count
-      FROM bookings WHERE created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
-      GROUP BY DATE(created_at) ORDER BY date ASC
-    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+      SELECT DATE(b.created_at) as date, COUNT(*) as count
+      FROM bookings b ${bookingCityJoin}
+      WHERE b.created_at >= :since ${bookingCityCond}
+      GROUP BY DATE(b.created_at) ORDER BY date ASC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // Bookings by zone
+    // Bookings grouped by customer city
     const bookingsByZone = await db.query(`
-      SELECT sz.name as zone, sz.city, COUNT(b.id) as total, SUM(b.total_amount) as revenue
-      FROM bookings b LEFT JOIN service_zones sz ON b.zone_id = sz.id
-      WHERE b.created_at >= :since GROUP BY b.zone_id ORDER BY total DESC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT u.city as zone, u.city, COUNT(b.id) as total, SUM(b.total_amount) as revenue
+      FROM bookings b JOIN users u ON u.id = b.customer_id
+      WHERE b.created_at >= :since AND u.city IS NOT NULL ${cityFilter ? 'AND u.city = :city' : ''}
+      GROUP BY u.city ORDER BY total DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Bookings by city
     const bookingsByCity = await db.query(`
-      SELECT sz.city, COUNT(b.id) as total, SUM(b.total_amount) as revenue
-      FROM bookings b LEFT JOIN service_zones sz ON b.zone_id = sz.id
-      WHERE b.created_at >= :since GROUP BY sz.city ORDER BY total DESC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT u.city, u.state, COUNT(b.id) as total, SUM(b.total_amount) as revenue
+      FROM bookings b JOIN users u ON u.id = b.customer_id
+      WHERE b.created_at >= :since AND u.city IS NOT NULL ${cityFilter ? 'AND u.city = :city' : ''}
+      GROUP BY u.city, u.state ORDER BY total DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Customer locations
     const customerLocations = await db.query(`
       SELECT u.city, u.state, COUNT(*) as count FROM users u
-      WHERE u.role='customer' AND u.city IS NOT NULL GROUP BY u.city, u.state ORDER BY count DESC LIMIT 20
-    `, { type: db.QueryTypes.SELECT });
+      WHERE u.role='customer' AND u.city IS NOT NULL ${cityFilter ? 'AND u.city = :city' : ''}
+      GROUP BY u.city, u.state ORDER BY count DESC LIMIT 20
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Booking status distribution
     const bookingStatusDist = await db.query(`
-      SELECT status, COUNT(*) as count FROM bookings WHERE created_at >= :since GROUP BY status
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT b.status, COUNT(*) as count
+      FROM bookings b ${bookingCityJoin}
+      WHERE b.created_at >= :since ${bookingCityCond}
+      GROUP BY b.status
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Subscription plan distribution
     const planDist = await db.query(`
       SELECT sp.name, COUNT(s.id) as count, SUM(s.amount_paid) as revenue
-      FROM subscriptions s LEFT JOIN service_plans sp ON s.plan_id = sp.id
+      FROM subscriptions s
+      LEFT JOIN service_plans sp ON s.plan_id = sp.id
+      ${cityFilter ? 'JOIN users cu ON cu.id = s.customer_id AND cu.city = :city' : ''}
       WHERE s.created_at >= :since GROUP BY s.plan_id ORDER BY count DESC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Top gardeners
     const topGardeners = await db.query(`
       SELECT u.name, gp.rating, gp.completed_jobs, gp.total_earnings
       FROM users u JOIN gardener_profiles gp ON u.id = gp.user_id
+      ${cityFilter ? 'WHERE u.city = :city' : ''}
       ORDER BY gp.completed_jobs DESC LIMIT 10
-    `, { type: db.QueryTypes.SELECT });
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // New users trend
     const newUsersTrend = await db.query(`
       SELECT DATE(created_at) as date, role, COUNT(*) as count
-      FROM users WHERE created_at >= :since GROUP BY DATE(created_at), role ORDER BY date ASC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      FROM users WHERE created_at >= :since ${cityFilter ? 'AND city = :city' : ''}
+      GROUP BY DATE(created_at), role ORDER BY date ASC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     // Repeat customers
     const repeatCustomers = await db.query(`
       SELECT COUNT(*) as count FROM (
-        SELECT customer_id FROM bookings WHERE status='completed' GROUP BY customer_id HAVING COUNT(*) > 1
+        SELECT b.customer_id FROM bookings b ${bookingCityJoin}
+        WHERE b.status='completed' ${bookingCityCond}
+        GROUP BY b.customer_id HAVING COUNT(*) > 1
       ) as rc
-    `, { type: db.QueryTypes.SELECT });
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // Average rating by zone
+    // Average rating by city
     const ratingByZone = await db.query(`
-      SELECT sz.name, sz.city, AVG(b.rating) as avg_rating, COUNT(b.rating) as rated_count
-      FROM bookings b LEFT JOIN service_zones sz ON b.zone_id = sz.id
-      WHERE b.rating IS NOT NULL GROUP BY b.zone_id
-    `, { type: db.QueryTypes.SELECT });
+      SELECT u.city as name, u.city, AVG(b.rating) as avg_rating, COUNT(b.rating) as rated_count
+      FROM bookings b JOIN users u ON u.id = b.customer_id
+      WHERE b.rating IS NOT NULL AND u.city IS NOT NULL ${cityFilter ? 'AND u.city = :city' : ''}
+      GROUP BY u.city
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Completion rate & avg rating ─────────────────────────────────
+    // Completion rate & avg rating
     const completionStats = await db.query(`
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed
-      FROM bookings WHERE created_at >= :since
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT COUNT(*) as total,
+        SUM(CASE WHEN b.status='completed' THEN 1 ELSE 0 END) as completed
+      FROM bookings b ${bookingCityJoin}
+      WHERE b.created_at >= :since ${bookingCityCond}
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const avgRatingRow = await db.query(`
-      SELECT AVG(rating) as avg_rating FROM bookings
-      WHERE rating IS NOT NULL AND created_at >= :since
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT AVG(b.rating) as avg_rating FROM bookings b ${bookingCityJoin}
+      WHERE b.rating IS NOT NULL AND b.created_at >= :since ${bookingCityCond}
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const completionRate = completionStats[0]?.total > 0
       ? parseFloat(((completionStats[0].completed / completionStats[0].total) * 100).toFixed(1))
       : 0;
 
-    // ── NEW: Shop order analytics ──────────────────────────────────────────
+    // Shop order analytics — filter by shipping_city
     const shopOrdersStats = await db.query(`
       SELECT
         COUNT(*) as total_orders,
@@ -154,10 +182,10 @@ exports.getAnalytics = async (req, res) => {
         SUM(CASE WHEN status='processing'  THEN 1 ELSE 0 END) as processing_orders,
         SUM(CASE WHEN status='shipped'     THEN 1 ELSE 0 END) as shipped_orders,
         SUM(CASE WHEN status='pending'     THEN 1 ELSE 0 END) as pending_orders
-      FROM orders WHERE created_at >= :since ${zone_id ? 'AND zone_id = :zone_id' : ''}
-    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+      FROM orders WHERE created_at >= :since ${flatOrderCityCond}
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Top selling products ──────────────────────────────────────────
+    // Top selling products
     const topProducts = await db.query(`
       SELECT p.name, p.icon_key,
         SUM(oi.quantity) as total_sold,
@@ -165,61 +193,69 @@ exports.getAnalytics = async (req, res) => {
       FROM order_items oi
       JOIN products p ON oi.product_id = p.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.created_at >= :since AND o.payment_status = 'paid' ${zone_id ? 'AND o.zone_id = :zone_id' : ''}
+      WHERE o.created_at >= :since AND o.payment_status = 'paid' ${orderCityCond}
       GROUP BY oi.product_id ORDER BY total_sold DESC LIMIT 10
-    `, { replacements: { since, zone_id }, type: db.QueryTypes.SELECT });
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Shop orders by zone ───────────────────────────────────────────
+    // Shop orders grouped by shipping_city
     const shopOrdersByZone = await db.query(`
-      SELECT sz.name as zone, sz.city, COUNT(o.id) as total, SUM(o.total_amount) as revenue
-      FROM orders o LEFT JOIN service_zones sz ON o.zone_id = sz.id
-      WHERE o.created_at >= :since GROUP BY o.zone_id ORDER BY total DESC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT
+        COALESCE(o.shipping_city, 'Unknown') as zone,
+        COALESCE(o.shipping_city, 'Unknown') as city,
+        COUNT(o.id) as total,
+        SUM(o.total_amount) as revenue
+      FROM orders o WHERE o.created_at >= :since ${cityFilter ? 'AND o.shipping_city = :city' : ''}
+      GROUP BY o.shipping_city ORDER BY total DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Shop orders by city ───────────────────────────────────────────
+    // Shop orders by city
     const shopOrdersByCity = await db.query(`
-      SELECT sz.city, COUNT(o.id) as total, SUM(o.total_amount) as revenue
-      FROM orders o LEFT JOIN service_zones sz ON o.zone_id = sz.id
-      WHERE o.created_at >= :since GROUP BY sz.city ORDER BY total DESC
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+      SELECT COALESCE(shipping_city, 'Unknown') as city, COUNT(id) as total, SUM(total_amount) as revenue
+      FROM orders WHERE created_at >= :since ${flatOrderCityCond}
+      GROUP BY shipping_city ORDER BY total DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Active subscriptions by plan ──────────────────────────────────
+    // Active subscriptions by plan
     const subscriptionsByPlan = await db.query(`
       SELECT sp.name, sp.price,
         COUNT(s.id) as active_count,
         SUM(s.amount_paid) as total_revenue
       FROM subscriptions s
       JOIN service_plans sp ON s.plan_id = sp.id
+      ${cityFilter ? 'JOIN users cu ON cu.id = s.customer_id AND cu.city = :city' : ''}
       WHERE s.status = 'active'
       GROUP BY s.plan_id ORDER BY active_count DESC
-    `, { type: db.QueryTypes.SELECT });
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Revenue breakdown ─────────────────────────────────────────────
-    const revenueBreakdown = await db.query(`
-      SELECT
-        (SELECT COALESCE(SUM(total_amount), 0) FROM bookings
-          WHERE status='completed' AND created_at >= :since) as booking_revenue,
-        (SELECT COALESCE(SUM(total_amount), 0) FROM orders
-          WHERE payment_status='paid' AND created_at >= :since) as shop_revenue,
-        (SELECT COALESCE(SUM(amount_paid), 0) FROM subscriptions
-          WHERE created_at >= :since) as subscription_revenue
-    `, { replacements: { since }, type: db.QueryTypes.SELECT });
+    // Revenue breakdown
+    const revenueBreakdown = await db.query([
+      'SELECT',
+      `  (SELECT COALESCE(SUM(b.total_amount), 0) FROM bookings b ${bookingCityJoin}`,
+      `    WHERE b.status='completed' AND b.created_at >= :since ${bookingCityCond}) as booking_revenue,`,
+      `  (SELECT COALESCE(SUM(total_amount), 0) FROM orders`,
+      `    WHERE payment_status='paid' AND created_at >= :since ${flatOrderCityCond}) as shop_revenue,`,
+      `  (SELECT COALESCE(SUM(s.amount_paid), 0) FROM subscriptions s`,
+      cityFilter ? `    JOIN users cu ON cu.id = s.customer_id AND cu.city = :city` : '',
+      `    WHERE s.created_at >= :since) as subscription_revenue`,
+    ].filter(Boolean).join('\n'), { replacements: rp, type: db.QueryTypes.SELECT });
 
-    // ── NEW: Active counts ─────────────────────────────────────────────────
+    // Active counts
     const activeGardeners = await db.query(`
-      SELECT COUNT(*) as count FROM users WHERE role='gardener' AND is_active=1 AND is_approved=1
-    `, { type: db.QueryTypes.SELECT });
+      SELECT COUNT(*) as count FROM users
+      WHERE role='gardener' AND is_active=1 AND is_approved=1 ${cityFilter ? 'AND city = :city' : ''}
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
-    const activeSubscriptions = await db.query(`
-      SELECT COUNT(*) as count FROM subscriptions WHERE status='active'
-    `, { type: db.QueryTypes.SELECT });
+    const activeSubscriptions = await db.query([
+      'SELECT COUNT(*) as count FROM subscriptions s',
+      cityFilter ? 'JOIN users cu ON cu.id = s.customer_id AND cu.city = :city' : '',
+      `WHERE s.status='active'`,
+    ].filter(Boolean).join(' '), { replacements: rp, type: db.QueryTypes.SELECT });
 
     res.json({
       success: true, data: {
         revenueByDay, bookingsByDay, bookingsByZone, bookingsByCity, customerLocations,
         bookingStatusDist, planDist, topGardeners, newUsersTrend,
         repeatCustomers: repeatCustomers[0]?.count || 0, ratingByZone,
-        // ── New fields ──────────────────────────────────────────────────────
         completionRate,
         avgRating: avgRatingRow[0]?.avg_rating || null,
         shopOrdersStats: shopOrdersStats[0] || {},
@@ -230,12 +266,16 @@ exports.getAnalytics = async (req, res) => {
         revenueBreakdown: revenueBreakdown[0] || {},
         activeGardeners: activeGardeners[0]?.count || 0,
         activeSubscriptions: activeSubscriptions[0]?.count || 0,
+        selectedCity: cityFilter || null,
       }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+
 
 
 // ── GARDENER MANAGEMENT ───────────────────────────────────────────────────────
@@ -576,9 +616,18 @@ exports.triggerPriceHike = async (req, res) => {
 // ── GARDENER UTILIZATION RATE ─────────────────────────────────────────────────
 exports.getUtilizationReport = async (req, res) => {
   try {
-    const { period = '30' } = req.query;
+    const { period = '30', zone_id, geofence_id } = req.query;
     const days = parseInt(period);
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Resolve city from geofence/zone
+    let cityFilter = null;
+    const gfId = geofence_id || zone_id;
+    if (gfId) {
+      const { Geofence } = require('../models');
+      const gf = await Geofence.findByPk(gfId);
+      if (gf) cityFilter = gf.city;
+    }
 
     // Max possible jobs: assume 6 jobs/day, 6 days/week
     const maxJobsPerDay = 6;
@@ -587,12 +636,8 @@ exports.getUtilizationReport = async (req, res) => {
 
     const utilization = await db.query(`
       SELECT
-        u.id,
-        u.name,
-        u.phone,
-        u.city,
-        gp.rating,
-        gp.is_available,
+        u.id, u.name, u.phone, u.city,
+        gp.rating, gp.is_available,
         COUNT(b.id) AS total_assigned,
         SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) AS completed,
         SUM(CASE WHEN b.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
@@ -609,21 +654,17 @@ exports.getUtilizationReport = async (req, res) => {
       JOIN gardener_profiles gp ON u.id = gp.user_id
       LEFT JOIN bookings b ON b.gardener_id = u.id AND b.created_at >= :since
       WHERE u.role = 'gardener' AND u.is_active = 1 AND u.is_approved = 1
+      ${cityFilter ? 'AND u.city = :city' : ''}
       GROUP BY u.id, u.name, u.phone, u.city, gp.rating, gp.is_available
       ORDER BY utilization_pct DESC
     `, {
-      replacements: { maxJobs: maxPossibleJobs, since },
+      replacements: { maxJobs: maxPossibleJobs, since, city: cityFilter },
       type: db.QueryTypes.SELECT
     });
 
-    // Summary stats
     const avgUtilization = utilization.length > 0
       ? (utilization.reduce((s, g) => s + Number(g.utilization_pct || 0), 0) / utilization.length).toFixed(1)
       : 0;
-
-    const overloaded = utilization.filter(g => Number(g.utilization_pct) > 80).length;
-    const underutilized = utilization.filter(g => Number(g.utilization_pct) < 30).length;
-    const optimal = utilization.filter(g => Number(g.utilization_pct) >= 30 && Number(g.utilization_pct) <= 80).length;
 
     res.json({
       success: true,
@@ -631,13 +672,14 @@ exports.getUtilizationReport = async (req, res) => {
         gardeners: utilization,
         summary: {
           avg_utilization_pct: avgUtilization,
-          overloaded,
-          underutilized,
-          optimal,
+          overloaded: utilization.filter(g => Number(g.utilization_pct) > 80).length,
+          underutilized: utilization.filter(g => Number(g.utilization_pct) < 30).length,
+          optimal: utilization.filter(g => Number(g.utilization_pct) >= 30 && Number(g.utilization_pct) <= 80).length,
           total_gardeners: utilization.length,
           max_possible_jobs_per_gardener: maxPossibleJobs,
           period_days: days,
-        }
+        },
+        selectedCity: cityFilter || null
       }
     });
   } catch (err) {
