@@ -1263,15 +1263,30 @@ router.get('/social-proof', async (req, res) => {
       });
     }
 
-    res.json({ 
-      success: true, 
-      data: { 
-        enabled: true, 
-        interval, 
-        delay, 
-        duration, 
+    // Add admin-created taglines as social proof items
+    const { Tagline } = require('../models');
+    const taglines = await Tagline.findAll({
+      where: { is_active: true },
+      order: [['display_order', 'ASC']]
+    });
+    taglines.forEach(tl => {
+      items.push({
+        type: 'tagline',
+        message: tl.text,
+        time_ago: '',
+        image_url: tl.image_url || null
+      });
+    });
+
+    res.json({
+      success: true,
+      data: {
+        enabled: true,
+        interval,
+        delay,
+        duration,
         items: items.sort(() => Math.random() - 0.5) // Randomize order for variety
-      } 
+      }
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
