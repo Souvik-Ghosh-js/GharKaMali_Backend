@@ -76,6 +76,21 @@ router.get('/cities/:slug', contentCtrl.getCityPage);
 // ── PRIVACY POLICY ────────────────────────────────────────────────────────────
 router.get('/privacy-policy', contentCtrl.getPrivacyPolicy);
 
+// ── GEOFENCES (public — used by customer app for location picker) ─────────────
+router.get('/geofences', async (req, res) => {
+  try {
+    const { Geofence } = require('../models');
+    const geofences = await Geofence.findAll({
+      where: { is_active: true },
+      attributes: ['id', 'name', 'city', 'base_price', 'price_per_plant', 'min_plants', 'surge_multiplier'],
+      order: [['city', 'ASC'], ['name', 'ASC']],
+    });
+    res.json({ success: true, data: geofences });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ── SHOP / MARKETPLACE ────────────────────────────────────────────────────────
 router.get('/shop/categories', authenticateOptional, shopCtrl.getCategories);
 router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
