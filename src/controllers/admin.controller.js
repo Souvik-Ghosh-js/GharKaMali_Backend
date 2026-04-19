@@ -76,7 +76,7 @@ exports.getAnalytics = async (req, res) => {
     const revenueByDay = await db.query(`
       SELECT DATE(b.created_at) as date, SUM(b.total_amount) as revenue
       FROM bookings b JOIN users cu ON cu.id = b.customer_id
-      WHERE b.status NOT IN ('cancelled', 'failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}
+      WHERE b.booking_type = 'ondemand' AND b.status NOT IN ('cancelled', 'failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}
       GROUP BY DATE(b.created_at) ORDER BY date ASC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
@@ -100,6 +100,23 @@ exports.getAnalytics = async (req, res) => {
       LEFT JOIN service_zones sz ON b.zone_id = sz.id
       WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL OR b.zone_id IS NOT NULL) ${bookingCond}
       GROUP BY g.id, g.name, sz.id, sz.name, cu.city ORDER BY total DESC
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
+
+    const bookingsByZoneRevenue = await db.query(`
+      SELECT
+        COALESCE(g.name, sz.name, cu.city) as zone,
+        SUM(CASE WHEN b.booking_type = 'ondemand' AND b.status NOT IN ('cancelled','failed') THEN b.total_amount ELSE 0 END) as ondemand_revenue
+      FROM bookings b
+      JOIN users cu ON cu.id = b.customer_id
+      LEFT JOIN geofences g ON b.geofence_id = g.id
+      LEFT JOIN service_zones sz ON b.zone_id = sz.id
+      WHERE b.created_at >= :since AND (cu.city IS NOT NULL OR b.geofence_id IS NOT NULL OR b.zone_id IS NOT NULL) ${bookingCond}
+      GROUP BY g.id, g.name, sz.id, sz.name, cu.city
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
+
+    // Merge ondemand revenue into bookingsByZone
+    const zoneRevenueMap = Object.fromEntries(bookingsByZoneRevenue.map(r => [r.zone, r.ondemand_revenue]));
+    bookingsByZone.forEach(z => { z.revenue = zoneRevenueMap[z.zone] ?? '0.00'; });
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingsByCity = await db.query(`
@@ -242,7 +259,7 @@ exports.getAnalytics = async (req, res) => {
     const revenueBreakdown = await db.query([
       'SELECT',
       `  (SELECT COALESCE(SUM(b.total_amount), 0) FROM bookings b JOIN users cu ON cu.id = b.customer_id`,
-      `    WHERE b.status NOT IN ('cancelled','failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}) as booking_revenue,`,
+      `    WHERE b.booking_type = 'ondemand' AND b.status NOT IN ('cancelled','failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}) as booking_revenue,`,
       `  (SELECT COALESCE(SUM(total_amount), 0) FROM orders o`,
       `    WHERE payment_status="paid" AND created_at >= :since ${orderCond}) as shop_revenue,`,
       `  (SELECT COALESCE(SUM(s.amount_paid), 0) FROM subscriptions s JOIN users cu ON cu.id = s.customer_id`,
