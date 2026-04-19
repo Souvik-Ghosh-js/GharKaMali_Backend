@@ -212,6 +212,7 @@ exports.upsertCityPage = async (req, res) => {
 // ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 exports.getNotifications = async (req, res) => {
   try {
+    console.log('[DEBUG] getNotifications USER:', req.user.id, 'ROLE:', req.user.role, 'GF:', req.user.geofence_id);
     const where = {
       [Op.or]: [
         { user_id: req.user.id },
