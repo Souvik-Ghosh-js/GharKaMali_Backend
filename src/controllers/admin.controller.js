@@ -76,7 +76,7 @@ exports.getAnalytics = async (req, res) => {
     const revenueByDay = await db.query(`
       SELECT DATE(b.created_at) as date, SUM(b.total_amount) as revenue
       FROM bookings b JOIN users cu ON cu.id = b.customer_id
-      WHERE b.status = 'completed' AND b.created_at >= :since ${bookingCond}
+      WHERE b.status NOT IN ('cancelled', 'failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}
       GROUP BY DATE(b.created_at) ORDER BY date ASC
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
@@ -242,7 +242,7 @@ exports.getAnalytics = async (req, res) => {
     const revenueBreakdown = await db.query([
       'SELECT',
       `  (SELECT COALESCE(SUM(b.total_amount), 0) FROM bookings b JOIN users cu ON cu.id = b.customer_id`,
-      `    WHERE b.status="completed" AND b.created_at >= :since ${bookingCond}) as booking_revenue,`,
+      `    WHERE b.status NOT IN ('cancelled','failed') AND b.total_amount > 0 AND b.created_at >= :since ${bookingCond}) as booking_revenue,`,
       `  (SELECT COALESCE(SUM(total_amount), 0) FROM orders o`,
       `    WHERE payment_status="paid" AND created_at >= :since ${orderCond}) as shop_revenue,`,
       `  (SELECT COALESCE(SUM(s.amount_paid), 0) FROM subscriptions s JOIN users cu ON cu.id = s.customer_id`,

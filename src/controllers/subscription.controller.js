@@ -1,5 +1,5 @@
-const { Op } = require('sequelize');
-const { Subscription, ServicePlan, User, Booking, ServiceZone } = require('../models');
+const { Op, literal } = require('sequelize');
+const { Subscription, ServicePlan, User, Booking, ServiceZone, Geofence } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const moment = require('moment');
 const bookingCtrl = require('./booking.controller');
@@ -20,7 +20,8 @@ exports.getPlans = async (req, res) => {
 // Subscribe
 exports.subscribe = async (req, res) => {
   try {
-    const { plan_id, zone_id, service_address, service_latitude, service_longitude, plant_count, preferred_gardener_id, auto_renew, payment_id } = req.body;
+    const { plan_id, zone_id, geofence_id: geofence_id_body, service_address, service_latitude, service_longitude, plant_count, preferred_gardener_id, auto_renew, payment_id } = req.body;
+    const activeZoneId = geofence_id_body || zone_id;
 
     const plan = await ServicePlan.findByPk(plan_id);
     if (!plan || !plan.is_active) return res.status(404).json({ success: false, message: 'Plan not found' });
@@ -31,8 +32,8 @@ exports.subscribe = async (req, res) => {
     const subscription = await Subscription.create({
       customer_id: req.user.id,
       plan_id,
-      zone_id,
-      geofence_id: zone_id, // Map selected zone/geofence
+      zone_id: activeZoneId,
+      geofence_id: activeZoneId,
       preferred_gardener_id,
       status: 'active',
       start_date: startDate,
@@ -128,30 +129,53 @@ exports.cancelSubscription = async (req, res) => {
 // Get all subscriptions (Admin)
 exports.getAllSubscriptions = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, page = 1, limit = 20, geofence_id, plan_id, search } = req.query;
     const where = {};
     if (status) where.status = status;
+    if (plan_id) where.plan_id = plan_id;
+
+    // Geofence filter: match explicit geofence_id/zone_id OR city fallback for legacy records
+    if (geofence_id) {
+      const gf = await Geofence.findByPk(geofence_id);
+      const city = gf ? gf.city : null;
+      where[Op.or] = [
+        { geofence_id: geofence_id },
+        { zone_id: geofence_id },
+        ...(city ? [literal(`(geofence_id IS NULL AND zone_id IS NULL AND EXISTS (SELECT 1 FROM users u WHERE u.id = \`Subscription\`.\`customer_id\` AND u.city = '${city.replace(/'/g, "\\'")}'))`)] : [])
+      ];
+    }
+
+    // Search by customer name/phone
+    const customerWhere = {};
+    if (search) {
+      customerWhere[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } }
+      ];
+    }
 
     const { count, rows } = await Subscription.findAndCountAll({
       where,
       include: [
         { model: ServicePlan, as: 'plan' },
-        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'email'] },
-        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone'] }
+        { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'email'], where: Object.keys(customerWhere).length ? customerWhere : undefined },
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone'] },
+        { model: Geofence, as: 'geofenceRef', attributes: ['id', 'name', 'city'] }
       ],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
-      offset: (page - 1) * limit
+      offset: (parseInt(page) - 1) * parseInt(limit),
+      subQuery: false
     });
 
-    res.json({ 
-      success: true, 
-      data: { 
-        items: rows, 
+    res.json({
+      success: true,
+      data: {
+        items: rows,
         total: count,
         page: parseInt(page),
-        pages: Math.ceil(count / limit)
-      } 
+        pages: Math.ceil(count / parseInt(limit))
+      }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
