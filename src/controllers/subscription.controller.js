@@ -86,11 +86,29 @@ exports.getMySubscriptions = async (req, res) => {
       where: { customer_id: req.user.id },
       include: [
         { model: ServicePlan, as: 'plan' },
-        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'] }
+        { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'] },
+        {
+          model: Booking,
+          as: 'bookings',
+          attributes: ['id', 'booking_number', 'scheduled_date', 'status', 'gardener_id'],
+          include: [{ model: User, as: 'gardener', attributes: ['id', 'name', 'profile_image'] }],
+          required: false
+        }
       ],
       order: [['created_at', 'DESC']]
     });
-    res.json({ success: true, data: subscriptions });
+
+    const data = subscriptions.map(sub => {
+      const plain = sub.toJSON();
+      plain.scheduled_visits_count = (plain.bookings || []).filter(b => b.status !== 'cancelled').length;
+      const upcoming = (plain.bookings || [])
+        .filter(b => b.status !== 'cancelled' && b.scheduled_date >= moment().format('YYYY-MM-DD'))
+        .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+      plain.next_visit_date = upcoming.length > 0 ? upcoming[0].scheduled_date : null;
+      return plain;
+    });
+
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
