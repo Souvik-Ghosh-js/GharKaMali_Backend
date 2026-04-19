@@ -117,7 +117,6 @@ exports.getAnalytics = async (req, res) => {
     // Merge ondemand revenue into bookingsByZone
     const zoneRevenueMap = Object.fromEntries(bookingsByZoneRevenue.map(r => [r.zone, r.ondemand_revenue]));
     bookingsByZone.forEach(z => { z.revenue = zoneRevenueMap[z.zone] ?? '0.00'; });
-    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const bookingsByCity = await db.query(`
       SELECT cu.city, cu.state, COUNT(b.id) as total, SUM(b.total_amount) as revenue
