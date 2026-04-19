@@ -212,8 +212,26 @@ exports.upsertCityPage = async (req, res) => {
 // ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 exports.getNotifications = async (req, res) => {
   try {
+    const where = {
+      [Op.or]: [
+        { user_id: req.user.id },
+        {
+          [Op.and]: [
+            { geofence_id: req.user.geofence_id || null },
+            { target_role: { [Op.in]: [req.user.role, 'all'] } }
+          ]
+        },
+        {
+          [Op.and]: [
+            { geofence_id: null },
+            { target_role: 'all' }
+          ]
+        }
+      ]
+    };
+
     const notifs = await Notification.findAll({
-      where: { user_id: req.user.id },
+      where,
       order: [['created_at', 'DESC']],
       limit: 30
     });
