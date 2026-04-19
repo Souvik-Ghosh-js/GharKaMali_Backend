@@ -571,12 +571,12 @@ router.put('/admin/addons/:id', authenticate, authorize('admin'), async (req, re
 // ── GARDENER PROFILE (dedicated gardener routes) ──────────────────────────────
 router.get('/gardener/profile', authenticate, authorize('gardener'), async (req, res) => {
   try {
-    const { GardenerProfile, User, ServiceZone, GardenerZone } = require('../models');
+    const { GardenerProfile, User, Geofence, GardenerZone } = require('../models');
     const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'otp', 'otp_expires_at'] } });
     const profile = await GardenerProfile.findOne({ where: { user_id: req.user.id } });
     const zones = await GardenerZone.findAll({
       where: { gardener_id: req.user.id },
-      include: [{ model: ServiceZone, as: 'zone' }]
+      include: [{ model: Geofence, as: 'geofence' }]
     });
     res.json({ success: true, data: { user, profile, zones } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -643,7 +643,7 @@ router.put('/notifications/read-all', authenticate, async (req, res) => {
 // ── ADMIN: SINGLE GARDENER DETAIL ─────────────────────────────────────────────
 router.get('/admin/gardeners/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { User, GardenerProfile, GardenerZone, ServiceZone, RewardPenalty, Booking } = require('../models');
+    const { User, GardenerProfile, GardenerZone, Geofence, RewardPenalty, Booking } = require('../models');
     const { Op } = require('sequelize');
     const user = await User.findOne({
       where: { id: req.params.id, role: 'gardener' },
@@ -651,7 +651,7 @@ router.get('/admin/gardeners/:id', authenticate, authorize('admin', 'supervisor'
       include: [{ model: GardenerProfile, as: 'gardenerProfile' }]
     });
     if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
-    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: ServiceZone, as: 'zone' }] });
+    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: Geofence, as: 'geofence' }] });
     const rewards = await RewardPenalty.findAll({ where: { gardener_id: req.params.id }, order: [['created_at', 'DESC']], limit: 10 });
     const recentJobs = await Booking.findAll({ where: { gardener_id: req.params.id }, order: [['created_at', 'DESC']], limit: 5, attributes: ['id', 'booking_number', 'status', 'scheduled_date', 'total_amount', 'rating'] });
     res.json({ success: true, data: { ...user.toJSON(), zones, recentRewards: rewards, recentJobs } });
@@ -672,8 +672,8 @@ router.patch('/admin/gardeners/:id/toggle', authenticate, authorize('admin'), as
 // ── ADMIN: GARDENER ZONE ASSIGNMENT ──────────────────────────────────────────
 router.get('/admin/gardeners/:id/zones', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { GardenerZone, ServiceZone } = require('../models');
-    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: ServiceZone, as: 'zone' }] });
+    const { GardenerZone, Geofence } = require('../models');
+    const zones = await GardenerZone.findAll({ where: { gardener_id: req.params.id }, include: [{ model: Geofence, as: 'geofence' }] });
     res.json({ success: true, data: zones });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
