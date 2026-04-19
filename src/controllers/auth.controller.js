@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const { User, GardenerProfile, Geofence, ServiceZone } = require('../models');
 const { generateToken } = require('../middleware/auth');
 const { generateOTP, sendOTP, sendWhatsApp, templates } = require('../services/otp.service');
+const { resolveGeofence } = require('../utils/geo');
 
 // Send OTP
 exports.sendOtp = async (req, res) => {
@@ -27,7 +28,7 @@ exports.sendOtp = async (req, res) => {
 // Verify OTP and login/register customer
 exports.verifyOtp = async (req, res) => {
   try {
-    const { phone, otp, name, fcm_token } = req.body;
+    const { phone, otp, name, fcm_token, lat, lng } = req.body;
     const staticOtp = process.env.STATIC_OTP || '123456';
 
     let user = await User.findOne({ where: { phone } });
