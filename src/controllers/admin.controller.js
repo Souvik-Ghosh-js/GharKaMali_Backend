@@ -591,7 +591,7 @@ exports.getAllBookings = async (req, res) => {
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image', 'city', 'address'] },
         { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'] },
         { model: ServiceZone, as: 'zone', attributes: ['id', 'name', 'city', 'center_latitude', 'center_longitude'] },
-        { model: Geofence, as: 'geofence', attributes: ['id', 'name', 'city'] },
+        { model: Geofence, as: 'geofenceRef', attributes: ['id', 'name', 'city'] },
         { model: Subscription, as: 'subscription', include: [{ model: ServicePlan, as: 'plan', attributes: ['name'] }] }
       ],
       order: [['created_at', 'DESC']],
@@ -960,7 +960,7 @@ exports.getAdminOrders = async (req, res) => {
       },
       include: [
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'city', 'address'] },
-        { model: Geofence, as: 'geofence', attributes: ['id', 'name', 'city'] },
+        { model: Geofence, as: 'geofenceRef', attributes: ['id', 'name', 'city'] },
         {
           model: OrderItem,
           as: 'items',

@@ -504,8 +504,7 @@ const WithdrawalRequest = sequelize.define('WithdrawalRequest', {
   bank_name: { type: DataTypes.STRING(100) },
   admin_notes: { type: DataTypes.TEXT },
   processed_at: { type: DataTypes.DATE },
-  processed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
-  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
+  processed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'withdrawal_requests', underscored: true });
 
 // ─── REVIEW ───────────────────────────────────────────────────────────────────
@@ -648,7 +647,6 @@ Complaint.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 Payment.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 PlantIdentification.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 ContactMessage.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
-WithdrawalRequest.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 
 // ProductZonePrice associations
 ProductZonePrice.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
