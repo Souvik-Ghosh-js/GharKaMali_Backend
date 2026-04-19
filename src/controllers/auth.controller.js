@@ -48,6 +48,13 @@ exports.verifyOtp = async (req, res) => {
 
     await user.update({ otp: null, otp_expires_at: null, last_login: new Date(), ...(fcm_token ? { fcm_token } : {}) });
 
+    if (lat != null && lng != null) {
+      const gf = await resolveGeofence(parseFloat(lat), parseFloat(lng));
+      if (gf) {
+        await user.update({ geofence_id: gf.id, latitude: parseFloat(lat), longitude: parseFloat(lng) });
+      }
+    }
+
     const token = generateToken(user);
     const userData = user.toJSON();
     delete userData.password;
