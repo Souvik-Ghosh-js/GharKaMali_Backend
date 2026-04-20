@@ -21,6 +21,7 @@ router.post('/auth/gardener-register',
 );
 router.get('/auth/profile', authenticate, authCtrl.getProfile);
 router.put('/auth/profile', authenticate, uploadProfile.single('profile_image'), authCtrl.updateProfile);
+router.use('/addresses', require('./address.routes'));
 
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
 router.post('/bookings', authenticate, authorize('customer'), bookingCtrl.createBooking);

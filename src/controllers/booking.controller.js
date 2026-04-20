@@ -108,7 +108,20 @@ const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 // Create booking (on-demand)
 exports.createBooking = async (req, res) => {
   try {
-    const { zone_id, geofence_id, scheduled_date, scheduled_time, service_address, service_latitude, service_longitude, plant_count, customer_notes, preferred_gardener_id, payment_method } = req.body;
+    const { 
+      zone_id, geofence_id, scheduled_date, scheduled_time, 
+      service_address, service_latitude, service_longitude, 
+      flat_no, building, area, landmark, city, state, pincode,
+      plant_count, customer_notes, preferred_gardener_id, payment_method 
+    } = req.body;
+
+    // Auto-save address to user profile
+    const addressCtrl = require('./address.controller');
+    await addressCtrl.smartSaveAddress(req.user.id, {
+      flat_no, building, area, landmark, city, state, pincode,
+      latitude: service_latitude, longitude: service_longitude,
+      label: building || area || 'Home'
+    });
 
     const activeZoneId = geofence_id || zone_id;
     // Use Geofence for pricing if available

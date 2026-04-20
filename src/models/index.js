@@ -646,7 +646,28 @@ Tip.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 Complaint.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 Payment.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 PlantIdentification.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+// ─── USER ADDRESS ────────────────────────────────────────────────────────────
+const UserAddress = sequelize.define('UserAddress', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  label: { type: DataTypes.STRING(50), defaultValue: 'Home' }, // Home, Office, etc.
+  flat_no: { type: DataTypes.STRING(100) },
+  building: { type: DataTypes.STRING(255) },
+  area: { type: DataTypes.TEXT },
+  landmark: { type: DataTypes.STRING(255) },
+  city: { type: DataTypes.STRING(100) },
+  state: { type: DataTypes.STRING(100) },
+  pincode: { type: DataTypes.STRING(15) },
+  latitude: { type: DataTypes.DECIMAL(10, 8), allowNull: false },
+  longitude: { type: DataTypes.DECIMAL(11, 8), allowNull: false },
+  is_default: { type: DataTypes.BOOLEAN, defaultValue: false }
+}, { tableName: 'user_addresses', underscored: true });
+
+// ... existing code ...
 ContactMessage.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
+
+User.hasMany(UserAddress, { foreignKey: 'user_id', as: 'addresses' });
+UserAddress.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 // ProductZonePrice associations
 ProductZonePrice.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
@@ -691,6 +712,7 @@ module.exports = {
   Tip,
   ProductZonePrice,
   ContactMessage,
-  SystemSetting
+  SystemSetting,
+  UserAddress
 };
 

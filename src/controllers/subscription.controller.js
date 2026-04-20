@@ -20,7 +20,20 @@ exports.getPlans = async (req, res) => {
 // Subscribe
 exports.subscribe = async (req, res) => {
   try {
-    const { plan_id, zone_id, geofence_id: geofence_id_body, service_address, service_latitude, service_longitude, plant_count, preferred_gardener_id, auto_renew, payment_id } = req.body;
+    const { 
+      plan_id, zone_id, geofence_id: geofence_id_body, 
+      service_address, service_latitude, service_longitude, 
+      flat_no, building, area, landmark, city, state, pincode,
+      plant_count, preferred_gardener_id, auto_renew, payment_id 
+    } = req.body;
+
+    // Auto-save address to user profile
+    const addressCtrl = require('./address.controller');
+    await addressCtrl.smartSaveAddress(req.user.id, {
+      flat_no, building, area, landmark, city, state, pincode,
+      latitude: service_latitude, longitude: service_longitude,
+      label: building || area || 'Home'
+    });
     const activeZoneId = geofence_id_body || zone_id;
 
     const plan = await ServicePlan.findByPk(plan_id);
