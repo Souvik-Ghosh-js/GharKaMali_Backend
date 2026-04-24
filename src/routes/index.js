@@ -331,6 +331,7 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     // Add columns causing 500 errors on the remote API due to sync failures
     try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE gardener_zones MODIFY COLUMN zone_id INT NULL"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE withdrawal_requests ADD COLUMN geofence_id INT"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE reviews ADD COLUMN geofence_id INT"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE tips ADD COLUMN geofence_id INT"); } catch (e) { }
