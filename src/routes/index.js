@@ -423,7 +423,8 @@ router.get('/bookings/gardener/earnings', authenticate, authorize('gardener'), a
       WHERE gardener_id = :uid AND status IN ('completed','cancelled')
     `, { replacements: { uid: req.user.id }, type: db.QueryTypes.SELECT });
 
-    res.json({ success: true, data: { period, breakdown: rows, totals: totals[0] } });
+    const breakdown = rows.map(r => ({ ...r, label: r.period_label, jobs: r.jobs || 0, earnings: parseFloat(r.earnings) || 0 }));
+    res.json({ success: true, data: { period, breakdown, totals: totals[0] } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -590,11 +591,16 @@ router.get('/gardener/profile', authenticate, authorize('gardener'), async (req,
     const { GardenerProfile, User, Geofence, GardenerZone } = require('../models');
     const user = await User.findByPk(req.user.id, { attributes: { exclude: ['password', 'otp', 'otp_expires_at'] } });
     const profile = await GardenerProfile.findOne({ where: { user_id: req.user.id } });
-    const zones = await GardenerZone.findAll({
+    const zoneRows = await GardenerZone.findAll({
       where: { gardener_id: req.user.id },
       include: [{ model: Geofence, as: 'geofence' }]
     });
-    res.json({ success: true, data: { user, profile, zones } });
+    // Return structure the app expects: user object with gardenerProfile nested
+    const userData = user.toJSON();
+    const profileData = profile ? profile.toJSON() : {};
+    profileData.zones = zoneRows.map(gz => gz.geofence ? gz.geofence.toJSON() : {}).filter(g => g.id);
+    userData.gardenerProfile = profileData;
+    res.json({ success: true, data: userData });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 

@@ -92,8 +92,20 @@ exports.checkAvailability = async (req, res) => {
     const { date, gardener_id, geofence_id } = req.query;
     if (!date) return res.status(400).json({ success: false, message: 'Date is required' });
 
+    // Check if any gardeners are assigned to this zone at all
+    let noGardenersInZone = false;
+    if (geofence_id && !gardener_id) {
+      const zoneCount = await GardenerZone.count({ where: { geofence_id } });
+      if (zoneCount === 0) noGardenersInZone = true;
+    }
+
     const slots = await checkGardenerAvailabilityInternal(date, gardener_id, geofence_id);
-    res.json({ success: true, data: slots });
+    res.json({
+      success: true,
+      data: slots,
+      no_gardeners_in_zone: noGardenersInZone,
+      message: noGardenersInZone ? 'No gardeners are currently serving this area.' : undefined
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -137,7 +149,7 @@ exports.createBooking = async (req, res) => {
     const extraPlants = Math.max(0, pCount - minPlants);
     const baseAmount = (basePrice + (extraPlants * pricePerPlant)) * surge;
 
-    // Wallet payment: check balance before confirming
+    // Wallet payment: check balance before confirming (addons calculated after this, so we pre-check base only here)
     if (payment_method === 'wallet') {
       const customer = await User.findByPk(req.user.id);
       if (parseFloat(customer.wallet_balance) < baseAmount) {
@@ -145,23 +157,77 @@ exports.createBooking = async (req, res) => {
       }
     }
 
-    // Find best gardener
+    // Find best gardener — must be in this geofence zone and free at the requested time
     let gardener_id = null;
+
+    // Helper: check if a gardener is free at the requested date/time (2-hr window)
+    const isGardenerFreeAtSlot = async (gId) => {
+      const conflicts = await Booking.findAll({
+        where: {
+          gardener_id: gId,
+          scheduled_date,
+          status: { [Op.notIn]: ['cancelled', 'failed'] }
+        },
+        attributes: ['scheduled_time']
+      });
+      const requestedMins = moment(scheduled_time, 'HH:mm');
+      return !conflicts.some(b => {
+        const bookingMins = moment(b.scheduled_time, 'HH:mm:ss');
+        return Math.abs(requestedMins.diff(bookingMins, 'minutes')) < 120;
+      });
+    };
+
+    // 1. Try preferred gardener first (must be in zone and free)
     if (preferred_gardener_id) {
-      const g = await GardenerProfile.findOne({ where: { user_id: preferred_gardener_id, is_available: true } });
-      if (g) gardener_id = preferred_gardener_id;
+      const inZone = await GardenerZone.findOne({ where: { gardener_id: preferred_gardener_id, geofence_id: activeZoneId } });
+      const g = inZone ? await GardenerProfile.findOne({ where: { user_id: preferred_gardener_id, is_available: true } }) : null;
+      if (g && await isGardenerFreeAtSlot(preferred_gardener_id)) gardener_id = preferred_gardener_id;
     }
 
+    // 2. Auto-assign: find best available gardener assigned to this geofence
     if (!gardener_id) {
-      // Find nearest available gardener in zone
-      const available = await GardenerProfile.findOne({
-        where: { is_available: true },
-        include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true } }]
+      const zoneAssignments = await GardenerZone.findAll({ where: { geofence_id: activeZoneId }, attributes: ['gardener_id'] });
+      const zoneGardenerIds = zoneAssignments.map(gz => gz.gardener_id);
+
+      if (zoneGardenerIds.length === 0) {
+        return res.status(400).json({ success: false, message: 'No gardeners are available in your area. Please try again later or contact support.' });
+      }
+
+      // Find available gardeners in zone, ordered by rating desc
+      const candidates = await GardenerProfile.findAll({
+        where: { user_id: { [Op.in]: zoneGardenerIds }, is_available: true },
+        include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true, role: 'gardener' } }],
+        order: [['rating', 'DESC']]
       });
-      if (available) gardener_id = available.user_id;
+
+      for (const candidate of candidates) {
+        if (await isGardenerFreeAtSlot(candidate.user_id)) {
+          gardener_id = candidate.user_id;
+          break;
+        }
+      }
+
+      if (!gardener_id) {
+        return res.status(400).json({ success: false, message: 'No gardener is available for the selected date and time slot. Please choose a different slot.' });
+      }
     }
 
     const otp = genVisitOTP();
+    // Calculate addon total before creating booking
+    const { addons } = req.body;
+    let addonTotal = 0;
+    let resolvedAddons = [];
+    if (Array.isArray(addons) && addons.length > 0) {
+      const addonIds = addons.map(a => a.addon_id).filter(Boolean);
+      const addonServices = await AddOnService.findAll({ where: { id: addonIds, is_active: true } });
+      resolvedAddons = addonServices.map(svc => {
+        const req_addon = addons.find(a => Number(a.addon_id) === Number(svc.id));
+        const qty = (req_addon && req_addon.quantity) || 1;
+        addonTotal += parseFloat(svc.price) * qty;
+        return { addon_id: svc.id, quantity: qty, price: parseFloat(svc.price) };
+      });
+    }
+
     const booking = await Booking.create({
       booking_number: genBookingNumber(),
       customer_id: req.user.id,
@@ -179,15 +245,21 @@ exports.createBooking = async (req, res) => {
       service_longitude,
       plant_count: plant_count || 1,
       base_amount: baseAmount,
-      total_amount: baseAmount,
+      total_amount: baseAmount + addonTotal,
       customer_notes,
       payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
     });
 
-    // Deduct wallet balance if wallet payment
+    // Create BookingAddOn records
+    if (resolvedAddons.length > 0) {
+      await BookingAddOn.bulkCreate(resolvedAddons.map(a => ({ booking_id: booking.id, ...a })));
+    }
+
+    // Deduct wallet balance if wallet payment (full total including addons)
     if (payment_method === 'wallet') {
-      await User.decrement({ wallet_balance: baseAmount }, { where: { id: req.user.id } });
-      await User.increment({ total_spent: baseAmount }, { where: { id: req.user.id } });
+      const totalCharge = baseAmount + addonTotal;
+      await User.decrement({ wallet_balance: totalCharge }, { where: { id: req.user.id } });
+      await User.increment({ total_spent: totalCharge }, { where: { id: req.user.id } });
     }
 
     // Log booking creation
@@ -305,7 +377,8 @@ exports.verifyVisitOtp = async (req, res) => {
     const booking = await Booking.findByPk(booking_id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     if (booking.gardener_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
-    if (booking.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    if (booking.status !== 'arrived') return res.status(400).json({ success: false, message: 'Please mark yourself as arrived at the location first' });
+    if (booking.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP. Please ask the customer to check their notification.' });
 
     await booking.update({ otp_verified: true, otp_verified_at: new Date(), status: 'in_progress', started_at: new Date() });
 
@@ -452,7 +525,10 @@ exports.getGardenerJobs = async (req, res) => {
   try {
     const { status, date } = req.query;
     const where = { gardener_id: req.user.id };
-    if (status) where.status = status;
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      where.status = statuses.length > 1 ? { [Op.in]: statuses } : statuses[0];
+    }
     if (date) where.scheduled_date = date;
 
     const bookings = await Booking.findAll({

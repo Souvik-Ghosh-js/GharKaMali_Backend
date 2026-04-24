@@ -101,12 +101,12 @@ exports.gardenerRegister = async (req, res) => {
     const user = await User.create({ name, phone, email, role: 'gardener', is_active: true, is_approved: false, referral_code: referralCode });
     const profile = await GardenerProfile.create({ user_id: user.id, experience_years: experience_years || 0, bio: bio || '' });
 
-    // Suggest service zones (will be verified/active after admin approval)
+    // Suggest service geofences (will be verified/active after admin approval)
     if (service_zone_ids) {
       const { GardenerZone } = require('../models');
-      const zoneIds = Array.isArray(service_zone_ids) ? service_zone_ids : [service_zone_ids];
+      const zoneIds = Array.isArray(service_zone_ids) ? service_zone_ids : JSON.parse(service_zone_ids);
       for (const zid of zoneIds) {
-        await GardenerZone.create({ gardener_id: user.id, zone_id: zid });
+        await GardenerZone.create({ gardener_id: user.id, geofence_id: zid });
       }
     }
 
@@ -198,8 +198,9 @@ exports.gardenerLogin = async (req, res) => {
     const token = generateToken(user);
     const userData = user.toJSON();
     delete userData.password; delete userData.otp;
+    userData.gardenerProfile = profile ? profile.toJSON() : null;
 
-    res.json({ success: true, data: { token, user: userData, profile } });
+    res.json({ success: true, data: { token, user: userData } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
