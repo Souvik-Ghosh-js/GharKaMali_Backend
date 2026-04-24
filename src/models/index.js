@@ -22,13 +22,13 @@ const User = sequelize.define('User', {
   city: { type: DataTypes.STRING(100) },
   state: { type: DataTypes.STRING(100) },
   pincode: { type: DataTypes.STRING(10) },
-    wallet_balance: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    total_spent: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-    referral_code: { type: DataTypes.STRING(20), unique: true },
-    referred_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
-    geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
-    service_zone_id: { type: DataTypes.INTEGER, references: { model: 'service_zones', key: 'id' } }
-  }, { tableName: 'users' });
+  wallet_balance: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  total_spent: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  referral_code: { type: DataTypes.STRING(20), unique: true },
+  referred_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
+  service_zone_id: { type: DataTypes.INTEGER, references: { model: 'service_zones', key: 'id' } }
+}, { tableName: 'users' });
 
 // ─── GARDENER PROFILE ─────────────────────────────────────────────────────────
 const GardenerProfile = sequelize.define('GardenerProfile', {
@@ -77,7 +77,8 @@ const ServiceZone = sequelize.define('ServiceZone', {
 const GardenerZone = sequelize.define('GardenerZone', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   gardener_id: { type: DataTypes.INTEGER, allowNull: false },
-  geofence_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'geofences', key: 'id' } }
+  geofence_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'geofences', key: 'id' } },
+  zone_id: { type: DataTypes.INTEGER, allowNull: true, references: { model: 'service_zones', key: 'id' } }
 }, { tableName: 'gardener_zones', underscored: true });
 
 // ─── SERVICE PLAN ─────────────────────────────────────────────────────────────
@@ -306,17 +307,17 @@ const PriceHikeSchedule = sequelize.define('PriceHikeSchedule', {
 // ─── COMPLAINT ────────────────────────────────────────────────────────────────
 const Complaint = sequelize.define('Complaint', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  booking_id:    { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
-  customer_id:   { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
-  gardener_id:   { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
-  assigned_to:   { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }, // supervisor
-  type: { type: DataTypes.ENUM('service_quality','late_arrival','no_show','rude_behavior','billing','damage','other'), allowNull: false },
-  description:   { type: DataTypes.TEXT, allowNull: false },
-  status: { type: DataTypes.ENUM('open','in_review','resolved','closed'), defaultValue: 'open' },
-  priority: { type: DataTypes.ENUM('low','medium','high'), defaultValue: 'medium' },
+  booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
+  customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  assigned_to: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }, // supervisor
+  type: { type: DataTypes.ENUM('service_quality', 'late_arrival', 'no_show', 'rude_behavior', 'billing', 'damage', 'other'), allowNull: false },
+  description: { type: DataTypes.TEXT, allowNull: false },
+  status: { type: DataTypes.ENUM('open', 'in_review', 'resolved', 'closed'), defaultValue: 'open' },
+  priority: { type: DataTypes.ENUM('low', 'medium', 'high'), defaultValue: 'medium' },
   resolution_notes: { type: DataTypes.TEXT },
-  resolved_at:   { type: DataTypes.DATE },
-  resolved_by:   { type: DataTypes.INTEGER },
+  resolved_at: { type: DataTypes.DATE },
+  resolved_by: { type: DataTypes.INTEGER },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'complaints' });
 
@@ -324,9 +325,9 @@ const Complaint = sequelize.define('Complaint', {
 // ─── SLA CONFIG ───────────────────────────────────────────────────────────────
 const SLAConfig = sequelize.define('SLAConfig', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  max_arrival_delay_mins:   { type: DataTypes.INTEGER, defaultValue: 30 },
-  max_service_duration_hrs: { type: DataTypes.DECIMAL(4,1), defaultValue: 3.0 },
-  response_time_hrs:        { type: DataTypes.INTEGER, defaultValue: 24 },
+  max_arrival_delay_mins: { type: DataTypes.INTEGER, defaultValue: 30 },
+  max_service_duration_hrs: { type: DataTypes.DECIMAL(4, 1), defaultValue: 3.0 },
+  response_time_hrs: { type: DataTypes.INTEGER, defaultValue: 24 },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   updated_by: { type: DataTypes.INTEGER }
 }, { tableName: 'sla_configs' });
@@ -334,9 +335,9 @@ const SLAConfig = sequelize.define('SLAConfig', {
 // ─── SLA BREACH ───────────────────────────────────────────────────────────────
 const SLABreach = sequelize.define('SLABreach', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  booking_id:  { type: DataTypes.INTEGER, allowNull: false },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false },
   gardener_id: { type: DataTypes.INTEGER },
-  breach_type: { type: DataTypes.ENUM('late_arrival','service_overtime','no_start','no_completion'), allowNull: false },
+  breach_type: { type: DataTypes.ENUM('late_arrival', 'service_overtime', 'no_start', 'no_completion'), allowNull: false },
   expected_by: { type: DataTypes.DATE },
   detected_at: { type: DataTypes.DATE },
   delay_minutes: { type: DataTypes.INTEGER },
@@ -348,24 +349,24 @@ const SLABreach = sequelize.define('SLABreach', {
 
 // ─── ADD-ON SERVICE ───────────────────────────────────────────────────────────
 const AddOnService = sequelize.define('AddOnService', {
-  id:          { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  name:        { type: DataTypes.STRING(100), allowNull: false },
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false },
   description: { type: DataTypes.TEXT },
-  price:       { type: DataTypes.DECIMAL(10,2), allowNull: false },
+  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   duration_mins: { type: DataTypes.INTEGER, defaultValue: 30 },
-  icon:        { type: DataTypes.STRING(10), defaultValue: '🌿' },
-  is_active:   { type: DataTypes.BOOLEAN, defaultValue: true },
-  category:    { type: DataTypes.STRING(50) }
+  icon: { type: DataTypes.STRING(10), defaultValue: '🌿' },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  category: { type: DataTypes.STRING(50) }
 }, { tableName: 'addon_services' });
 
 // ─── BOOKING ADD-ON ───────────────────────────────────────────────────────────
 const BookingAddOn = sequelize.define('BookingAddOn', {
-  id:         { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   booking_id: { type: DataTypes.INTEGER, allowNull: false },
-  addon_id:   { type: DataTypes.INTEGER, allowNull: false },
-  quantity:   { type: DataTypes.INTEGER, defaultValue: 1 },
-  price:      { type: DataTypes.DECIMAL(10,2), allowNull: false },
-  status:     { type: DataTypes.ENUM('pending','completed'), defaultValue: 'pending' }
+  addon_id: { type: DataTypes.INTEGER, allowNull: false },
+  quantity: { type: DataTypes.INTEGER, defaultValue: 1 },
+  price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  status: { type: DataTypes.ENUM('pending', 'completed'), defaultValue: 'pending' }
 }, { tableName: 'booking_addons' });
 
 // ─── GEOFENCE ──────────────────────────────────────────────────────
@@ -425,9 +426,9 @@ const Order = sequelize.define('Order', {
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
   zone_id: { type: DataTypes.INTEGER, references: { model: 'service_zones', key: 'id' } },
   total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-  status: { 
+  status: {
     type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'),
-    defaultValue: 'pending' 
+    defaultValue: 'pending'
   },
   payment_status: { type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded'), defaultValue: 'pending' },
   payment_id: { type: DataTypes.STRING(100) },

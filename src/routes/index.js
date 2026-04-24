@@ -312,7 +312,7 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
   if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
   try {
     const { sequelize } = require('../models');
-    
+
     // Fix zero dates in key tables that might block sync
     const tables = ['users', 'products', 'orders', 'payments', 'bookings', 'geofences'];
     for (const table of tables) {
@@ -323,25 +323,25 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
         console.log(`Failed to fix dates for ${table}:`, e.message);
       }
     }
-    
+
     // Explicitly add missing columns in case sync(alter: true) fails due to constraints or versioning
-    try { await sequelize.query("ALTER TABLE geofences ADD COLUMN surge_multiplier DECIMAL(4, 2) DEFAULT 1.00"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100)"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE geofences ADD COLUMN surge_multiplier DECIMAL(4, 2) DEFAULT 1.00"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100)"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch (e) { }
     // Add columns causing 500 errors on the remote API due to sync failures
-    try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE withdrawal_requests ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE reviews ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE tips ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE complaints ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE payments ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE plant_identifications ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE contact_messages ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE bookings ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE subscriptions ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE users ADD COLUMN geofence_id INT"); } catch(e){}
-    try { await sequelize.query("ALTER TABLE users ADD COLUMN service_zone_id INT"); } catch(e){}
+    try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE withdrawal_requests ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE reviews ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE tips ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE complaints ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE payments ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE plant_identifications ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE contact_messages ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE bookings ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE subscriptions ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE users ADD COLUMN geofence_id INT"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE users ADD COLUMN service_zone_id INT"); } catch (e) { }
 
     await sequelize.sync({ alter: true });
     res.json({ success: true, message: 'Database schema synchronized successfully and legacy dates fixed.' });
@@ -463,9 +463,9 @@ router.get('/admin/utilization', authenticate, authorize('admin'), adminCtrl.get
 const complaintCtrl = require('../controllers/complaint.controller');
 router.post('/complaints', authenticate, authorize('customer'), complaintCtrl.raiseComplaint);
 router.get('/complaints/my', authenticate, authorize('customer'), complaintCtrl.getMyComplaints);
-router.get('/complaints/stats', authenticate, authorize('admin','supervisor'), complaintCtrl.getComplaintStats);
-router.get('/complaints', authenticate, authorize('admin','supervisor'), complaintCtrl.getAllComplaints);
-router.put('/complaints/:id', authenticate, authorize('admin','supervisor'), complaintCtrl.updateComplaint);
+router.get('/complaints/stats', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getComplaintStats);
+router.get('/complaints', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getAllComplaints);
+router.put('/complaints/:id', authenticate, authorize('admin', 'supervisor'), complaintCtrl.updateComplaint);
 
 // ── SLA CONFIG & BREACHES ─────────────────────────────────────────────────────
 router.get('/admin/sla/config', authenticate, authorize('admin'), async (req, res) => {
@@ -518,7 +518,7 @@ router.put('/admin/sla/breaches/:id/resolve', authenticate, authorize('admin', '
 router.get('/addons', async (req, res) => {
   try {
     const { AddOnService } = require('../models');
-    const addons = await AddOnService.findAll({ where: { is_active: true }, order: [['category','ASC'],['price','ASC']] });
+    const addons = await AddOnService.findAll({ where: { is_active: true }, order: [['category', 'ASC'], ['price', 'ASC']] });
     res.json({ success: true, data: addons });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -529,7 +529,7 @@ router.post('/bookings/:id/addons', authenticate, authorize('customer'), async (
     const { AddOnService, BookingAddOn, Booking } = require('../models');
     const booking = await Booking.findOne({ where: { id: req.params.id, customer_id: req.user.id } });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (!['pending','assigned'].includes(booking.status)) return res.status(400).json({ success: false, message: 'Can only add services to pending/assigned bookings' });
+    if (!['pending', 'assigned'].includes(booking.status)) return res.status(400).json({ success: false, message: 'Can only add services to pending/assigned bookings' });
 
     let addedTotal = 0;
     const created = [];
@@ -563,7 +563,7 @@ router.get('/bookings/:id/addons', authenticate, async (req, res) => {
 router.get('/admin/addons', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { AddOnService } = require('../models');
-    const addons = await AddOnService.findAll({ order: [['category','ASC'],['name','ASC']] });
+    const addons = await AddOnService.findAll({ order: [['category', 'ASC'], ['name', 'ASC']] });
     res.json({ success: true, data: addons });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -837,7 +837,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
     // Notify gardeners via Push & WhatsApp
     const { sendWhatsApp } = require('../services/otp.service');
     const { notify } = require('../services/push.service');
-    
+
     // Notify new gardener
     await sendWhatsApp(gardener.phone, `🌿 *GharKaMali*\nHello ${gardener.name}, a booking (${booking.booking_number}) has been assigned to you for ${booking.scheduled_date} at ${booking.scheduled_time || 'morning'}. Please check your app.`);
     if (gardener.fcm_token) {
@@ -1245,9 +1245,9 @@ router.get('/social-proof', async (req, res) => {
         AND b.created_at >= DATE_SUB(NOW(), INTERVAL 72 HOUR)
       ORDER BY b.created_at DESC
       LIMIT :limit
-    `, { 
+    `, {
       replacements: { limit: maxItems },
-      type: db.QueryTypes.SELECT 
+      type: db.QueryTypes.SELECT
     });
 
     const items = rows.map(r => {
