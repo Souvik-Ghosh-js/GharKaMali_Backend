@@ -15,11 +15,16 @@ const createStorage = (folder) => multer.diskStorage({
 });
 
 const imageFilter = (req, file, cb) => {
-  const allowed = /jpeg|jpg|png|webp/;
-  const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mime = allowed.test(file.mimetype);
-  if (ext && mime) cb(null, true);
-  else cb(new Error('Only image files are allowed'));
+  const allowedExts = /jpeg|jpg|png|webp|heic|heif|jfif|bmp/;
+  const ext = allowedExts.test(path.extname(file.originalname).toLowerCase());
+  const mime = file.mimetype.startsWith('image/') || allowedExts.test(file.mimetype);
+  
+  if (ext || mime) {
+    cb(null, true);
+  } else {
+    console.log(`❌ Upload rejected: Name=${file.originalname}, Mime=${file.mimetype}`);
+    cb(new Error('Only image files are allowed (jpg, png, webp, heic supported)'));
+  }
 };
 
 const uploadProfile = multer({ storage: createStorage('profiles'), fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });

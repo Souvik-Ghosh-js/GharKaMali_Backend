@@ -48,8 +48,9 @@ const sendPush = async (fcmToken, title, body, data = {}) => {
       notification: { title, body },
       data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
       android: { priority: 'high', notification: { sound: 'default', clickAction: 'FLUTTER_NOTIFICATION_CLICK' } },
-      apns:    { payload: { aps: { sound: 'default', badge: 1 } } },
+      apns: { payload: { aps: { sound: 'default', badge: 1 } } },
     };
+
     const result = await admin.messaging().send(message);
     return { success: true, messageId: result };
   } catch (err) {
