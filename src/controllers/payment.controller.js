@@ -164,16 +164,18 @@ exports.rescheduleBooking = async (req, res) => {
 // Check serviceability
 exports.checkServiceability = async (req, res) => {
   try {
-    const lat = req.query.lat || req.query.latitude;
-    const lng = req.query.lng || req.query.longitude;
-    if (!lat || !lng) return res.status(400).json({ success: false, message: 'Latitude and longitude are required' });
-    
-    const { Geofence } = require('../models');
-    const zones = await Geofence.findAll({ where: { is_active: true } });
-    // Simple radius check or use a proper library if available
-    // For now, return all active zones as a placeholder or implement point-in-polygon
-    const isServiceable = zones.length > 0;
-    res.json({ success: true, data: { serviceable: isServiceable, zones, zone: zones[0] } });
+    const lat = parseFloat(req.query.lat || req.query.latitude);
+    const lng = parseFloat(req.query.lng || req.query.longitude);
+    if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ success: false, message: 'Latitude and longitude are required' });
+
+    const { resolveGeofence } = require('../utils/geo');
+    const zone = await resolveGeofence(lat, lng);
+
+    if (!zone) {
+      return res.json({ success: true, data: { serviceable: false, zone: null, zones: [] } });
+    }
+
+    res.json({ success: true, data: { serviceable: true, zone, zones: [zone] } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
