@@ -9,7 +9,7 @@ const { resolveGeofence } = require('../utils/geo');
 exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
-    if (!phone || !/^[6-9]\d{9}$/.test(phone)) {
+    if (!phone || !/^\d{10}$/.test(phone)) {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
     const otp = process.env.USE_STATIC_OTP === 'true' ? (process.env.STATIC_OTP || '123456') : generateOTP();
