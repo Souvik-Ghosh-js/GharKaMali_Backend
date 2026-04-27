@@ -552,6 +552,17 @@ const ContactMessage = sequelize.define('ContactMessage', {
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'contact_messages', underscored: true });
 
+// ─── GARDENER DOCUMENT ────────────────────────────────────────────────────────
+const GardenerDocument = sequelize.define('GardenerDocument', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  doc_type: { type: DataTypes.ENUM('aadhaar', 'pan', 'passbook'), allowNull: false },
+  image_url: { type: DataTypes.STRING(500), allowNull: false },
+  original_name: { type: DataTypes.STRING(255) },
+  status: { type: DataTypes.ENUM('pending', 'verified', 'rejected'), defaultValue: 'pending' },
+  admin_notes: { type: DataTypes.TEXT }
+}, { tableName: 'gardener_documents', underscored: true });
+
 // ─── SYSTEM SETTING ───────────────────────────────────────────────────────────
 const SystemSetting = sequelize.define('SystemSetting', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -667,6 +678,9 @@ const UserAddress = sequelize.define('UserAddress', {
 // ... existing code ...
 ContactMessage.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'geofence' });
 
+GardenerDocument.belongsTo(User, { foreignKey: 'user_id', as: 'gardener' });
+User.hasMany(GardenerDocument, { foreignKey: 'user_id', as: 'documents' });
+
 User.hasMany(UserAddress, { foreignKey: 'user_id', as: 'addresses' });
 UserAddress.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
@@ -714,6 +728,7 @@ module.exports = {
   ProductZonePrice,
   ContactMessage,
   SystemSetting,
-  UserAddress
+  UserAddress,
+  GardenerDocument
 };
 

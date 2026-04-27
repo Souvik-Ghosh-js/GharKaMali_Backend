@@ -633,6 +633,71 @@ router.patch('/gardener/availability', authenticate, authorize('gardener'), asyn
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── GARDENER DOCUMENTS ────────────────────────────────────────────────────────
+const { uploadDocument } = require('../middleware/upload');
+
+router.get('/gardener/documents', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { GardenerDocument } = require('../models');
+    const docs = await GardenerDocument.findAll({ where: { user_id: req.user.id }, order: [['created_at', 'DESC']] });
+    res.json({ success: true, data: docs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/gardener/documents', authenticate, authorize('gardener'), uploadDocument.single('document'), async (req, res) => {
+  try {
+    const { GardenerDocument } = require('../models');
+    const { doc_type } = req.body;
+    const allowed = ['aadhaar', 'pan', 'passbook'];
+    if (!allowed.includes(doc_type)) return res.status(400).json({ success: false, message: 'doc_type must be aadhaar, pan, or passbook' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+    const image_url = `${baseUrl}/uploads/documents/${req.file.filename}`;
+    // Replace existing doc of same type (one per type per gardener)
+    await GardenerDocument.destroy({ where: { user_id: req.user.id, doc_type } });
+    const doc = await GardenerDocument.create({
+      user_id: req.user.id,
+      doc_type,
+      image_url,
+      original_name: req.file.originalname,
+      status: 'pending'
+    });
+    res.json({ success: true, message: 'Document uploaded successfully', data: doc });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/gardener/documents/:id', authenticate, authorize('gardener'), async (req, res) => {
+  try {
+    const { GardenerDocument } = require('../models');
+    const doc = await GardenerDocument.findOne({ where: { id: req.params.id, user_id: req.user.id } });
+    if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+    await doc.destroy();
+    res.json({ success: true, message: 'Document deleted' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin: view a gardener's documents
+router.get('/admin/gardeners/:id/documents', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { GardenerDocument } = require('../models');
+    const docs = await GardenerDocument.findAll({ where: { user_id: req.params.id }, order: [['created_at', 'DESC']] });
+    res.json({ success: true, data: docs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin: update document status (verify / reject)
+router.patch('/admin/gardeners/:gardener_id/documents/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { GardenerDocument } = require('../models');
+    const { status, admin_notes } = req.body;
+    if (!['verified', 'rejected', 'pending'].includes(status)) return res.status(400).json({ success: false, message: 'Invalid status' });
+    const doc = await GardenerDocument.findOne({ where: { id: req.params.id, user_id: req.params.gardener_id } });
+    if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+    await doc.update({ status, admin_notes });
+    res.json({ success: true, message: 'Document status updated', data: doc });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── SUBSCRIPTION PAUSE / RESUME ───────────────────────────────────────────────
 router.patch('/subscriptions/:id/pause', authenticate, authorize('customer'), async (req, res) => {
   try {
