@@ -648,7 +648,7 @@ router.post('/gardener/documents', authenticate, authorize('gardener'), uploadDo
   try {
     const { GardenerDocument } = require('../models');
     const { doc_type } = req.body;
-    const allowed = ['aadhaar', 'pan', 'passbook'];
+    const allowed = ['aadhaar', 'pan', 'passbook', 'cancelled_cheque'];
     if (!allowed.includes(doc_type)) return res.status(400).json({ success: false, message: 'doc_type must be aadhaar, pan, or passbook' });
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000';

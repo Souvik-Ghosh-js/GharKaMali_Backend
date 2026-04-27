@@ -556,7 +556,7 @@ const ContactMessage = sequelize.define('ContactMessage', {
 const GardenerDocument = sequelize.define('GardenerDocument', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
-  doc_type: { type: DataTypes.ENUM('aadhaar', 'pan', 'passbook'), allowNull: false },
+  doc_type: { type: DataTypes.ENUM('aadhaar', 'pan', 'passbook', 'cancelled_cheque'), allowNull: false },
   image_url: { type: DataTypes.STRING(500), allowNull: false },
   original_name: { type: DataTypes.STRING(255) },
   status: { type: DataTypes.ENUM('pending', 'verified', 'rejected'), defaultValue: 'pending' },
