@@ -107,7 +107,22 @@ router.get('/notifications', authenticate, contentCtrl.getNotifications);
 router.put('/notifications/:id/read', authenticate, contentCtrl.markNotificationRead);
 
 // ── SUPERVISOR ────────────────────────────────────────────────────────────────
-router.get('/supervisor/dashboard', authenticate, authorize('supervisor', 'admin'), contentCtrl.getSupervisorDashboard);
+const supervisorCtrl = require('../controllers/supervisor.controller');
+router.get('/supervisor/dashboard', authenticate, authorize('supervisor', 'admin'), supervisorCtrl.getDashboard);
+router.get('/supervisor/gardeners', authenticate, authorize('supervisor'), supervisorCtrl.getMyGardeners);
+router.get('/supervisor/gardeners/unassigned', authenticate, authorize('supervisor'), supervisorCtrl.getUnassignedGardeners);
+router.get('/supervisor/gardeners/:id', authenticate, authorize('supervisor'), supervisorCtrl.getGardenerDetail);
+router.put('/supervisor/gardeners/:id', authenticate, authorize('supervisor'), supervisorCtrl.updateGardener);
+router.post('/supervisor/gardeners/:id/approve', authenticate, authorize('supervisor'), supervisorCtrl.approveGardener);
+router.post('/supervisor/gardeners/:id/reject', authenticate, authorize('supervisor'), supervisorCtrl.rejectGardener);
+router.post('/supervisor/gardeners/:id/toggle', authenticate, authorize('supervisor'), supervisorCtrl.toggleGardener);
+router.post('/supervisor/gardeners/:id/assign', authenticate, authorize('supervisor'), supervisorCtrl.assignGardener);
+router.post('/supervisor/gardeners/:id/unassign', authenticate, authorize('supervisor'), supervisorCtrl.unassignGardener);
+router.post('/supervisor/gardeners/:id/zones', authenticate, authorize('supervisor'), supervisorCtrl.assignGeofences);
+router.get('/supervisor/bookings', authenticate, authorize('supervisor'), supervisorCtrl.getBookings);
+router.get('/supervisor/rewards', authenticate, authorize('supervisor'), supervisorCtrl.getRewards);
+router.post('/supervisor/rewards', authenticate, authorize('supervisor'), supervisorCtrl.giveReward);
+router.get('/supervisor/complaints', authenticate, authorize('supervisor'), supervisorCtrl.getMyComplaints);
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
 router.get('/admin/dashboard', authenticate, authorize('admin'), adminCtrl.getDashboard);
@@ -129,6 +144,7 @@ router.delete('/admin/geofence/:id', authenticate, authorize('admin'), adminCtrl
 router.get('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.getSupervisors);
 router.post('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.createSupervisor);
 router.put('/admin/supervisors/:id', authenticate, authorize('admin'), adminCtrl.updateSupervisor);
+router.delete('/admin/supervisors/:id', authenticate, authorize('admin'), adminCtrl.deleteSupervisor);
 
 router.get('/admin/zones', authenticate, authorize('admin'), adminCtrl.getZones);
 router.post('/admin/zones', authenticate, authorize('admin'), adminCtrl.createZone);

@@ -465,6 +465,19 @@ exports.getSupervisors = async (req, res) => {
   }
 };
 
+exports.deleteSupervisor = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user || user.role !== 'supervisor') return res.status(404).json({ success: false, message: 'Supervisor not found' });
+    // Detach team
+    await GardenerProfile.update({ supervisor_id: null }, { where: { supervisor_id: user.id } });
+    await user.destroy();
+    res.json({ success: true, message: 'Supervisor deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── SERVICE ZONE MANAGEMENT ───────────────────────────────────────────────────
 exports.getZones = async (req, res) => {
   try {
