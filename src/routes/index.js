@@ -61,6 +61,8 @@ router.post('/contact', async (req, res) => {
   }
 });
 
+
+
 // ── PLANTOPEDIA ───────────────────────────────────────────────────────────────
 router.post('/plants/identify', authenticate, uploadPlant.single('image'), contentCtrl.identifyPlant);
 router.get('/plants/history', authenticate, contentCtrl.getMyPlantHistory);
@@ -98,6 +100,47 @@ router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
 router.get('/shop/products/:id', authenticateOptional, shopCtrl.getProductDetail);
 router.post('/shop/orders', authenticate, authorize('customer'), shopCtrl.createOrder);
 router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
+router.post('/admin/shop/products/bulk-import', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Product, ProductCategory } = require('../models');
+    const rows = req.body.products;
+    if (!Array.isArray(rows) || rows.length === 0)
+      return res.status(400).json({ success: false, message: 'No products provided' });
+
+    // Build category name → id map for convenience
+    const cats = await ProductCategory.findAll({ attributes: ['id', 'name'] });
+    const catMap = {};
+    cats.forEach(c => { catMap[c.name.toLowerCase().trim()] = c.id; });
+
+    const created = [], failed = [];
+    for (const row of rows) {
+      try {
+        const data = {
+          name: String(row.name || '').trim(),
+          price: parseFloat(row.price) || 0,
+          mrp: row.mrp ? parseFloat(row.mrp) : null,
+          stock_quantity: parseInt(row.stock_quantity) || 0,
+          description: row.description || null,
+          badge: row.badge || null,
+          icon_key: row.icon_key || 'plant',
+          is_active: String(row.is_active).toLowerCase() !== 'false',
+          tags: row.tags ? String(row.tags).split(',').map(t => t.trim()).filter(Boolean) : null,
+          category_id: row.category_id
+            ? parseInt(row.category_id)
+            : (catMap[String(row.category_name || '').toLowerCase().trim()] || null),
+        };
+        if (!data.name) throw new Error('name is required');
+        if (!data.price) throw new Error('price is required');
+        const product = await Product.create(data);
+        created.push(product.id);
+      } catch (err) {
+        failed.push({ row: row.name || '(unnamed)', reason: err.message });
+      }
+    }
+    res.json({ success: true, message: `Import complete: ${created.length} created, ${failed.length} failed`, data: { created: created.length, failed: failed.length, errors: failed } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 
 // ── ZONES (public) ────────────────────────────────────────────────────────────
 router.get('/zones', adminCtrl.getZones);
