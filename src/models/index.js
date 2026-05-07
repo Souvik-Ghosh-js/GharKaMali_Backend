@@ -415,6 +415,9 @@ const Product = sequelize.define('Product', {
   rating: { type: DataTypes.DECIMAL(3, 2), defaultValue: 0 },
   review_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  long_description: { type: DataTypes.TEXT },
+  features: { type: DataTypes.JSON }, // Array of strings shown as bullet points
+  faqs: { type: DataTypes.JSON }, // Array of { q, a } objects
   tags: { type: DataTypes.JSON }, // Array of string tags for search/filtering
   available_geofence_ids: { type: DataTypes.JSON, defaultValue: null } // null = available everywhere; array of geofence IDs = restricted
 }, { tableName: 'products' });
