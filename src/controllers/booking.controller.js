@@ -447,7 +447,7 @@ exports.updateBookingStatus = async (req, res) => {
 
     if (status === 'completed') {
       updates.completed_at = new Date();
-      // ... extra plants logic omitted for brevity as it remains same ...
+
       if (extra_plants > 0) {
         const zone = await Geofence.findByPk(booking.zone_id);
         const extraAmt = extra_plants * (zone ? parseFloat(zone.price_per_plant) : 15);
@@ -462,8 +462,20 @@ exports.updateBookingStatus = async (req, res) => {
         if (req.files.after_image) updates.after_image = `${baseUrl}/uploads/work-proof/${req.files.after_image[0].filename}`;
       }
 
+      // Parse checklist submitted by gardener
+      let checklistDone = [];
+      if (req.body.checklist_done) {
+        try { checklistDone = JSON.parse(req.body.checklist_done); } catch (_) {}
+      }
+      if (checklistDone.length > 0 || gardener_notes) {
+        updates.gardener_notes = JSON.stringify({ tasks: checklistDone, notes: gardener_notes || null });
+      }
+
       const customer = await User.findByPk(booking.customer_id);
       const finalAmount = updates.total_amount || booking.total_amount;
+
+      // Send visit report via WhatsApp
+      await sendWhatsApp(customer.phone, templates.visitReport(customer.name, booking.booking_number, checklistDone, gardener_notes || null));
       await sendWhatsApp(customer.phone, templates.visitCompleted(customer.name, finalAmount));
       if (customer?.fcm_token) await notify.visitCompleted(customer.fcm_token, booking.booking_number, finalAmount);
 

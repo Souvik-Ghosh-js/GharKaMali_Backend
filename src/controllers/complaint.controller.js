@@ -7,13 +7,13 @@ exports.raiseComplaint = async (req, res) => {
   try {
     const { booking_id, type, description, priority } = req.body;
 
+    if (!booking_id) return res.status(400).json({ success: false, message: 'Order ID is required to raise a complaint' });
+
     let gardener_id = null;
-    if (booking_id) {
-      const booking = await Booking.findByPk(booking_id);
-      if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-      if (booking.customer_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
-      gardener_id = booking.gardener_id;
-    }
+    const booking = await Booking.findByPk(booking_id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.customer_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
+    gardener_id = booking.gardener_id;
 
     const complaint = await Complaint.create({
       booking_id:  booking_id || null,

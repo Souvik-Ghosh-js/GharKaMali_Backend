@@ -57,6 +57,14 @@ const templates = {
   visitCompleted: (name, amount) =>
     `🎉 *GharKaMali*\nThank you ${name}! Your garden visit is complete. Total: ₹${amount}. Rate your experience in the app!`,
 
+  visitReport: (name, bookingNumber, tasks, notes) => {
+    const taskLines = tasks && tasks.length > 0
+      ? tasks.map(t => `  ✅ ${t}`).join('\n')
+      : '  (no tasks recorded)';
+    const notesLine = notes ? `\n📝 *Gardener Notes:* ${notes}` : '';
+    return `📋 *GharKaMali — Visit Report*\nHi ${name}, here is your service report for booking *${bookingNumber}*:\n\n*Tasks Completed:*\n${taskLines}${notesLine}\n\nBefore & after photos are available in the app. Rate your experience to help us improve! 🌿`;
+  },
+
   subscriptionRenewed: (name, planName, endDate) =>
     `🔄 *GharKaMali*\nHi ${name}! Your *${planName}* subscription has been renewed until *${endDate}*. Happy gardening! 🌺`,
 
