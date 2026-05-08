@@ -38,10 +38,11 @@ exports.getProducts = async (req, res) => {
       else where.category_id = -1; // No match → return empty
     }
 
+    // When searching: SQL filters on safe TEXT columns, JS handles JSON columns
     if (search) {
       where[Op.or] = [
         { name: { [Op.like]: `%${search}%` } },
-        { tags: { [Op.like]: `%${search}%` } }
+        { description: { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -51,12 +52,15 @@ exports.getProducts = async (req, res) => {
       if (max_price) where.price[Op.lte] = parseFloat(max_price);
     }
 
+    // Fetch more rows when searching so JS can widen results via JSON field matching
+    const fetchLimit = search ? 200 : parseInt(limit);
+
     const items = await Product.findAll({
       where,
       include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }],
       order: [['created_at', 'DESC']],
-      limit: parseInt(limit),
-      offset: (parseInt(page) - 1) * parseInt(limit)
+      limit: fetchLimit,
+      offset: search ? 0 : (parseInt(page) - 1) * parseInt(limit)
     });
 
     // ── Location-based availability filter ────────────────────────────────────
@@ -71,7 +75,7 @@ exports.getProducts = async (req, res) => {
       });
     }
 
-    const products = filteredItems.map(p => {
+    let products = filteredItems.map(p => {
       const json = p.toJSON();
       if (productMarkup > 0) {
         json.price = parseFloat(json.price) + productMarkup;
@@ -80,6 +84,33 @@ exports.getProducts = async (req, res) => {
       }
       return json;
     });
+
+    // ── Relevance sort + JSON field widening when searching ───────────────────
+    if (search) {
+      const q = search.toLowerCase();
+      const score = (p) => {
+        const name = (p.name || '').toLowerCase();
+        const tags = JSON.stringify(p.tags || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        const longDesc = (p.long_description || '').toLowerCase();
+        const feats = JSON.stringify(p.features || '').toLowerCase();
+        const faqsStr = JSON.stringify(p.faqs || '').toLowerCase();
+        if (name === q) return 100;
+        if (name.startsWith(q)) return 90;
+        if (name.includes(q)) return 80;
+        if (tags.includes(q)) return 60;
+        if (desc.includes(q)) return 40;
+        if (longDesc.includes(q)) return 30;
+        if (feats.includes(q)) return 20;
+        if (faqsStr.includes(q)) return 10;
+        return 0;
+      };
+      // Include products that match via JSON fields even if SQL missed them
+      products = products.filter(p => score(p) > 0);
+      products = products.sort((a, b) => score(b) - score(a));
+      // Respect the original limit after JS filtering
+      products = products.slice(0, parseInt(limit));
+    }
 
     res.json({ success: true, data: products });
   } catch (err) {
