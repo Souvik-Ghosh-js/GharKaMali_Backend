@@ -49,6 +49,10 @@ router.get('/subscriptions/my', authenticate, authorize('customer'), subscriptio
 router.put('/subscriptions/:id/cancel', authenticate, authorize('customer'), subscriptionCtrl.cancelSubscription);
 router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer'), subscriptionCtrl.selectDates);
 
+// ── CAREERS ───────────────────────────────────────────────────────────────────
+const careersCtrl = require('../controllers/careers.controller');
+router.post('/careers/apply', careersCtrl.apply);
+
 // ── CONTACT ───────────────────────────────────────────────────────────────────
 router.post('/contact', async (req, res) => {
   try {
