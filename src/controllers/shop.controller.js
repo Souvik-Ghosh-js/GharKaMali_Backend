@@ -157,6 +157,8 @@ exports.createOrder = async (req, res) => {
     const {
       items, shipping_address, shipping_city, shipping_pincode, notes, zone_id,
       geofence_id, service_latitude, service_longitude,
+      // GST fields
+      apply_gst, shipping_state, billing_gstin, billing_business_name,
       // Book a Mali fields
       book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali,
       service_bookings
@@ -173,7 +175,8 @@ exports.createOrder = async (req, res) => {
       if (zone) productMarkup = parseFloat(zone.product_markup) || 0;
     }
 
-    let totalAmount = 0;
+    let subtotal = 0;
+    let gstAmount = 0;
     const orderItemsData = [];
 
     // sum product items
@@ -185,18 +188,25 @@ exports.createOrder = async (req, res) => {
         }
         const finalPrice = parseFloat(product.price) + productMarkup;
         const itemTotal = finalPrice * item.quantity;
-        totalAmount += itemTotal;
+        subtotal += itemTotal;
+        // Compute GST per item if customer opted in
+        if (apply_gst && product.gst_rate > 0) {
+          gstAmount += (itemTotal * product.gst_rate) / 100;
+        }
         orderItemsData.push({ product_id: product.id, quantity: item.quantity, price: finalPrice });
         await product.decrement('stock_quantity', { by: item.quantity, transaction: t });
       }
     }
+    let totalAmount = subtotal + gstAmount;
 
     // sum service bookings
+    let serviceTotal = 0;
     if (service_bookings && Array.isArray(service_bookings)) {
       for (const service of service_bookings) {
-        totalAmount += (parseFloat(service.price) || 0);
+        serviceTotal += (parseFloat(service.price) || 0);
       }
     }
+    totalAmount = subtotal + gstAmount + serviceTotal;
 
     const orderNumber = `GKM-ORD-${Date.now()}`;
     const txnid = `GKM-TXN-${Date.now()}`;
@@ -216,7 +226,12 @@ exports.createOrder = async (req, res) => {
       notes,
       status: 'processing',
       payment_status: 'paid',
-      payment_id: txnid
+      payment_id: txnid,
+      apply_gst: !!apply_gst,
+      gst_amount: gstAmount,
+      shipping_state: shipping_state || null,
+      billing_gstin: billing_gstin || null,
+      billing_business_name: billing_business_name || null,
     }, { transaction: t });
 
     // Create Order Items
@@ -368,9 +383,9 @@ exports.getMyOrders = async (req, res) => {
       where: { customer_id: req.user.id },
       include: [
         { 
-          model: OrderItem, 
+          model: OrderItem,
           as: 'items',
-          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key'] }]
+          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key', 'images', 'gst_rate', 'description'] }]
         }
       ],
       order: [['created_at', 'DESC']]

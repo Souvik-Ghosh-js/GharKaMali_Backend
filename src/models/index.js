@@ -416,10 +416,11 @@ const Product = sequelize.define('Product', {
   review_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   long_description: { type: DataTypes.TEXT },
-  features: { type: DataTypes.JSON }, // Array of strings shown as bullet points
-  faqs: { type: DataTypes.JSON }, // Array of { q, a } objects
-  tags: { type: DataTypes.JSON }, // Array of string tags for search/filtering
-  available_geofence_ids: { type: DataTypes.JSON, defaultValue: null } // null = available everywhere; array of geofence IDs = restricted
+  features: { type: DataTypes.JSON },
+  faqs: { type: DataTypes.JSON },
+  tags: { type: DataTypes.JSON },
+  gst_rate: { type: DataTypes.INTEGER, defaultValue: 0 }, // 0, 12, or 18
+  available_geofence_ids: { type: DataTypes.JSON, defaultValue: null }
 }, { tableName: 'products' });
 
 // ─── ORDER ────────────────────────────────────────────────────────────────────
@@ -443,7 +444,12 @@ const Order = sequelize.define('Order', {
   tracking_number: { type: DataTypes.STRING(100) },
   tracking_url: { type: DataTypes.STRING(500) },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } },
-  notes: { type: DataTypes.TEXT }
+  notes: { type: DataTypes.TEXT },
+  apply_gst: { type: DataTypes.BOOLEAN, defaultValue: false },
+  gst_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  shipping_state: { type: DataTypes.STRING(100) },
+  billing_gstin: { type: DataTypes.STRING(20) },
+  billing_business_name: { type: DataTypes.STRING(200) }
 }, { tableName: 'orders' });
 
 // ─── ORDER ITEM ───────────────────────────────────────────────────────────────
