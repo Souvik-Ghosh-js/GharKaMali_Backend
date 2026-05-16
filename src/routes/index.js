@@ -523,12 +523,34 @@ router.delete('/admin/price-hike/schedule/:id', authenticate, authorize('admin')
 // ── UTILIZATION REPORT ─────────────────────────────────────────────────────────
 router.get('/admin/utilization', authenticate, authorize('admin'), adminCtrl.getUtilizationReport);
 
-// ── COMPLAINTS ────────────────────────────────────────────────────────────────
+// ── COMPLAINTS / TICKETING ────────────────────────────────────────────────────
 const complaintCtrl = require('../controllers/complaint.controller');
-router.post('/complaints', authenticate, authorize('customer'), complaintCtrl.raiseComplaint);
+const { uploadComplaint } = require('../middleware/upload');
+
+// Departments (list is auth'd-any; admin sees all incl inactive)
+router.get('/complaints/departments', authenticate, complaintCtrl.listDepartments);
+router.post('/admin/complaints/departments', authenticate, authorize('admin'), complaintCtrl.createDepartment);
+router.put('/admin/complaints/departments/:id', authenticate, authorize('admin'), complaintCtrl.updateDepartment);
+router.delete('/admin/complaints/departments/:id', authenticate, authorize('admin'), complaintCtrl.deleteDepartment);
+
+// Assignees (admin/supervisor users)
+router.get('/admin/complaints/assignees', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getAssignees);
+
+// Customer-facing
+router.post('/complaints', authenticate, authorize('customer'), uploadComplaint.array('attachments', 5), complaintCtrl.raiseComplaint);
 router.get('/complaints/my', authenticate, authorize('customer'), complaintCtrl.getMyComplaints);
+
+// Stats / list (staff)
 router.get('/complaints/stats', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getComplaintStats);
 router.get('/complaints', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getAllComplaints);
+
+// Detail (any authed user — handler enforces ownership for customers)
+router.get('/complaints/:id', authenticate, complaintCtrl.getComplaintDetail);
+
+// Comments / attachments (any authed; handler enforces ownership)
+router.post('/complaints/:id/comments', authenticate, uploadComplaint.array('attachments', 5), complaintCtrl.addComment);
+
+// Update (staff)
 router.put('/complaints/:id', authenticate, authorize('admin', 'supervisor'), complaintCtrl.updateComplaint);
 
 // ── SLA CONFIG & BREACHES ─────────────────────────────────────────────────────

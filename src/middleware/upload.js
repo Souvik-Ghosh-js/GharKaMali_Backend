@@ -35,4 +35,22 @@ const uploadIdProof = multer({ storage: createStorage('id-proofs'), fileFilter: 
 const uploadShop = multer({ storage: createStorage('shop'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 const uploadDocument = multer({ storage: createStorage('documents'), fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
-module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadIdProof, uploadBlog, uploadShop, uploadDocument };
+const complaintFilter = (req, file, cb) => {
+  const allowedExts = /jpeg|jpg|png|webp|heic|heif|jfif|bmp|pdf|doc|docx|xls|xlsx|csv|txt/;
+  const ext = allowedExts.test(path.extname(file.originalname).toLowerCase());
+  const mime = file.mimetype.startsWith('image/')
+    || file.mimetype.includes('pdf')
+    || file.mimetype.includes('word')
+    || file.mimetype.includes('excel')
+    || file.mimetype.includes('spreadsheet')
+    || file.mimetype.includes('text');
+  if (ext || mime) cb(null, true);
+  else cb(new Error('Only images, PDFs, Office docs and text files are allowed'));
+};
+const uploadComplaint = multer({
+  storage: createStorage('complaints'),
+  fileFilter: complaintFilter,
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadIdProof, uploadBlog, uploadShop, uploadDocument, uploadComplaint };

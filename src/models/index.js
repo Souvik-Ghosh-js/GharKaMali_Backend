@@ -307,19 +307,59 @@ const PriceHikeSchedule = sequelize.define('PriceHikeSchedule', {
 // ─── COMPLAINT ────────────────────────────────────────────────────────────────
 const Complaint = sequelize.define('Complaint', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  ticket_number: { type: DataTypes.STRING(20), unique: true },
+  subject: { type: DataTypes.STRING(255) },
   booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
   gardener_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
-  assigned_to: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }, // supervisor
+  assigned_to: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  department_id: { type: DataTypes.INTEGER, references: { model: 'complaint_departments', key: 'id' } },
   type: { type: DataTypes.ENUM('service_quality', 'late_arrival', 'no_show', 'rude_behavior', 'billing', 'damage', 'other'), allowNull: false },
   description: { type: DataTypes.TEXT, allowNull: false },
-  status: { type: DataTypes.ENUM('open', 'in_review', 'resolved', 'closed'), defaultValue: 'open' },
+  status: { type: DataTypes.ENUM('open', 'in_progress', 'awaiting_customer', 'in_review', 'resolved', 'closed', 'reopened'), defaultValue: 'open' },
   priority: { type: DataTypes.ENUM('low', 'medium', 'high'), defaultValue: 'medium' },
+  due_date: { type: DataTypes.DATE },
   resolution_notes: { type: DataTypes.TEXT },
   resolved_at: { type: DataTypes.DATE },
   resolved_by: { type: DataTypes.INTEGER },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'complaints' });
+
+const ComplaintDepartment = sequelize.define('ComplaintDepartment', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(80), allowNull: false, unique: true },
+  description: { type: DataTypes.STRING(255) },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+}, { tableName: 'complaint_departments' });
+
+const ComplaintComment = sequelize.define('ComplaintComment', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  complaint_id: { type: DataTypes.INTEGER, allowNull: false },
+  user_id: { type: DataTypes.INTEGER, allowNull: false },
+  user_role: { type: DataTypes.ENUM('admin','supervisor','gardener','customer'), allowNull: false },
+  comment: { type: DataTypes.TEXT, allowNull: false },
+  is_internal: { type: DataTypes.BOOLEAN, defaultValue: false },
+}, { tableName: 'complaint_comments' });
+
+const ComplaintAttachment = sequelize.define('ComplaintAttachment', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  complaint_id: { type: DataTypes.INTEGER, allowNull: false },
+  comment_id: { type: DataTypes.INTEGER },
+  uploaded_by: { type: DataTypes.INTEGER, allowNull: false },
+  file_url: { type: DataTypes.STRING(500), allowNull: false },
+  file_name: { type: DataTypes.STRING(255), allowNull: false },
+  file_type: { type: DataTypes.STRING(100) },
+  file_size: { type: DataTypes.INTEGER },
+}, { tableName: 'complaint_attachments', updatedAt: false });
+
+const ComplaintStatusHistory = sequelize.define('ComplaintStatusHistory', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  complaint_id: { type: DataTypes.INTEGER, allowNull: false },
+  from_status: { type: DataTypes.STRING(40) },
+  to_status: { type: DataTypes.STRING(40), allowNull: false },
+  changed_by: { type: DataTypes.INTEGER },
+  note: { type: DataTypes.STRING(500) },
+}, { tableName: 'complaint_status_history', updatedAt: false });
 
 
 // ─── SLA CONFIG ───────────────────────────────────────────────────────────────
@@ -626,6 +666,16 @@ Complaint.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 Complaint.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 Complaint.belongsTo(User, { foreignKey: 'assigned_to', as: 'assignedTo' });
 Complaint.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+Complaint.belongsTo(ComplaintDepartment, { foreignKey: 'department_id', as: 'department' });
+Complaint.hasMany(ComplaintComment, { foreignKey: 'complaint_id', as: 'comments' });
+Complaint.hasMany(ComplaintAttachment, { foreignKey: 'complaint_id', as: 'attachments' });
+Complaint.hasMany(ComplaintStatusHistory, { foreignKey: 'complaint_id', as: 'history' });
+ComplaintComment.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+ComplaintComment.belongsTo(Complaint, { foreignKey: 'complaint_id', as: 'complaint' });
+ComplaintComment.hasMany(ComplaintAttachment, { foreignKey: 'comment_id', as: 'attachments' });
+ComplaintAttachment.belongsTo(User, { foreignKey: 'uploaded_by', as: 'uploader' });
+ComplaintAttachment.belongsTo(ComplaintComment, { foreignKey: 'comment_id', as: 'comment' });
+ComplaintStatusHistory.belongsTo(User, { foreignKey: 'changed_by', as: 'changedBy' });
 
 SLABreach.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 SLABreach.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
@@ -709,6 +759,10 @@ module.exports = {
   SLAConfig,
   SLABreach,
   Complaint,
+  ComplaintDepartment,
+  ComplaintComment,
+  ComplaintAttachment,
+  ComplaintStatusHistory,
   PriceHikeSchedule,
   Geofence,
   sequelize,
