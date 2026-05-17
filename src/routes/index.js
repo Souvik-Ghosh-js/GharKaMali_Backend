@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authenticateOptional, authorize } = require('../middleware/auth');
 const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof, uploadShop } = require('../middleware/upload');
+const { validate } = require('../middleware/validate');
+const V = require('../middleware/validators');
 const authCtrl = require('../controllers/auth.controller');
 const bookingCtrl = require('../controllers/booking.controller');
 const subscriptionCtrl = require('../controllers/subscription.controller');
@@ -11,50 +13,59 @@ const shopCtrl = require('../controllers/shop.controller');
 const taglineCtrl = require('../controllers/tagline.controller');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-router.post('/auth/send-otp', authCtrl.sendOtp);
-router.post('/auth/verify-otp', authCtrl.verifyOtp);
-router.post('/auth/admin-login', authCtrl.adminLogin);
-router.post('/auth/gardener-login', authCtrl.gardenerLogin);
+router.post('/auth/send-otp',       validate(V.auth.sendOtp),       authCtrl.sendOtp);
+router.post('/auth/verify-otp',     validate(V.auth.verifyOtp),     authCtrl.verifyOtp);
+router.post('/auth/admin-login',    validate(V.auth.adminLogin),    authCtrl.adminLogin);
+router.post('/auth/gardener-login', validate(V.auth.gardenerLogin), authCtrl.gardenerLogin);
 router.post('/auth/gardener-register',
   uploadIdProof.fields([{ name: 'profile_image', maxCount: 1 }, { name: 'id_proof', maxCount: 1 }]),
+  validate(V.auth.gardenerRegister),
   authCtrl.gardenerRegister
 );
 router.get('/auth/profile', authenticate, authCtrl.getProfile);
-router.put('/auth/profile', authenticate, uploadProfile.single('profile_image'), authCtrl.updateProfile);
+router.put('/auth/profile', authenticate, uploadProfile.single('profile_image'), validate(V.auth.updateProfile), authCtrl.updateProfile);
 router.use('/addresses', require('./address.routes'));
 
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
-router.post('/bookings', authenticate, authorize('customer'), bookingCtrl.createBooking);
+router.post('/bookings', authenticate, authorize('customer'), validate(V.booking.create), bookingCtrl.createBooking);
 router.get('/bookings/my', authenticate, authorize('customer'), bookingCtrl.getMyBookings);
 router.get('/bookings/previous-gardeners', authenticate, authorize('customer'), bookingCtrl.getPreviousGardeners);
 router.get('/bookings/check-availability', bookingCtrl.checkAvailability);
 router.get('/bookings/:id', authenticate, bookingCtrl.getBookingDetail);
 router.get('/bookings/:id/logs', authenticate, bookingCtrl.getBookingLogs);
-router.post('/bookings/verify-otp', authenticate, authorize('gardener'), bookingCtrl.verifyVisitOtp);
+router.post('/bookings/verify-otp', authenticate, authorize('gardener'), validate(V.booking.verifyOtp), bookingCtrl.verifyVisitOtp);
 router.put('/bookings/status',
   authenticate, authorize('gardener'),
   uploadWorkProof.fields([{ name: 'before_image', maxCount: 1 }, { name: 'after_image', maxCount: 1 }]),
   bookingCtrl.updateBookingStatus
 );
-router.post('/bookings/rate', authenticate, authorize('customer'), bookingCtrl.rateBooking);
-router.post('/bookings/cancel', authenticate, bookingCtrl.cancelBooking);
+router.post('/bookings/rate',     authenticate, authorize('customer'), validate(V.booking.rate),           bookingCtrl.rateBooking);
+router.post('/bookings/cancel',   authenticate,                         validate(V.booking.cancel),         bookingCtrl.cancelBooking);
 router.get('/bookings/gardener/jobs', authenticate, authorize('gardener'), bookingCtrl.getGardenerJobs);
-router.post('/bookings/location', authenticate, authorize('gardener'), bookingCtrl.updateLocation);
+router.post('/bookings/location', authenticate, authorize('gardener'),  validate(V.booking.updateLocation), bookingCtrl.updateLocation);
 router.get('/bookings/track/:booking_id', authenticate, authorize('customer'), bookingCtrl.getGardenerLocation);
 
 // ── SUBSCRIPTIONS ─────────────────────────────────────────────────────────────
 router.get('/plans', subscriptionCtrl.getPlans);
-router.post('/subscriptions', authenticate, authorize('customer'), subscriptionCtrl.subscribe);
+router.post('/subscriptions', authenticate, authorize('customer'), validate(V.subscription.create), subscriptionCtrl.subscribe);
 router.get('/subscriptions/my', authenticate, authorize('customer'), subscriptionCtrl.getMySubscriptions);
 router.put('/subscriptions/:id/cancel', authenticate, authorize('customer'), subscriptionCtrl.cancelSubscription);
 router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer'), subscriptionCtrl.selectDates);
 
 // ── CAREERS ───────────────────────────────────────────────────────────────────
 const careersCtrl = require('../controllers/careers.controller');
-router.post('/careers/apply', careersCtrl.apply);
+router.post('/careers/apply', validate([
+  V.name('name'),
+  V.phone(),
+  V.phone('whatsapp', true),
+  V.email('email', true),
+  V.text('experience', { min: 1, max: 100 }),
+  V.text('cities', { min: 2, max: 500 }),
+  V.text('bio', { max: 2000, optional: true }),
+]), careersCtrl.apply);
 
 // ── CONTACT ───────────────────────────────────────────────────────────────────
-router.post('/contact', async (req, res) => {
+router.post('/contact', validate(V.contact.create), async (req, res) => {
   try {
     const { name, phone, email, message, geofence_id } = req.body;
     const { ContactMessage } = require('../models');
@@ -102,9 +113,9 @@ router.get('/geofences', async (req, res) => {
 router.get('/shop/categories', authenticateOptional, shopCtrl.getCategories);
 router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
 router.get('/shop/products/:id', authenticateOptional, shopCtrl.getProductDetail);
-router.post('/shop/orders', authenticate, authorize('customer'), shopCtrl.createOrder);
+router.post('/shop/orders', authenticate, authorize('customer'), validate(V.order.create), shopCtrl.createOrder);
 router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
-router.post('/admin/shop/products/bulk-import', authenticate, authorize('admin'), async (req, res) => {
+router.post('/admin/shop/products/bulk-import', authenticate, authorize('admin'), validate(V.product.bulkImport), async (req, res) => {
   try {
     const { Product, ProductCategory } = require('../models');
     const rows = req.body.products;
@@ -189,17 +200,17 @@ router.delete('/admin/geofence/:id', authenticate, authorize('admin'), adminCtrl
 
 
 router.get('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.getSupervisors);
-router.post('/admin/supervisors', authenticate, authorize('admin'), adminCtrl.createSupervisor);
-router.put('/admin/supervisors/:id', authenticate, authorize('admin'), adminCtrl.updateSupervisor);
+router.post('/admin/supervisors', authenticate, authorize('admin'), validate(V.admin.supervisor), adminCtrl.createSupervisor);
+router.put('/admin/supervisors/:id', authenticate, authorize('admin'), validate(V.admin.supervisor), adminCtrl.updateSupervisor);
 router.delete('/admin/supervisors/:id', authenticate, authorize('admin'), adminCtrl.deleteSupervisor);
 
 router.get('/admin/zones', authenticate, authorize('admin'), adminCtrl.getZones);
-router.post('/admin/zones', authenticate, authorize('admin'), adminCtrl.createZone);
-router.put('/admin/zones/:id', authenticate, authorize('admin'), adminCtrl.updateZone);
+router.post('/admin/zones', authenticate, authorize('admin'), validate(V.admin.zone), adminCtrl.createZone);
+router.put('/admin/zones/:id', authenticate, authorize('admin'), validate(V.admin.zone), adminCtrl.updateZone);
 
 router.get('/admin/plans', authenticate, authorize('admin'), subscriptionCtrl.getPlans);
-router.post('/admin/plans', authenticate, authorize('admin'), adminCtrl.createPlan);
-router.put('/admin/plans/:id', authenticate, authorize('admin'), adminCtrl.updatePlan);
+router.post('/admin/plans', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.createPlan);
+router.put('/admin/plans/:id', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.updatePlan);
 
 router.get('/admin/bookings', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAllBookings);
 router.get('/admin/bookings/:id', authenticate, authorize('admin', 'supervisor'), bookingCtrl.getBookingDetail);
@@ -209,7 +220,7 @@ router.get('/admin/customers', authenticate, authorize('admin'), adminCtrl.getCu
 router.post('/admin/rewards', authenticate, authorize('admin'), adminCtrl.createRewardPenalty);
 router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewardPenalties);
 
-router.post('/admin/price-hike', authenticate, authorize('admin'), adminCtrl.triggerPriceHike);
+router.post('/admin/price-hike', authenticate, authorize('admin'), validate(V.admin.priceHike), adminCtrl.triggerPriceHike);
 
 // ── ADMIN GARDENER GEOFENCE ASSIGNMENT ─────────────────────────────────────────
 router.get('/admin/gardeners/:id/zones', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
@@ -336,25 +347,25 @@ router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res)
 });
 
 // Admin blog/content management
-router.post('/admin/blogs', authenticate, authorize('admin'), uploadBlog.single('featured_image'), contentCtrl.createBlog);
-router.put('/admin/blogs/:id', authenticate, authorize('admin'), uploadBlog.single('featured_image'), contentCtrl.updateBlog);
+router.post('/admin/blogs', authenticate, authorize('admin'), uploadBlog.single('featured_image'), validate(V.admin.blog), contentCtrl.createBlog);
+router.put('/admin/blogs/:id', authenticate, authorize('admin'), uploadBlog.single('featured_image'), validate(V.admin.blog), contentCtrl.updateBlog);
 router.delete('/admin/blogs/:id', authenticate, authorize('admin'), contentCtrl.deleteBlog);
 router.post('/admin/cities', authenticate, authorize('admin'), contentCtrl.upsertCityPage);
 router.get('/admin/plants/history', authenticate, authorize('admin'), contentCtrl.getAllPlantIdentifications);
 
 // Admin Shop Management
 router.get('/admin/shop/categories', authenticate, authorize('admin'), adminCtrl.getAdminCategories);
-router.post('/admin/shop/categories', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.createCategory);
-router.put('/admin/shop/categories/:id', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.updateCategory);
+router.post('/admin/shop/categories', authenticate, authorize('admin'), uploadShop.single('image'), validate(V.product.category), adminCtrl.createCategory);
+router.put('/admin/shop/categories/:id', authenticate, authorize('admin'), uploadShop.single('image'), validate(V.product.category), adminCtrl.updateCategory);
 router.delete('/admin/shop/categories/:id', authenticate, authorize('admin'), adminCtrl.deleteCategory);
 
 router.get('/admin/shop/products', authenticate, authorize('admin'), adminCtrl.getAdminProducts);
-router.post('/admin/shop/products', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.createProduct);
-router.put('/admin/shop/products/:id', authenticate, authorize('admin'), uploadShop.single('image'), adminCtrl.updateProduct);
+router.post('/admin/shop/products', authenticate, authorize('admin'), uploadShop.single('image'), validate(V.product.create), adminCtrl.createProduct);
+router.put('/admin/shop/products/:id', authenticate, authorize('admin'), uploadShop.single('image'), validate(V.product.create), adminCtrl.updateProduct);
 router.delete('/admin/shop/products/:id', authenticate, authorize('admin'), adminCtrl.deleteProduct);
 
 router.get('/admin/shop/orders', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAdminOrders);
-router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin', 'supervisor'), adminCtrl.updateOrderStatus);
+router.put('/admin/shop/orders/:id/status', authenticate, authorize('admin', 'supervisor'), validate(V.order.updateStatus), adminCtrl.updateOrderStatus);
 
 // ─── TAGLINES ────────────────────────────────────────────────────────────────
 router.get('/taglines', taglineCtrl.getActiveTaglines);
@@ -415,19 +426,19 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
 });
 
 // Send Broadcast Notification
-router.post('/admin/notifications/broadcast', authenticate, authorize('admin'), adminCtrl.sendBroadcastNotification);
+router.post('/admin/notifications/broadcast', authenticate, authorize('admin'), validate(V.admin.broadcast), adminCtrl.sendBroadcastNotification);
 
 module.exports = router;
 
 // ── PAYMENTS (PayU) ───────────────────────────────────────────────────────────
 const paymentCtrl = require('../controllers/payment.controller');
-router.post('/payments/initiate', authenticate, paymentCtrl.initiatePayment);
-router.post('/payments/success', paymentCtrl.paymentSuccess);       // PayU callback
-router.post('/payments/failure', paymentCtrl.paymentFailure);       // PayU callback
+router.post('/payments/initiate', authenticate, validate(V.payment.initiate), paymentCtrl.initiatePayment);
+router.post('/payments/success', paymentCtrl.paymentSuccess);       // PayU callback (signed, do not validate)
+router.post('/payments/failure', paymentCtrl.paymentFailure);       // PayU callback (signed, do not validate)
 router.get('/payments/status/:txnid', authenticate, paymentCtrl.checkPaymentStatus);
 router.get('/payments/my', authenticate, paymentCtrl.getMyPayments);
-router.post('/payments/wallet-topup', authenticate, paymentCtrl.walletTopup);
-router.post('/payments/reschedule', authenticate, paymentCtrl.rescheduleBooking);
+router.post('/payments/wallet-topup', authenticate, validate(V.payment.walletTopup), paymentCtrl.walletTopup);
+router.post('/payments/reschedule', authenticate, validate(V.booking.reschedule), paymentCtrl.rescheduleBooking);
 router.get('/payments/check-serviceability', paymentCtrl.checkServiceability);
 router.get('/admin/payments', authenticate, authorize('admin'), paymentCtrl.getAllPayments);
 
@@ -529,15 +540,15 @@ const { uploadComplaint } = require('../middleware/upload');
 
 // Departments (list is auth'd-any; admin sees all incl inactive)
 router.get('/complaints/departments', authenticate, complaintCtrl.listDepartments);
-router.post('/admin/complaints/departments', authenticate, authorize('admin'), complaintCtrl.createDepartment);
-router.put('/admin/complaints/departments/:id', authenticate, authorize('admin'), complaintCtrl.updateDepartment);
+router.post('/admin/complaints/departments', authenticate, authorize('admin'), validate(V.complaint.department), complaintCtrl.createDepartment);
+router.put('/admin/complaints/departments/:id', authenticate, authorize('admin'), validate(V.complaint.department), complaintCtrl.updateDepartment);
 router.delete('/admin/complaints/departments/:id', authenticate, authorize('admin'), complaintCtrl.deleteDepartment);
 
 // Assignees (admin/supervisor users)
 router.get('/admin/complaints/assignees', authenticate, authorize('admin', 'supervisor'), complaintCtrl.getAssignees);
 
 // Customer-facing
-router.post('/complaints', authenticate, authorize('customer'), uploadComplaint.array('attachments', 5), complaintCtrl.raiseComplaint);
+router.post('/complaints', authenticate, authorize('customer'), uploadComplaint.array('attachments', 5), validate(V.complaint.create), complaintCtrl.raiseComplaint);
 router.get('/complaints/my', authenticate, authorize('customer'), complaintCtrl.getMyComplaints);
 
 // Stats / list (staff)
@@ -548,10 +559,10 @@ router.get('/complaints', authenticate, authorize('admin', 'supervisor'), compla
 router.get('/complaints/:id', authenticate, complaintCtrl.getComplaintDetail);
 
 // Comments / attachments (any authed; handler enforces ownership)
-router.post('/complaints/:id/comments', authenticate, uploadComplaint.array('attachments', 5), complaintCtrl.addComment);
+router.post('/complaints/:id/comments', authenticate, uploadComplaint.array('attachments', 5), validate(V.complaint.comment), complaintCtrl.addComment);
 
 // Update (staff)
-router.put('/complaints/:id', authenticate, authorize('admin', 'supervisor'), complaintCtrl.updateComplaint);
+router.put('/complaints/:id', authenticate, authorize('admin', 'supervisor'), validate(V.complaint.update), complaintCtrl.updateComplaint);
 
 // ── SLA CONFIG & BREACHES ─────────────────────────────────────────────────────
 router.get('/admin/sla/config', authenticate, authorize('admin'), async (req, res) => {
@@ -654,7 +665,7 @@ router.get('/admin/addons', authenticate, authorize('admin'), async (req, res) =
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.post('/admin/addons', authenticate, authorize('admin'), async (req, res) => {
+router.post('/admin/addons', authenticate, authorize('admin'), validate(V.admin.addon), async (req, res) => {
   try {
     const { AddOnService } = require('../models');
     const addon = await AddOnService.create(req.body);
@@ -662,7 +673,7 @@ router.post('/admin/addons', authenticate, authorize('admin'), async (req, res) 
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.put('/admin/addons/:id', authenticate, authorize('admin'), async (req, res) => {
+router.put('/admin/addons/:id', authenticate, authorize('admin'), validate(V.admin.addon), async (req, res) => {
   try {
     const { AddOnService } = require('../models');
     await AddOnService.update(req.body, { where: { id: req.params.id } });
@@ -1075,7 +1086,7 @@ router.get('/admin/bookings/:id/logs', authenticate, authorize('admin', 'supervi
 });
 
 // ── TIP FEATURE ───────────────────────────────────────────────────────────────
-router.post('/bookings/:id/tip', authenticate, authorize('customer'), async (req, res) => {
+router.post('/bookings/:id/tip', authenticate, authorize('customer'), validate(V.review.tip), async (req, res) => {
   try {
     const { Tip, Booking, GardenerProfile, User } = require('../models');
     const { amount } = req.body;
@@ -1208,7 +1219,7 @@ router.get('/reviews', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.post('/bookings/:id/review', authenticate, authorize('customer'), async (req, res) => {
+router.post('/bookings/:id/review', authenticate, authorize('customer'), validate(V.review.create), async (req, res) => {
   try {
     const { Review, Booking } = require('../models');
     const { rating, comment } = req.body;
@@ -1489,7 +1500,7 @@ router.get('/admin/settings', authenticate, authorize('admin'), async (req, res)
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.put('/admin/settings/:key', authenticate, authorize('admin'), async (req, res) => {
+router.put('/admin/settings/:key', authenticate, authorize('admin'), validate(V.admin.setting), async (req, res) => {
   try {
     const { SystemSetting } = require('../models');
     const { value } = req.body;

@@ -23,11 +23,49 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ── RATE LIMITING ─────────────────────────────────────────────────────────────
-const limiter = rateLimit({ windowMs: 50 * 60 * 1000, max: 1000 });
+// Generic API limiter (loose — per IP)
+const limiter = rateLimit({
+  windowMs: 50 * 60 * 1000, max: 1000,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many requests — please slow down' },
+});
 app.use('/api/', limiter);
 
-const otpLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { success: false, message: 'Too many OTP requests' } });
+// Strict on OTP / auth — stops brute force + SMS bombing
+const otpLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 5,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many OTP requests — try again in a minute' },
+});
 app.use('/api/auth/send-otp', otpLimiter);
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many login attempts — try again in 15 minutes' },
+});
+app.use('/api/auth/admin-login', loginLimiter);
+app.use('/api/auth/verify-otp',  loginLimiter);
+app.use('/api/auth/gardener-login', loginLimiter);
+
+// Strict on payment initiation — prevents abuse / abandoned-cart spam
+const paymentLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 10,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many payment attempts — try again shortly' },
+});
+app.use('/api/payments/initiate', paymentLimiter);
+app.use('/api/payments/wallet-topup', paymentLimiter);
+
+// Public form spam protection
+const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 20,
+  standardHeaders: true, legacyHeaders: false,
+  message: { success: false, message: 'Too many submissions — please try again later' },
+});
+app.use('/api/contact', publicFormLimiter);
+app.use('/api/careers/apply', publicFormLimiter);
+app.use('/api/complaints', publicFormLimiter);
 
 // ── STATIC FILES ──────────────────────────────────────────────────────────────
 const uploadPath = process.env.UPLOAD_PATH || path.join(__dirname, '../uploads');

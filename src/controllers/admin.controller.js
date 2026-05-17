@@ -1034,7 +1034,7 @@ exports.getAdminOrders = async (req, res) => {
         {
           model: OrderItem,
           as: 'items',
-          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key', 'price', 'mrp'] }]
+          include: [{ model: Product, as: 'product', attributes: ['name', 'icon_key', 'price', 'mrp', 'gst_rate'] }]
         }
       ],
       order: [['created_at', 'DESC']],
