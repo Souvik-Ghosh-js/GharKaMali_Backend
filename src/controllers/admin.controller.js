@@ -401,12 +401,30 @@ exports.deleteGardener = async (req, res) => {
 // ── SUPERVISOR MANAGEMENT ─────────────────────────────────────────────────────
 exports.createSupervisor = async (req, res) => {
   try {
-    const { name, phone, email, password } = req.body;
+    const { name, phone, email, password, address, city, state, pincode, geofence_id, service_zone_id } = req.body;
+
+    if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Name is required' });
+    if (!phone || !/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: 'Phone must be exactly 10 digits' });
+    if (!password || password.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ success: false, message: 'Invalid email format' });
+    if (pincode && !/^\d{6}$/.test(pincode)) return res.status(400).json({ success: false, message: 'Pincode must be 6 digits' });
+
     const existing = await User.findOne({ where: { phone } });
-    if (existing) return res.status(400).json({ success: false, message: 'Phone already exists' });
+    if (existing) return res.status(400).json({ success: false, message: 'Phone already registered' });
+    if (email) {
+      const existingEmail = await User.findOne({ where: { email } });
+      if (existingEmail) return res.status(400).json({ success: false, message: 'Email already registered' });
+    }
+
     const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, phone, email, password: hashed, role: 'supervisor', is_active: true, is_approved: true, referral_code: `SUP${phone.slice(-6)}` });
-    const u = user.toJSON(); delete u.password;
+    const user = await User.create({
+      name: name.trim(), phone, email: email || null, password: hashed,
+      role: 'supervisor', is_active: true, is_approved: true,
+      address: address || null, city: city || null, state: state || null, pincode: pincode || null,
+      geofence_id: geofence_id || null, service_zone_id: service_zone_id || null,
+      referral_code: `SUP${phone.slice(-6)}`,
+    });
+    const u = user.toJSON(); delete u.password; delete u.otp;
     res.status(201).json({ success: true, data: u });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -415,11 +433,34 @@ exports.createSupervisor = async (req, res) => {
 
 exports.updateSupervisor = async (req, res) => {
   try {
-    const { name, phone, email, password, gardener_ids } = req.body;
+    const { name, phone, email, password, gardener_ids, address, city, state, pincode, geofence_id, service_zone_id } = req.body;
     const user = await User.findByPk(req.params.id);
     if (!user || user.role !== 'supervisor') return res.status(404).json({ success: false, message: 'Supervisor not found' });
 
-    const updates = { name, phone, email };
+    if (phone && !/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: 'Phone must be exactly 10 digits' });
+    if (password && password.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ success: false, message: 'Invalid email format' });
+    if (pincode && !/^\d{6}$/.test(pincode)) return res.status(400).json({ success: false, message: 'Pincode must be 6 digits' });
+
+    if (phone && phone !== user.phone) {
+      const dupe = await User.findOne({ where: { phone } });
+      if (dupe) return res.status(400).json({ success: false, message: 'Phone already in use' });
+    }
+    if (email && email !== user.email) {
+      const dupe = await User.findOne({ where: { email } });
+      if (dupe) return res.status(400).json({ success: false, message: 'Email already in use' });
+    }
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (phone !== undefined) updates.phone = phone;
+    if (email !== undefined) updates.email = email || null;
+    if (address !== undefined) updates.address = address || null;
+    if (city !== undefined) updates.city = city || null;
+    if (state !== undefined) updates.state = state || null;
+    if (pincode !== undefined) updates.pincode = pincode || null;
+    if (geofence_id !== undefined) updates.geofence_id = geofence_id || null;
+    if (service_zone_id !== undefined) updates.service_zone_id = service_zone_id || null;
     if (password) updates.password = await bcrypt.hash(password, 10);
     await user.update(updates);
 
