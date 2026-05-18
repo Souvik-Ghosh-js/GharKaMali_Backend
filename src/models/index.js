@@ -440,6 +440,9 @@ const Geofence = sequelize.define('Geofence', {
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   surge_multiplier: { type: DataTypes.DECIMAL(4, 2), defaultValue: 1.00 },
+  // Default duration of any garden visit in this zone (subscription or on-demand).
+  // Gardener-app timer counts down from `visit_minutes + booking.extra_time_minutes`.
+  visit_minutes: { type: DataTypes.INTEGER, defaultValue: 60 },
   // Time-extension addon (used when a customer wants to extend the on-demand visit)
   time_addon_minutes: { type: DataTypes.INTEGER, defaultValue: 30 },
   time_addon_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },

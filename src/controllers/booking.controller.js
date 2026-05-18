@@ -361,7 +361,8 @@ exports.getBookingDetail = async (req, res) => {
         { model: ServiceZone, as: 'zone' },
         { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 },
         { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon' }] },
-        { model: BookingTimeAddon, as: 'timeAddons' }
+        { model: BookingTimeAddon, as: 'timeAddons' },
+        { model: Geofence, as: 'geofenceRef', attributes: ['id', 'name', 'visit_minutes', 'time_addon_minutes', 'time_addon_price'] }
       ]
     });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
