@@ -127,25 +127,74 @@ router.post('/admin/shop/products/bulk-import', authenticate, authorize('admin')
     const catMap = {};
     cats.forEach(c => { catMap[c.name.toLowerCase().trim()] = c.id; });
 
+    // Helpers for parsing complex Excel-friendly columns
+    const splitList = (val, sep) => String(val == null ? '' : val)
+      .split(sep).map(s => s.trim()).filter(Boolean);
+    const parseFeatures = (val) => {
+      if (val == null || val === '') return null;
+      if (Array.isArray(val)) return val;
+      // Accept JSON array or pipe-separated string
+      const s = String(val).trim();
+      if (s.startsWith('[')) { try { return JSON.parse(s); } catch (_) {} }
+      const list = splitList(s, '|');
+      return list.length ? list : null;
+    };
+    const parseFaqs = (val) => {
+      if (val == null || val === '') return null;
+      if (Array.isArray(val)) return val;
+      const s = String(val).trim();
+      if (s.startsWith('[')) { try { return JSON.parse(s); } catch (_) {} }
+      // Format: "Q::A||Q::A"
+      return splitList(s, '||').map(pair => {
+        const [q, ...rest] = pair.split('::');
+        return { q: (q || '').trim(), a: rest.join('::').trim() };
+      }).filter(f => f.q && f.a);
+    };
+    const parseImages = (val) => {
+      if (val == null || val === '') return null;
+      if (Array.isArray(val)) return val;
+      const s = String(val).trim();
+      if (s.startsWith('[')) { try { return JSON.parse(s); } catch (_) {} }
+      const list = splitList(s, ',');
+      return list.length ? list : null;
+    };
+    const parseGeofenceIds = (val) => {
+      if (val == null || val === '') return null;
+      if (Array.isArray(val)) return val.map(n => parseInt(n)).filter(Number.isFinite);
+      const s = String(val).trim();
+      if (s.startsWith('[')) { try { const arr = JSON.parse(s); return Array.isArray(arr) ? arr.map(n => parseInt(n)).filter(Number.isFinite) : null; } catch (_) {} }
+      const ids = splitList(s, ',').map(n => parseInt(n)).filter(Number.isFinite);
+      return ids.length ? ids : null;
+    };
+
     const created = [], failed = [];
     for (const row of rows) {
       try {
         const data = {
           name: String(row.name || '').trim(),
+          slug: row.slug ? String(row.slug).trim() : undefined,
           price: parseFloat(row.price) || 0,
-          mrp: row.mrp ? parseFloat(row.mrp) : null,
+          mrp: row.mrp !== '' && row.mrp != null ? parseFloat(row.mrp) : null,
           stock_quantity: parseInt(row.stock_quantity) || 0,
+          gst_rate: row.gst_rate !== '' && row.gst_rate != null ? parseInt(row.gst_rate) : 0,
           description: row.description || null,
+          long_description: row.long_description || null,
           badge: row.badge || null,
           icon_key: row.icon_key || 'plant',
           is_active: String(row.is_active).toLowerCase() !== 'false',
-          tags: row.tags ? String(row.tags).split(',').map(t => t.trim()).filter(Boolean) : null,
+          tags: row.tags ? splitList(row.tags, ',') : null,
+          features: parseFeatures(row.features),
+          faqs: parseFaqs(row.faqs),
+          images: parseImages(row.images),
+          available_geofence_ids: parseGeofenceIds(row.available_geofence_ids),
           category_id: row.category_id
             ? parseInt(row.category_id)
             : (catMap[String(row.category_name || '').toLowerCase().trim()] || null),
         };
         if (!data.name) throw new Error('name is required');
         if (!data.price) throw new Error('price is required');
+        // Strip undefined so Sequelize uses model defaults
+        Object.keys(data).forEach(k => data[k] === undefined && delete data[k]);
         const product = await Product.create(data);
         created.push(product.id);
       } catch (err) {
