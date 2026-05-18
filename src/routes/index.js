@@ -40,6 +40,10 @@ router.put('/bookings/status',
   bookingCtrl.updateBookingStatus
 );
 router.post('/bookings/rate',     authenticate, authorize('customer'), validate(V.booking.rate),           bookingCtrl.rateBooking);
+
+// Customer raises a time-extension addon (30-min block at zone-configured price)
+router.post('/bookings/:id/time-addon', authenticate, authorize('customer'), bookingCtrl.requestTimeAddon);
+router.get('/bookings/:id/time-addons', authenticate, bookingCtrl.getTimeAddons);
 router.post('/bookings/cancel',   authenticate,                         validate(V.booking.cancel),         bookingCtrl.cancelBooking);
 router.get('/bookings/gardener/jobs', authenticate, authorize('gardener'), bookingCtrl.getGardenerJobs);
 router.post('/bookings/location', authenticate, authorize('gardener'),  validate(V.booking.updateLocation), bookingCtrl.updateLocation);

@@ -851,7 +851,7 @@ exports.getGeofences = async (req, res) => {
 exports.createGeofence = async (req, res) => {
   try {
     const { Geofence } = require('../models');
-    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup } = req.body;
+    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup, time_addon_minutes, time_addon_price } = req.body;
     if (!polygon_coords || !Array.isArray(polygon_coords) || polygon_coords.length < 3) {
       return res.status(400).json({ success: false, message: 'polygon_coords must be an array of at least 3 [lat, lng] points' });
     }
@@ -863,6 +863,8 @@ exports.createGeofence = async (req, res) => {
       price_per_plant: parseFloat(price_per_plant) || 0,
       min_plants: parseInt(min_plants) || 1,
       product_markup: parseFloat(product_markup) || 0,
+      time_addon_minutes: parseInt(time_addon_minutes) || 30,
+      time_addon_price: parseFloat(time_addon_price) || 0,
       created_by: req.user.id
     });
     res.status(201).json({ success: true, data: geofence });
@@ -876,7 +878,7 @@ exports.updateGeofence = async (req, res) => {
     const { Geofence } = require('../models');
     const geofence = await Geofence.findByPk(req.params.id);
     if (!geofence) return res.status(404).json({ success: false, message: 'Geofence not found' });
-    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup } = req.body;
+    const { name, city, state, polygon_coords, is_active, base_price, price_per_plant, min_plants, product_markup, time_addon_minutes, time_addon_price } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (city !== undefined) updates.city = city;
@@ -886,6 +888,8 @@ exports.updateGeofence = async (req, res) => {
     if (price_per_plant !== undefined) updates.price_per_plant = parseFloat(price_per_plant) || 0;
     if (min_plants !== undefined) updates.min_plants = parseInt(min_plants) || 1;
     if (product_markup !== undefined) updates.product_markup = parseFloat(product_markup) || 0;
+    if (time_addon_minutes !== undefined) updates.time_addon_minutes = parseInt(time_addon_minutes) || 30;
+    if (time_addon_price !== undefined) updates.time_addon_price = parseFloat(time_addon_price) || 0;
     if (polygon_coords && Array.isArray(polygon_coords) && polygon_coords.length >= 3) {
       updates.polygon_coords = JSON.stringify(polygon_coords);
     }

@@ -166,8 +166,24 @@ const Booking = sequelize.define('Booking', {
   rating: { type: DataTypes.INTEGER },
   review: { type: DataTypes.TEXT },
   rated_at: { type: DataTypes.DATE },
+  // Total customer-requested time-extension on this visit (sum across all addons)
+  extra_time_minutes: { type: DataTypes.INTEGER, defaultValue: 0 },
+  extra_time_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'bookings' });
+
+// ─── BOOKING TIME ADDON ───────────────────────────────────────────────────────
+// Each row is one customer request to extend the on-demand visit by a fixed
+// time block at the zone-configured price.
+const BookingTimeAddon = sequelize.define('BookingTimeAddon', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  minutes: { type: DataTypes.INTEGER, allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  requested_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  status: { type: DataTypes.ENUM('pending', 'accepted', 'rejected'), defaultValue: 'pending' },
+  payment_status: { type: DataTypes.ENUM('pending', 'paid', 'refunded'), defaultValue: 'pending' }
+}, { tableName: 'booking_time_addons', underscored: true });
 
 // ─── BOOKING TRACKING ─────────────────────────────────────────────────────────
 const BookingTracking = sequelize.define('BookingTracking', {
@@ -424,6 +440,9 @@ const Geofence = sequelize.define('Geofence', {
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   surge_multiplier: { type: DataTypes.DECIMAL(4, 2), defaultValue: 1.00 },
+  // Time-extension addon (used when a customer wants to extend the on-demand visit)
+  time_addon_minutes: { type: DataTypes.INTEGER, defaultValue: 30 },
+  time_addon_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   created_by: { type: DataTypes.INTEGER }
 }, { tableName: 'geofences', underscored: true });
 
@@ -683,6 +702,10 @@ BookingAddOn.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 BookingAddOn.belongsTo(AddOnService, { foreignKey: 'addon_id', as: 'addon' });
 Booking.hasMany(BookingAddOn, { foreignKey: 'booking_id', as: 'addons' });
 
+BookingTimeAddon.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+BookingTimeAddon.belongsTo(User, { foreignKey: 'requested_by', as: 'requester' });
+Booking.hasMany(BookingTimeAddon, { foreignKey: 'booking_id', as: 'timeAddons' });
+
 PlantIdentification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasMany(PlantIdentification, { foreignKey: 'user_id', as: 'plantIdentifications' });
 
@@ -756,6 +779,7 @@ module.exports = {
   OrderItem,
   AddOnService,
   BookingAddOn,
+  BookingTimeAddon,
   SLAConfig,
   SLABreach,
   Complaint,

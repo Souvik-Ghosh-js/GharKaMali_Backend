@@ -1,6 +1,6 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService, BookingTimeAddon } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
@@ -360,11 +360,139 @@ exports.getBookingDetail = async (req, res) => {
         { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'], include: [{ model: GardenerProfile, as: 'gardenerProfile' }] },
         { model: ServiceZone, as: 'zone' },
         { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 },
-        { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon' }] }
+        { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon' }] },
+        { model: BookingTimeAddon, as: 'timeAddons' }
       ]
     });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     res.json({ success: true, data: booking });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ───────────────────────────────────────────────────────────────────────────
+// Customer: request a TIME ADDON on an on-demand booking.
+// Each call adds one block of `time_addon_minutes` at `time_addon_price`,
+// both configured per geofence/zone by the admin. Block size defaults to 30.
+// ───────────────────────────────────────────────────────────────────────────
+exports.requestTimeAddon = async (req, res) => {
+  try {
+    const bookingId = parseInt(req.params.id);
+    const blocks = Math.max(1, parseInt(req.body.blocks) || 1); // allow buying N blocks at once
+
+    const booking = await Booking.findByPk(bookingId);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.customer_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
+    if (booking.booking_type !== 'ondemand') return res.status(400).json({ success: false, message: 'Time addons are only available for on-demand visits' });
+
+    // Customer can only add time AFTER they've shared the OTP and the visit has started.
+    if (booking.status !== 'in_progress' || !booking.otp_verified) {
+      return res.status(400).json({ success: false, message: 'Extra time can only be added after the gardener has started the visit (OTP verified).' });
+    }
+
+    // Resolve zone config (prefer geofence_id, then zone_id)
+    const geofence = booking.geofence_id ? await Geofence.findByPk(booking.geofence_id) : null;
+    if (!geofence) return res.status(400).json({ success: false, message: 'No service zone found for this booking' });
+
+    const minutesPerBlock = parseInt(geofence.time_addon_minutes) || 30;
+    const pricePerBlock = parseFloat(geofence.time_addon_price);
+    if (!pricePerBlock || pricePerBlock <= 0) {
+      return res.status(400).json({ success: false, message: 'Time addon is not configured for this zone. Please contact support.' });
+    }
+
+    const minutes = minutesPerBlock * blocks;
+    const amount = pricePerBlock * blocks;
+
+    const addon = await BookingTimeAddon.create({
+      booking_id: booking.id,
+      minutes,
+      amount,
+      requested_by: req.user.id,
+      status: 'accepted',         // auto-accepted — customer-initiated
+      payment_status: 'pending',  // settled at visit completion / via existing payment flow
+    });
+
+    await booking.update({
+      extra_time_minutes: (booking.extra_time_minutes || 0) + minutes,
+      extra_time_amount: parseFloat(booking.extra_time_amount || 0) + amount,
+      total_amount: parseFloat(booking.total_amount || 0) + amount,
+    });
+
+    await logBookingEvent(booking.id, 'time_addon', req.user.id, 'customer',
+      { minutes, amount, blocks },
+      `Customer added ${minutes} mins (+₹${amount}) to the visit`);
+
+    // Notify gardener
+    if (booking.gardener_id) {
+      try {
+        const notificationService = require('../services/notification.service');
+        await notificationService.notifyUser(booking.gardener_id, {
+          title: '⏱️ Extra time requested',
+          body: `Customer extended the visit by ${minutes} mins (+₹${amount}).`,
+          type: 'info',
+          data: { booking_id: booking.id, minutes, amount }
+        });
+        const gardener = await User.findByPk(booking.gardener_id);
+        if (gardener?.fcm_token) {
+          await notify.custom?.(gardener.fcm_token, '⏱️ Extra time requested',
+            `Customer added ${minutes} mins (+₹${amount}) to booking ${booking.booking_number}`);
+        }
+      } catch (_) {}
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Added ${minutes} minutes (+₹${amount})`,
+      data: {
+        addon,
+        booking: {
+          id: booking.id,
+          extra_time_minutes: booking.extra_time_minutes,
+          extra_time_amount: booking.extra_time_amount,
+          total_amount: booking.total_amount
+        }
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.getTimeAddons = async (req, res) => {
+  try {
+    const bookingId = parseInt(req.params.id);
+    const booking = await Booking.findByPk(bookingId);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    // Only customer, assigned gardener, or admin/supervisor can read
+    const role = req.user.role;
+    const isAuthed = role === 'admin' || role === 'supervisor'
+      || booking.customer_id === req.user.id
+      || booking.gardener_id === req.user.id;
+    if (!isAuthed) return res.status(403).json({ success: false, message: 'Not authorized' });
+
+    const addons = await BookingTimeAddon.findAll({
+      where: { booking_id: bookingId },
+      order: [['created_at', 'ASC']]
+    });
+
+    let blockMinutes = 30, blockPrice = 0;
+    if (booking.geofence_id) {
+      const g = await Geofence.findByPk(booking.geofence_id);
+      if (g) { blockMinutes = parseInt(g.time_addon_minutes) || 30; blockPrice = parseFloat(g.time_addon_price) || 0; }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        addons,
+        config: { block_minutes: blockMinutes, block_price: blockPrice, configured: blockPrice > 0 },
+        totals: {
+          extra_time_minutes: booking.extra_time_minutes || 0,
+          extra_time_amount: parseFloat(booking.extra_time_amount || 0)
+        }
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
