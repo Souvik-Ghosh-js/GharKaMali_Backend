@@ -135,6 +135,9 @@ const Booking = sequelize.define('Booking', {
   subscription_id: { type: DataTypes.INTEGER },
   zone_id: { type: DataTypes.INTEGER },
   booking_type: { type: DataTypes.ENUM('subscription', 'ondemand'), defaultValue: 'ondemand' },
+  // Instant on-demand bookings — dispatched within zone.instant_eta_minutes.
+  // Distinguishes "Book Now" from scheduled on-demand bookings.
+  is_instant: { type: DataTypes.BOOLEAN, defaultValue: false },
   status: {
     type: DataTypes.ENUM('pending', 'assigned', 'en_route', 'arrived', 'in_progress', 'completed', 'cancelled', 'failed'),
     defaultValue: 'pending'

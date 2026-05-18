@@ -122,9 +122,12 @@ const booking = {
     intInRange('plan_id', { min: 1, max: 1000000, optional: true }),
     intInRange('zone_id', { min: 1, optional: true }),
     intInRange('geofence_id', { min: 1, optional: true }),
-    isoDate('scheduled_date'),
+    // Date/time optional — required only for scheduled bookings; instant bookings
+    // get a server-computed slot when `is_instant: true`.
+    body('scheduled_date').optional({ values: 'falsy' }).isISO8601().withMessage('scheduled_date must be ISO date'),
     body('scheduled_time').optional({ values: 'falsy' }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
       .withMessage('scheduled_time must be HH:mm'),
+    body('is_instant').optional({ values: 'falsy' }).isBoolean().toBoolean(),
     text('service_address', { min: 5, max: 500 }),
     lat('service_latitude', false), lng('service_longitude', false),
     intInRange('plant_count', { min: 1, max: 1000, optional: true }),

@@ -31,6 +31,7 @@ router.post('/bookings', authenticate, authorize('customer'), validate(V.booking
 router.get('/bookings/my', authenticate, authorize('customer'), bookingCtrl.getMyBookings);
 router.get('/bookings/previous-gardeners', authenticate, authorize('customer'), bookingCtrl.getPreviousGardeners);
 router.get('/bookings/check-availability', bookingCtrl.checkAvailability);
+router.get('/bookings/instant-availability', bookingCtrl.checkInstantAvailability);
 router.get('/bookings/:id', authenticate, bookingCtrl.getBookingDetail);
 router.get('/bookings/:id/logs', authenticate, bookingCtrl.getBookingLogs);
 router.post('/bookings/verify-otp', authenticate, authorize('gardener'), validate(V.booking.verifyOtp), bookingCtrl.verifyVisitOtp);

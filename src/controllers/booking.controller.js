@@ -5,6 +5,13 @@ const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
 
+// ───────────────────────────────────────────────────────────────────────────
+// Default arrival window for "Instant" on-demand bookings.
+// TODO: replace with a real ETA computed from the assigned gardener's live
+// distance to the customer location once on-the-ground operations are live.
+// ───────────────────────────────────────────────────────────────────────────
+const DEFAULT_INSTANT_ETA_MINUTES = 50;
+
 // Helper: create booking log entry
 const logBookingEvent = async (booking_id, event_type, actor_id, actor_role, meta, description) => {
   try {
@@ -111,6 +118,65 @@ exports.checkAvailability = async (req, res) => {
   }
 };
 
+// ───────────────────────────────────────────────────────────────────────────
+// Check if instant on-demand booking is feasible right now in a given zone.
+// Returns the configured ETA + whether any gardener is free to start "now".
+// ───────────────────────────────────────────────────────────────────────────
+exports.checkInstantAvailability = async (req, res) => {
+  try {
+    const { geofence_id } = req.query;
+    if (!geofence_id) return res.status(400).json({ success: false, message: 'geofence_id is required' });
+
+    const zone = await Geofence.findByPk(geofence_id);
+    if (!zone) return res.status(404).json({ success: false, message: 'Zone not found' });
+
+    const etaMinutes = DEFAULT_INSTANT_ETA_MINUTES;
+
+    // Today + (now + eta) in HH:mm — the slot we'd assign.
+    const target = moment().add(etaMinutes, 'minutes');
+    const targetDate = target.format('YYYY-MM-DD');
+    const targetTime = target.format('HH:mm');
+
+    const zoneAssignments = await GardenerZone.findAll({ where: { geofence_id }, attributes: ['gardener_id'] });
+    const zoneGardenerIds = zoneAssignments.map(gz => gz.gardener_id);
+    if (zoneGardenerIds.length === 0) {
+      return res.json({ success: true, data: { available: false, reason: 'no_gardeners_in_zone', eta_minutes: etaMinutes } });
+    }
+
+    const candidates = await GardenerProfile.findAll({
+      where: { user_id: { [Op.in]: zoneGardenerIds }, is_available: true },
+      include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true, role: 'gardener' } }]
+    });
+
+    let freeCount = 0;
+    for (const c of candidates) {
+      const conflicts = await Booking.findAll({
+        where: {
+          gardener_id: c.user_id,
+          scheduled_date: targetDate,
+          status: { [Op.notIn]: ['cancelled', 'failed', 'completed'] }
+        },
+        attributes: ['scheduled_time']
+      });
+      const targetM = moment(targetTime, 'HH:mm');
+      const isFree = !conflicts.some(b => Math.abs(targetM.diff(moment(b.scheduled_time, 'HH:mm:ss'), 'minutes')) < 120);
+      if (isFree) freeCount++;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        available: freeCount > 0,
+        eta_minutes: etaMinutes,
+        gardener_count: freeCount,
+        reason: freeCount > 0 ? null : 'no_free_gardeners',
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // Generate booking number
 const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;
 
@@ -120,12 +186,25 @@ const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 // Create booking (on-demand)
 exports.createBooking = async (req, res) => {
   try {
-    const { 
-      zone_id, geofence_id, scheduled_date, scheduled_time, 
-      service_address, service_latitude, service_longitude, 
+    let {
+      zone_id, geofence_id, scheduled_date, scheduled_time,
+      service_address, service_latitude, service_longitude,
       flat_no, building, area, landmark, city, state, pincode,
-      plant_count, customer_notes, preferred_gardener_id, payment_method 
+      plant_count, customer_notes, preferred_gardener_id, payment_method,
+      is_instant
     } = req.body;
+
+    // Instant booking — server-side computes the slot. The client cannot pick
+    // the time. ETA is currently a flat default; will be distance-based later.
+    if (is_instant) {
+      const target = moment().add(DEFAULT_INSTANT_ETA_MINUTES, 'minutes');
+      scheduled_date = target.format('YYYY-MM-DD');
+      scheduled_time = target.format('HH:mm');
+    } else {
+      if (!scheduled_date) {
+        return res.status(400).json({ success: false, message: 'scheduled_date is required for scheduled bookings' });
+      }
+    }
 
     // Auto-save address to user profile
     const addressCtrl = require('./address.controller');
@@ -208,6 +287,13 @@ exports.createBooking = async (req, res) => {
       }
 
       if (!gardener_id) {
+        if (is_instant) {
+          return res.status(409).json({
+            success: false,
+            no_instant_slot: true,
+            message: 'No gardener is free for an instant visit right now. Please schedule a later slot.'
+          });
+        }
         return res.status(400).json({ success: false, message: 'No gardener is available for the selected date and time slot. Please choose a different slot.' });
       }
     }
@@ -235,6 +321,7 @@ exports.createBooking = async (req, res) => {
       zone_id: activeZoneId,
       geofence_id: activeZoneId, // Map the selected geofence ID
       booking_type: 'ondemand',
+      is_instant: !!is_instant,
       status: gardener_id ? 'assigned' : 'pending',
       assigned_at: gardener_id ? new Date() : null,
       scheduled_date,
