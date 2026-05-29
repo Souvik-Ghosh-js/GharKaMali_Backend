@@ -1426,13 +1426,14 @@ router.get('/social-proof', async (req, res) => {
     }
 
     // Get config settings
-    const [intervalSetting, delaySetting, durationSetting, maxItemsSetting, bookingTemplateSetting, visitorTemplateSetting] = await Promise.all([
+    const [intervalSetting, delaySetting, durationSetting, maxItemsSetting, bookingTemplateSetting, visitorTemplateSetting, visitorBaseSetting] = await Promise.all([
       SystemSetting.findOne({ where: { key: 'social_proof_interval' } }),
       SystemSetting.findOne({ where: { key: 'social_proof_delay' } }),
       SystemSetting.findOne({ where: { key: 'social_proof_duration' } }),
       SystemSetting.findOne({ where: { key: 'social_proof_max_items' } }),
       SystemSetting.findOne({ where: { key: 'social_proof_booking_template' } }),
       SystemSetting.findOne({ where: { key: 'social_proof_visitor_template' } }),
+      SystemSetting.findOne({ where: { key: 'social_proof_visitor_base' } }),
     ]);
 
     const interval = intervalSetting ? parseInt(intervalSetting.value) || 8000 : 8000;
@@ -1440,7 +1441,22 @@ router.get('/social-proof', async (req, res) => {
     const duration = durationSetting ? parseInt(durationSetting.value) || 5000 : 5000;
     const maxItems = maxItemsSetting ? parseInt(maxItemsSetting.value) || 10 : 10;
     const bookingTemplate = bookingTemplateSetting ? bookingTemplateSetting.value : '{name} from {city} just booked {service}';
-    const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '10+ people are viewing this page right now';
+    const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '{count} people are viewing this page right now';
+    const visitorBase = visitorBaseSetting ? parseInt(visitorBaseSetting.value) || 0 : 1000;
+
+    // Live visitor count = admin-set base + accumulated real visits.
+    // Only fresh-session visits send ?count=1, so reloads don't inflate the number.
+    if (req.query.count === '1') {
+      await db.query(
+        "INSERT INTO system_settings (`key`, value, created_at, updated_at) " +
+        "VALUES ('social_proof_visitor_count', '1', NOW(), NOW()) " +
+        "ON DUPLICATE KEY UPDATE value = CAST(value AS UNSIGNED) + 1, updated_at = NOW()",
+        { type: db.QueryTypes.INSERT }
+      );
+    }
+    const visitorCountSetting = await SystemSetting.findOne({ where: { key: 'social_proof_visitor_count' } });
+    const realVisits = visitorCountSetting ? parseInt(visitorCountSetting.value) || 0 : 0;
+    const liveVisitorCount = visitorBase + realVisits;
 
     // Fetch recent bookings
     const rows = await db.query(`
@@ -1496,7 +1512,7 @@ router.get('/social-proof', async (req, res) => {
     if (visitorTemplate && visitorTemplate.trim() !== '') {
       items.push({
         type: 'visitor',
-        message: visitorTemplate,
+        message: visitorTemplate.replace('{count}', liveVisitorCount.toLocaleString('en-IN')),
         time_ago: 'live'
       });
     }

@@ -2,7 +2,7 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const {
   sequelize, User, ServiceZone, ServicePlan, GardenerProfile,
-  GardenerZone, AddOnService, SLAConfig, CityPage, Blog
+  GardenerZone, AddOnService, SLAConfig, CityPage, Blog, SystemSetting
 } = require('../models');
 
 async function seed() {
@@ -269,6 +269,27 @@ async function seed() {
       await Blog.findOrCreate({ where: { slug: b.slug }, defaults: b });
     }
     console.log('✅ Blog posts: 3');
+
+    // ── SOCIAL PROOF SETTINGS ────────────────────────────────────────────────────
+    // findOrCreate so existing admin-configured values are never overwritten.
+    const socialProofDefaults = [
+      { key: 'social_proof_enabled',          value: 'true' },
+      { key: 'social_proof_booking_template', value: '{name} from {city} just booked {service}' },
+      { key: 'social_proof_visitor_template', value: '{count} people are viewing this page right now' },
+      { key: 'social_proof_visitor_base',     value: '1000' },
+      { key: 'social_proof_visitor_count',    value: '0' },
+      { key: 'social_proof_delay',            value: '5000' },
+      { key: 'social_proof_duration',         value: '5000' },
+      { key: 'social_proof_interval',         value: '8000' },
+      { key: 'social_proof_max_items',        value: '10' }
+    ];
+    for (const s of socialProofDefaults) {
+      await SystemSetting.findOrCreate({
+        where: { key: s.key },
+        defaults: { key: s.key, value: s.value, updated_by: admin.id }
+      });
+    }
+    console.log('✅ Social proof settings (visitor base: 1000, live {count} enabled)');
 
     // ── SUMMARY ────────────────────────────────────────────────────────────────
     console.log('\n═══════════════════════════════════════════');
