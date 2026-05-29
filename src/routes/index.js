@@ -1510,9 +1510,15 @@ router.get('/social-proof', async (req, res) => {
 
     // Add visitor count notification if template is set
     if (visitorTemplate && visitorTemplate.trim() !== '') {
+      const liveCountStr = liveVisitorCount.toLocaleString('en-IN');
+      // If the saved template still has no {count} tag, fall back to a message
+      // that includes the live number so it always reflects real growth.
+      const visitorMessage = visitorTemplate.includes('{count}')
+        ? visitorTemplate.replace('{count}', liveCountStr)
+        : `${liveCountStr} people are viewing this page right now`;
       items.push({
         type: 'visitor',
-        message: visitorTemplate.replace('{count}', liveVisitorCount.toLocaleString('en-IN')),
+        message: visitorMessage,
         time_ago: 'live'
       });
     }
