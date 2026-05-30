@@ -1206,7 +1206,14 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
       }),
       Subscription.findAll({
         where: { customer_id: req.params.id },
-        include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'duration_days'] }],
+        include: [
+          { model: ServicePlan, as: 'plan', attributes: ['name', 'duration_days', 'visits_per_month'] },
+          {
+            model: Booking, as: 'bookings', separate: true, order: [['scheduled_date', 'DESC']],
+            attributes: ['id', 'booking_number', 'status', 'scheduled_date', 'scheduled_time', 'completed_at', 'total_amount', 'rating', 'gardener_id'],
+            include: [{ model: User, as: 'gardener', attributes: ['id', 'name', 'phone'] }]
+          }
+        ],
         order: [['created_at', 'DESC']]
       }),
       Payment.findAll({
