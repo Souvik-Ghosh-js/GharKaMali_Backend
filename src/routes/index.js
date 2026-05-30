@@ -404,6 +404,31 @@ router.post('/coupons/validate', authenticate, authorize('customer'), validate(V
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Public: list coupons a customer can currently apply (active, in-date, not exhausted).
+router.get('/coupons', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Coupon } = require('../models');
+    const now = new Date();
+    const all = await Coupon.findAll({ where: { is_active: true }, order: [['min_order_amount', 'ASC']] });
+    const available = all
+      .filter(c => {
+        if (c.valid_from && now < new Date(c.valid_from)) return false;
+        if (c.valid_to && now > new Date(c.valid_to)) return false;
+        if (c.usage_limit != null && c.usage_count >= c.usage_limit) return false;
+        return true;
+      })
+      .map(c => ({
+        code: c.code,
+        description: c.description || null,
+        discount_type: c.discount_type,
+        discount_value: c.discount_value,
+        min_order_amount: c.min_order_amount,
+        max_discount: c.max_discount,
+      }));
+    res.json({ success: true, data: available });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Admin: manage coupons.
 router.get('/admin/coupons', authenticate, authorize('admin'), async (req, res) => {
   try {
