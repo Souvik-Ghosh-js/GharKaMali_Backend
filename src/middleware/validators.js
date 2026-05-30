@@ -306,7 +306,7 @@ const review = {
 const address = {
   create: [
     text('label', { max: 50, optional: true }),
-    text('flat_no', { max: 100, optional: true }),
+    text('flat_no', { max: 10, optional: true }),
     text('building', { max: 255, optional: true }),
     text('area', { max: 500, optional: true }),
     text('landmark', { max: 255, optional: true }),
