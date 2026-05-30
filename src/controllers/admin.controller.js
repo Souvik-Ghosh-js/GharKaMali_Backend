@@ -579,6 +579,33 @@ exports.updatePlan = async (req, res) => {
   }
 };
 
+exports.deletePlan = async (req, res) => {
+  try {
+    const { ServicePlan, Subscription } = require('../models');
+    const plan = await ServicePlan.findByPk(req.params.id);
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    // Plans referenced by subscriptions can't be hard-deleted (it would orphan
+    // them) — deactivate so it disappears from the app while history is kept.
+    const inUse = await Subscription.count({ where: { plan_id: plan.id } });
+    if (inUse > 0) {
+      await plan.update({ is_active: false });
+      return res.json({ success: true, deactivated: true, message: `Plan has ${inUse} subscription(s), so it was deactivated and hidden from customers instead of permanently deleted.` });
+    }
+
+    try {
+      await plan.destroy();
+      return res.json({ success: true, message: 'Plan deleted' });
+    } catch (e) {
+      // Referenced by historical records (e.g. price-hike logs) — deactivate.
+      await plan.update({ is_active: false });
+      return res.json({ success: true, deactivated: true, message: 'Plan is referenced by historical records, so it was deactivated and hidden instead of permanently deleted.' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── REWARD/PENALTY ────────────────────────────────────────────────────────────
 exports.createRewardPenalty = async (req, res) => {
   try {

@@ -265,6 +265,7 @@ router.put('/admin/zones/:id', authenticate, authorize('admin'), validate(V.admi
 router.get('/admin/plans', authenticate, authorize('admin'), subscriptionCtrl.getPlans);
 router.post('/admin/plans', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.createPlan);
 router.put('/admin/plans/:id', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.updatePlan);
+router.delete('/admin/plans/:id', authenticate, authorize('admin'), adminCtrl.deletePlan);
 
 router.get('/admin/bookings', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAllBookings);
 router.get('/admin/bookings/:id', authenticate, authorize('admin', 'supervisor'), bookingCtrl.getBookingDetail);
