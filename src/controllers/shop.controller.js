@@ -159,6 +159,8 @@ exports.createOrder = async (req, res) => {
       geofence_id, service_latitude, service_longitude,
       // GST fields
       apply_gst, shipping_state, billing_gstin, billing_business_name,
+      // Discount coupon
+      coupon_code,
       // Book a Mali fields
       book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali,
       service_bookings
@@ -208,6 +210,22 @@ exports.createOrder = async (req, res) => {
     }
     totalAmount = subtotal + gstAmount + serviceTotal;
 
+    // ── Apply discount coupon (against product subtotal) ─────────────────────
+    let discountAmount = 0;
+    let appliedCouponCode = null;
+    if (coupon_code && String(coupon_code).trim()) {
+      const { validateCoupon } = require('../utils/coupon');
+      const result = await validateCoupon(coupon_code, subtotal);
+      if (!result.ok) {
+        throw new Error(result.reason || 'Coupon could not be applied');
+      }
+      discountAmount = result.discount;
+      appliedCouponCode = result.coupon.code;
+      totalAmount = Math.max(0, totalAmount - discountAmount);
+      // Count the redemption (atomic).
+      await result.coupon.increment('usage_count', { by: 1, transaction: t });
+    }
+
     const orderNumber = `GKM-ORD-${Date.now()}`;
     const txnid = `GKM-TXN-${Date.now()}`;
     
@@ -232,6 +250,8 @@ exports.createOrder = async (req, res) => {
       shipping_state: shipping_state || null,
       billing_gstin: billing_gstin || null,
       billing_business_name: billing_business_name || null,
+      coupon_code: appliedCouponCode,
+      discount_amount: discountAmount,
     }, { transaction: t });
 
     // Create Order Items

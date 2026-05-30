@@ -514,8 +514,30 @@ const Order = sequelize.define('Order', {
   gst_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   shipping_state: { type: DataTypes.STRING(100) },
   billing_gstin: { type: DataTypes.STRING(20) },
-  billing_business_name: { type: DataTypes.STRING(200) }
+  billing_business_name: { type: DataTypes.STRING(200) },
+  coupon_code: { type: DataTypes.STRING(40) },
+  discount_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
 }, { tableName: 'orders' });
+
+// ─── COUPON ───────────────────────────────────────────────────────────────────
+const Coupon = sequelize.define('Coupon', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  code: { type: DataTypes.STRING(40), allowNull: false, unique: true },
+  description: { type: DataTypes.STRING(255) },
+  discount_type: { type: DataTypes.ENUM('percentage', 'fixed'), allowNull: false, defaultValue: 'percentage' },
+  discount_value: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  // Minimum cart subtotal required to use the coupon (0 = no minimum).
+  min_order_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  // Cap on the rupee discount for percentage coupons (null = uncapped).
+  max_discount: { type: DataTypes.DECIMAL(10, 2) },
+  // Total number of times the coupon may be redeemed (null = unlimited).
+  usage_limit: { type: DataTypes.INTEGER },
+  usage_count: { type: DataTypes.INTEGER, defaultValue: 0 },
+  valid_from: { type: DataTypes.DATE },
+  valid_to: { type: DataTypes.DATE },
+  is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
+}, { tableName: 'coupons', underscored: true });
 
 // ─── ORDER ITEM ───────────────────────────────────────────────────────────────
 const OrderItem = sequelize.define('OrderItem', {
@@ -822,6 +844,7 @@ module.exports = {
   ContactMessage,
   SystemSetting,
   UserAddress,
-  GardenerDocument
+  GardenerDocument,
+  Coupon
 };
 

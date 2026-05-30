@@ -383,6 +383,73 @@ router.delete('/admin/tags/:id', authenticate, authorize('admin'), async (req, r
   }
 });
 
+// ─── COUPONS ──────────────────────────────────────────────────────────────────
+// Public: customer applies a code at checkout. Returns the rupee discount.
+router.post('/coupons/validate', authenticate, authorize('customer'), validate(V.coupon.validate), async (req, res) => {
+  try {
+    const { validateCoupon } = require('../utils/coupon');
+    const result = await validateCoupon(req.body.code, req.body.subtotal);
+    if (!result.ok) return res.status(200).json({ success: false, message: result.reason });
+    return res.json({
+      success: true,
+      message: 'Coupon applied',
+      data: {
+        code: result.coupon.code,
+        discount_type: result.coupon.discount_type,
+        discount_value: result.coupon.discount_value,
+        discount_amount: result.discount,
+        description: result.coupon.description || null,
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin: manage coupons.
+router.get('/admin/coupons', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Coupon } = require('../models');
+    const coupons = await Coupon.findAll({ order: [['created_at', 'DESC']] });
+    res.json({ success: true, data: coupons });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/admin/coupons', authenticate, authorize('admin'), validate(V.coupon.save), async (req, res) => {
+  try {
+    const { Coupon } = require('../models');
+    const payload = { ...req.body, code: String(req.body.code).trim().toUpperCase(), updated_by: req.user.id };
+    const coupon = await Coupon.create(payload);
+    res.status(201).json({ success: true, data: coupon });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ success: false, message: 'A coupon with this code already exists' });
+    }
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.put('/admin/coupons/:id', authenticate, authorize('admin'), validate(V.coupon.save), async (req, res) => {
+  try {
+    const { Coupon } = require('../models');
+    const payload = { ...req.body, code: String(req.body.code).trim().toUpperCase(), updated_by: req.user.id };
+    await Coupon.update(payload, { where: { id: req.params.id } });
+    const coupon = await Coupon.findByPk(req.params.id);
+    res.json({ success: true, data: coupon });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ success: false, message: 'A coupon with this code already exists' });
+    }
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/admin/coupons/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Coupon } = require('../models');
+    await Coupon.destroy({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Coupon deleted' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ─── ADMIN CONTACTS ───────────────────────────────────────────────────────────
 router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res) => {
   try {
@@ -456,6 +523,8 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE geofences ADD COLUMN surge_multiplier DECIMAL(4, 2) DEFAULT 1.00"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40)"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0"); } catch (e) { }
     // Add columns causing 500 errors on the remote API due to sync failures
     try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }

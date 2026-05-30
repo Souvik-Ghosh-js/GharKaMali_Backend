@@ -174,10 +174,33 @@ const order = {
     gstin('billing_gstin', true),
     text('billing_business_name', { max: 200, optional: true }),
     text('shipping_state', { max: 80, optional: true }),
+    text('coupon_code', { max: 40, optional: true }),
     body('book_mali').optional({ values: 'falsy' }).isBoolean().toBoolean(),
     body('service_bookings').optional({ values: 'falsy' }).isArray({ max: 10 }),
   ],
   updateStatus: [enumIn('status', ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'])],
+};
+
+// COUPONS
+const coupon = {
+  // Public: customer applying a code at checkout.
+  validate: [
+    text('code', { min: 1, max: 40 }),
+    amount('subtotal', { min: 0, max: 10000000 }),
+  ],
+  // Admin: create / update a coupon.
+  save: [
+    text('code', { min: 2, max: 40 }),
+    text('description', { max: 255, optional: true }),
+    enumIn('discount_type', ['percentage', 'fixed']),
+    amount('discount_value', { min: 0, max: 1000000 }),
+    amount('min_order_amount', { min: 0, max: 10000000, optional: true }),
+    amount('max_discount', { min: 0, max: 1000000, optional: true }),
+    intInRange('usage_limit', { min: 1, max: 10000000, optional: true }),
+    isoDate('valid_from', true),
+    isoDate('valid_to', true),
+    body('is_active').optional({ values: 'falsy' }).isBoolean().toBoolean(),
+  ],
 };
 
 // COMPLAINTS
@@ -346,5 +369,5 @@ module.exports = {
   phone, otp, email, name, pincode, gstin, amount, intInRange, text, enumIn,
   lat, lng, isoDate, idParam, url, slug, password,
   // grouped
-  auth, booking, order, complaint, product, payment, subscription, contact, review, address, admin,
+  auth, booking, order, complaint, product, payment, subscription, contact, review, address, admin, coupon,
 };
