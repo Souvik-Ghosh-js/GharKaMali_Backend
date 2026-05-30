@@ -253,6 +253,7 @@ const product = {
   ],
   category: [
     text('name', { min: 2, max: 100 }),
+    text('slug', { max: 100, optional: true }),
     text('description', { max: 500, optional: true }),
   ],
 };
@@ -325,6 +326,7 @@ const admin = {
   ],
   plan: [
     text('name', { min: 2, max: 100 }),
+    text('slug', { max: 120, optional: true }),
     amount('price', { min: 0, max: 1000000 }),
     text('description', { max: 1000, optional: true }),
   ],

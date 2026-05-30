@@ -85,6 +85,7 @@ const GardenerZone = sequelize.define('GardenerZone', {
 const ServicePlan = sequelize.define('ServicePlan', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING(100), allowNull: false },
+  slug: { type: DataTypes.STRING(120), unique: true },
   description: { type: DataTypes.TEXT },
   tagline: { type: DataTypes.STRING(255) },
   plan_type: { type: DataTypes.ENUM('subscription', 'ondemand'), defaultValue: 'subscription' },
@@ -463,6 +464,23 @@ const ProductCategory = sequelize.define('ProductCategory', {
   image_url: { type: DataTypes.STRING(500) },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'product_categories' });
+
+// Auto-generate a URL slug from the name. A slug is only created when one isn't
+// already set, so renaming a plan/category keeps its URL stable. An explicitly
+// provided slug is normalized.
+const { slugify: _slugify, uniqueSlug: _uniqueSlug } = require('../utils/slug');
+function attachSlugHook(model) {
+  model.beforeValidate(async (instance) => {
+    if (instance.slug) {
+      const normalized = _slugify(instance.slug);
+      if (normalized !== instance.slug) instance.slug = normalized;
+    } else if (instance.name) {
+      instance.slug = await _uniqueSlug(model, instance.name, instance.id);
+    }
+  });
+}
+attachSlugHook(ServicePlan);
+attachSlugHook(ProductCategory);
 
 // ─── PRODUCT ──────────────────────────────────────────────────────────────────
 const Product = sequelize.define('Product', {

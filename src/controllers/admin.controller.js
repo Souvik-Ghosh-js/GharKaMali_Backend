@@ -564,6 +564,13 @@ exports.updatePlan = async (req, res) => {
     if (req.body.price && req.body.price !== oldPlan.price) {
       await PriceHikeLog.create({ plan_id: req.params.id, old_price: oldPlan.price, new_price: req.body.price, reason: req.body.price_reason || 'Manual update', applied_by: req.user.id });
     }
+    // Static update() skips the slug hook — normalize / ensure a slug here.
+    if (req.body.slug !== undefined) {
+      const { slugify, uniqueSlug } = require('../utils/slug');
+      req.body.slug = req.body.slug
+        ? slugify(req.body.slug)
+        : await uniqueSlug(ServicePlan, req.body.name || oldPlan.name, oldPlan.id);
+    }
     await ServicePlan.update(req.body, { where: { id: req.params.id } });
     const plan = await ServicePlan.findByPk(req.params.id);
     res.json({ success: true, data: plan });
@@ -942,6 +949,13 @@ exports.updateCategory = async (req, res) => {
     if (req.file) {
       const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
       data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
+    }
+    // Static update() skips the slug hook — normalize / ensure a slug here.
+    if (data.slug !== undefined) {
+      const { slugify, uniqueSlug } = require('../utils/slug');
+      data.slug = data.slug
+        ? slugify(data.slug)
+        : await uniqueSlug(ProductCategory, data.name, req.params.id);
     }
     await ProductCategory.update(data, { where: { id: req.params.id } });
     const category = await ProductCategory.findByPk(req.params.id);

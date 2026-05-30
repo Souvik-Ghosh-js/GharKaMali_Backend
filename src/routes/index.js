@@ -550,6 +550,9 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0"); } catch (e) { }
+    // Stable URL slugs for plans & categories
+    try { await sequelize.query("ALTER TABLE service_plans ADD COLUMN slug VARCHAR(120)"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE product_categories ADD COLUMN slug VARCHAR(100)"); } catch (e) { }
     // Add columns causing 500 errors on the remote API due to sync failures
     try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }
@@ -567,7 +570,23 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE users ADD COLUMN service_zone_id INT"); } catch (e) { }
 
     await sequelize.sync({ alter: true });
-    res.json({ success: true, message: 'Database schema synchronized successfully and legacy dates fixed.' });
+
+    // Backfill slugs for existing plans & categories that don't have one yet.
+    const { ServicePlan, ProductCategory } = require('../models');
+    const { uniqueSlug } = require('../utils/slug');
+    let slugged = 0;
+    for (const M of [ServicePlan, ProductCategory]) {
+      const rows = await M.findAll();
+      for (const r of rows) {
+        if (!r.slug && r.name) {
+          const s = await uniqueSlug(M, r.name, r.id);
+          await M.update({ slug: s }, { where: { id: r.id }, hooks: false });
+          slugged++;
+        }
+      }
+    }
+
+    res.json({ success: true, message: `Database schema synchronized. Backfilled ${slugged} slug(s).` });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
