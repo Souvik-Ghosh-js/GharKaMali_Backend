@@ -557,6 +557,14 @@ const Coupon = sequelize.define('Coupon', {
   updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'coupons', underscored: true });
 
+// ─── VISITOR IP ───────────────────────────────────────────────────────────────
+// One row per unique visitor IP — powers the IP-deduplicated live visitor count
+// in social proof (same IP refreshing is not counted again).
+const VisitorIp = sequelize.define('VisitorIp', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  ip: { type: DataTypes.STRING(45), allowNull: false, unique: true }
+}, { tableName: 'visitor_ips', underscored: true });
+
 // ─── ORDER ITEM ───────────────────────────────────────────────────────────────
 const OrderItem = sequelize.define('OrderItem', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -863,6 +871,7 @@ module.exports = {
   SystemSetting,
   UserAddress,
   GardenerDocument,
-  Coupon
+  Coupon,
+  VisitorIp
 };
 

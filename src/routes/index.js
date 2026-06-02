@@ -1565,18 +1565,16 @@ router.get('/social-proof', async (req, res) => {
     const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '{count} people are viewing this page right now';
     const visitorBase = visitorBaseSetting ? parseInt(visitorBaseSetting.value) || 0 : 1000;
 
-    // Live visitor count = admin-set base + accumulated real visits.
-    // Only fresh-session visits send ?count=1, so reloads don't inflate the number.
-    if (req.query.count === '1') {
-      await db.query(
-        "INSERT INTO system_settings (`key`, value, created_at, updated_at) " +
-        "VALUES ('social_proof_visitor_count', '1', NOW(), NOW()) " +
-        "ON DUPLICATE KEY UPDATE value = CAST(value AS UNSIGNED) + 1, updated_at = NOW()",
-        { type: db.QueryTypes.INSERT }
-      );
+    // Live visitor count = admin-set base + number of UNIQUE visitor IPs.
+    // Each IP is recorded once (INSERT IGNORE), so the same person refreshing
+    // does not inflate the number.
+    const { VisitorIp } = require('../models');
+    const xff = req.headers['x-forwarded-for'];
+    const clientIp = (xff ? String(xff).split(',')[0].trim() : (req.ip || (req.connection && req.connection.remoteAddress))) || null;
+    if (clientIp) {
+      try { await VisitorIp.create({ ip: clientIp }, { ignoreDuplicates: true }); } catch (_) { /* duplicate IP — ignore */ }
     }
-    const visitorCountSetting = await SystemSetting.findOne({ where: { key: 'social_proof_visitor_count' } });
-    const realVisits = visitorCountSetting ? parseInt(visitorCountSetting.value) || 0 : 0;
+    const realVisits = await VisitorIp.count();
     const liveVisitorCount = visitorBase + realVisits;
 
     // Fetch recent bookings
