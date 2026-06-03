@@ -314,6 +314,17 @@ exports.createBooking = async (req, res) => {
       });
     }
 
+    // Wallet payment: ensure sufficient balance BEFORE creating the booking,
+    // so the wallet can't be driven negative.
+    if (payment_method === 'wallet') {
+      const totalCharge = baseAmount + addonTotal;
+      const walletUser = await User.findByPk(req.user.id, { attributes: ['wallet_balance'] });
+      const balance = parseFloat(walletUser?.wallet_balance) || 0;
+      if (balance < totalCharge) {
+        return res.status(400).json({ success: false, message: `Insufficient wallet balance. This booking needs ₹${totalCharge.toFixed(0)} but your wallet has ₹${balance.toFixed(0)}.` });
+      }
+    }
+
     const booking = await Booking.create({
       booking_number: genBookingNumber(),
       customer_id: req.user.id,

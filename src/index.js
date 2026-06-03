@@ -10,6 +10,11 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust the first proxy hop (nginx / load balancer) so req.ip resolves to the
+// real client instead of the proxy. This makes rate-limiting key per-client and
+// prevents a spoofed X-Forwarded-For from inflating the visitor count.
+app.set('trust proxy', 1);
+
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────────
 // Disable CSP for Swagger UI (helmet blocks its inline scripts by default)
 app.use('/api-docs', (req, res, next) => {

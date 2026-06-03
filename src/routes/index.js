@@ -262,9 +262,10 @@ router.get('/admin/zones', authenticate, authorize('admin'), adminCtrl.getZones)
 router.post('/admin/zones', authenticate, authorize('admin'), validate(V.admin.zone), adminCtrl.createZone);
 router.put('/admin/zones/:id', authenticate, authorize('admin'), validate(V.admin.zone), adminCtrl.updateZone);
 
-router.get('/admin/plans', authenticate, authorize('admin'), subscriptionCtrl.getPlans);
+router.get('/admin/plans', authenticate, authorize('admin'), adminCtrl.getAllPlans);
 router.post('/admin/plans', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.createPlan);
 router.put('/admin/plans/:id', authenticate, authorize('admin'), validate(V.admin.plan), adminCtrl.updatePlan);
+router.patch('/admin/plans/:id/active', authenticate, authorize('admin'), adminCtrl.setPlanActive);
 router.delete('/admin/plans/:id', authenticate, authorize('admin'), adminCtrl.deletePlan);
 
 router.get('/admin/bookings', authenticate, authorize('admin', 'supervisor'), adminCtrl.getAllBookings);
@@ -1569,8 +1570,9 @@ router.get('/social-proof', async (req, res) => {
     // Each IP is recorded once (INSERT IGNORE), so the same person refreshing
     // does not inflate the number.
     const { VisitorIp } = require('../models');
-    const xff = req.headers['x-forwarded-for'];
-    const clientIp = (xff ? String(xff).split(',')[0].trim() : (req.ip || (req.connection && req.connection.remoteAddress))) || null;
+    // req.ip is the de-spoofed client IP because `trust proxy` is set in index.js
+    // (a forged X-Forwarded-For can no longer inflate the count).
+    const clientIp = req.ip || (req.connection && req.connection.remoteAddress) || null;
     if (clientIp) {
       try { await VisitorIp.create({ ip: clientIp }, { ignoreDuplicates: true }); } catch (_) { /* duplicate IP — ignore */ }
     }

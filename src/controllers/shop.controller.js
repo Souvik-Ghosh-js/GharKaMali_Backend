@@ -222,8 +222,16 @@ exports.createOrder = async (req, res) => {
       discountAmount = result.discount;
       appliedCouponCode = result.coupon.code;
       totalAmount = Math.max(0, totalAmount - discountAmount);
-      // Count the redemption (atomic).
-      await result.coupon.increment('usage_count', { by: 1, transaction: t });
+      // Atomically claim one redemption inside the transaction. The conditional
+      // WHERE closes the race where two concurrent orders both pass the limit
+      // check — the row lock serializes them and only one can increment.
+      const [updateRes] = await sequelize.query(
+        'UPDATE coupons SET usage_count = usage_count + 1 WHERE id = :id AND (usage_limit IS NULL OR usage_count < usage_limit)',
+        { replacements: { id: result.coupon.id }, transaction: t }
+      );
+      if ((updateRes?.affectedRows ?? 0) === 0) {
+        throw new Error('This coupon has just reached its usage limit. Please remove it and try again.');
+      }
     }
 
     const orderNumber = `GKM-ORD-${Date.now()}`;

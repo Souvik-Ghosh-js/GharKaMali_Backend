@@ -561,7 +561,10 @@ exports.createPlan = async (req, res) => {
 exports.updatePlan = async (req, res) => {
   try {
     const oldPlan = await ServicePlan.findByPk(req.params.id);
-    if (req.body.price && req.body.price !== oldPlan.price) {
+    if (!oldPlan) return res.status(404).json({ success: false, message: 'Plan not found' });
+    // DECIMAL comes back from Sequelize as a string — compare numerically so an
+    // unchanged price doesn't log a spurious price hike on every save.
+    if (req.body.price != null && Number(req.body.price) !== Number(oldPlan.price)) {
       await PriceHikeLog.create({ plan_id: req.params.id, old_price: oldPlan.price, new_price: req.body.price, reason: req.body.price_reason || 'Manual update', applied_by: req.user.id });
     }
     // Static update() skips the slug hook — normalize / ensure a slug here.
@@ -604,6 +607,26 @@ exports.deletePlan = async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+};
+
+// Admin plan list — includes inactive (soft-deleted) plans so they remain
+// visible and can be reactivated. Active ones sort first.
+exports.getAllPlans = async (req, res) => {
+  try {
+    const plans = await ServicePlan.findAll({ order: [['is_active', 'DESC'], ['price', 'ASC']] });
+    res.json({ success: true, data: plans });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// Activate / deactivate a plan (used to restore a soft-deleted plan).
+exports.setPlanActive = async (req, res) => {
+  try {
+    const plan = await ServicePlan.findByPk(req.params.id);
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+    const active = req.body.is_active === true || req.body.is_active === 'true' || req.body.is_active === 1;
+    await plan.update({ is_active: active });
+    res.json({ success: true, data: plan, message: active ? 'Plan reactivated' : 'Plan deactivated' });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
 // ── REWARD/PENALTY ────────────────────────────────────────────────────────────
@@ -656,10 +679,19 @@ exports.getCustomers = async (req, res) => {
     if (city) where.city = city;
     const { count, rows } = await User.findAndCountAll({
       where,
-      attributes: { exclude: ['password', 'otp'] },
+      attributes: {
+        exclude: ['password', 'otp'],
+        // Per-customer booking aggregates so the list shows real numbers
+        // (matches the detail modal). Correlated subqueries on the bookings table.
+        include: [
+          [User.sequelize.literal('(SELECT COUNT(*) FROM bookings WHERE bookings.customer_id = User.id)'), 'total_bookings'],
+          [User.sequelize.literal('(SELECT COALESCE(SUM(total_amount),0) FROM bookings WHERE bookings.customer_id = User.id)'), 'total_spent']
+        ]
+      },
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
-      offset: (page - 1) * limit
+      offset: (page - 1) * limit,
+      subQuery: false
     });
     res.json({ success: true, data: { customers: rows, total: count, page: parseInt(page), pages: Math.ceil(count / limit) } });
   } catch (err) {
