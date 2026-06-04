@@ -93,7 +93,7 @@ exports.getAllPayments = async (req, res) => {
 exports.walletTopup = async (req, res) => {
   try {
     const { amount, geofence_id } = req.body;
-    if (!amount || amount < 100) return res.status(400).json({ success: false, message: 'Minimum topup is ₹100' });
+    if (!amount || amount < 1) return res.status(400).json({ success: false, message: 'Minimum topup is ₹1' });
     req.body.type = 'wallet_topup';
     req.body.amount = amount;
     req.body.geofence_id = geofence_id;

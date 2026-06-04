@@ -260,7 +260,7 @@ const product = {
 
 // PAYMENTS
 const payment = {
-  walletTopup: [amount('amount', { min: 10, max: 100000 })],
+  walletTopup: [amount('amount', { min: 1, max: 100000 })],
   razorpayOrder: [
     enumIn('type', ['booking', 'subscription', 'order', 'wallet_topup'], { optional: true }),
     body('fulfill').optional({ values: 'falsy' }).isArray({ max: 50 }),
