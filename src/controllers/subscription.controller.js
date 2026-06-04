@@ -24,8 +24,11 @@ exports.subscribe = async (req, res) => {
       plan_id, zone_id, geofence_id: geofence_id_body, 
       service_address, service_latitude, service_longitude, 
       flat_no, building, area, landmark, city, state, pincode,
-      plant_count, preferred_gardener_id, auto_renew, payment_id 
+      plant_count, preferred_gardener_id, auto_renew, payment_id, payment_method
     } = req.body;
+    // Online (Razorpay) subscriptions start as 'pending' and are activated by
+    // the payment verification/webhook. Other paths activate immediately.
+    const pendingPayment = payment_method === 'razorpay';
 
     // Auto-save address to user profile
     const addressCtrl = require('./address.controller');
@@ -48,7 +51,7 @@ exports.subscribe = async (req, res) => {
       zone_id: activeZoneId,
       geofence_id: activeZoneId,
       preferred_gardener_id,
-      status: 'active',
+      status: pendingPayment ? 'pending' : 'active',
       start_date: startDate,
       end_date: endDate,
       auto_renew: auto_renew !== false,
@@ -65,28 +68,27 @@ exports.subscribe = async (req, res) => {
     // Auto-scheduling removed - user will select dates manually via selectDates API
 
     const customer = await User.findByPk(req.user.id);
-    await sendWhatsApp(customer.phone, templates.subscriptionRenewed(customer.name, plan.name, endDate));
 
-    // ── NOTIFY ─────────────────────────────────────────────────────────────
-    const notificationService = require('../services/notification.service');
-    
-    // Notify User
-    await notificationService.notifyUser(req.user.id, {
-      title: '🎉 Subscription Activated',
-      body: `Your ${plan.name} subscription is now active until ${endDate}.`,
-      type: 'success',
-      data: { subscription_id: subscription.id }
-    });
+    // Only announce activation once payment isn't pending — otherwise the
+    // payment verification/webhook will activate and the client can notify.
+    if (!pendingPayment) {
+      await sendWhatsApp(customer.phone, templates.subscriptionRenewed(customer.name, plan.name, endDate));
+      const notificationService = require('../services/notification.service');
+      await notificationService.notifyUser(req.user.id, {
+        title: '🎉 Subscription Activated',
+        body: `Your ${plan.name} subscription is now active until ${endDate}.`,
+        type: 'success',
+        data: { subscription_id: subscription.id }
+      });
+      await notificationService.notifyAdmins({
+        title: '💎 New Subscription',
+        body: `${customer.name} subscribed to ${plan.name}.`,
+        type: 'success',
+        data: { subscription_id: subscription.id }
+      });
+    }
 
-    // Notify Admin
-    await notificationService.notifyAdmins({
-      title: '💎 New Subscription',
-      body: `${customer.name} subscribed to ${plan.name}.`,
-      type: 'success',
-      data: { subscription_id: subscription.id }
-    });
-
-    res.status(201).json({ success: true, message: 'Subscription activated', data: subscription });
+    res.status(201).json({ success: true, message: pendingPayment ? 'Subscription created — complete payment to activate' : 'Subscription activated', data: subscription });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

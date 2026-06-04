@@ -555,6 +555,10 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     // Stable URL slugs for plans & categories
     try { await sequelize.query("ALTER TABLE service_plans ADD COLUMN slug VARCHAR(120)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE product_categories ADD COLUMN slug VARCHAR(100)"); } catch (e) { }
+    // Allow 'order' payment type (Razorpay shop-order payments)
+    try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL"); } catch (e) { }
+    // Allow 'pending' subscription status (online subscriptions awaiting payment)
+    try { await sequelize.query("ALTER TABLE subscriptions MODIFY COLUMN status ENUM('pending','active','paused','cancelled','expired') DEFAULT 'active'"); } catch (e) { }
     // Add columns causing 500 errors on the remote API due to sync failures
     try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }
@@ -601,9 +605,10 @@ module.exports = router;
 
 // ── PAYMENTS (PayU) ───────────────────────────────────────────────────────────
 const paymentCtrl = require('../controllers/payment.controller');
-router.post('/payments/initiate', authenticate, validate(V.payment.initiate), paymentCtrl.initiatePayment);
-router.post('/payments/success', paymentCtrl.paymentSuccess);       // PayU callback (signed, do not validate)
-router.post('/payments/failure', paymentCtrl.paymentFailure);       // PayU callback (signed, do not validate)
+// ── Razorpay ──
+router.post('/payments/razorpay/order', authenticate, validate(V.payment.razorpayOrder), paymentCtrl.createRazorpayOrder);
+router.post('/payments/razorpay/verify', authenticate, validate(V.payment.razorpayVerify), paymentCtrl.verifyRazorpayPayment);
+router.post('/payments/razorpay/webhook', paymentCtrl.razorpayWebhook);  // Razorpay server-to-server (signature-verified, no auth)
 router.get('/payments/status/:txnid', authenticate, paymentCtrl.checkPaymentStatus);
 router.get('/payments/my', authenticate, paymentCtrl.getMyPayments);
 router.post('/payments/wallet-topup', authenticate, validate(V.payment.walletTopup), paymentCtrl.walletTopup);

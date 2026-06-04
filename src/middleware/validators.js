@@ -260,13 +260,21 @@ const product = {
 
 // PAYMENTS
 const payment = {
-  initiate: [
-    amount('amount', { min: 1, max: 1000000 }),
+  walletTopup: [amount('amount', { min: 10, max: 100000 })],
+  razorpayOrder: [
+    enumIn('type', ['booking', 'subscription', 'order', 'wallet_topup'], { optional: true }),
+    body('fulfill').optional({ values: 'falsy' }).isArray({ max: 50 }),
+    amount('amount', { min: 1, max: 1000000, optional: true }),
     intInRange('booking_id', { min: 1, optional: true }),
     intInRange('subscription_id', { min: 1, optional: true }),
-    enumIn('payment_for', ['booking', 'subscription', 'wallet_topup', 'order', 'tip'], { optional: true }),
+    intInRange('order_id', { min: 1, optional: true }),
+    intInRange('geofence_id', { min: 1, optional: true }),
   ],
-  walletTopup: [amount('amount', { min: 10, max: 100000 })],
+  razorpayVerify: [
+    text('razorpay_order_id', { min: 4, max: 100 }),
+    text('razorpay_payment_id', { min: 4, max: 100 }),
+    text('razorpay_signature', { min: 8, max: 256 }),
+  ],
 };
 
 // SUBSCRIPTIONS

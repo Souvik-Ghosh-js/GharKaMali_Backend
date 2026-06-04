@@ -161,10 +161,15 @@ exports.createOrder = async (req, res) => {
       apply_gst, shipping_state, billing_gstin, billing_business_name,
       // Discount coupon
       coupon_code,
+      // Payment
+      payment_method,
       // Book a Mali fields
       book_mali, service_address_for_mali, scheduled_date_for_mali, zone_id_for_mali,
       service_bookings
     } = req.body;
+    // Online (Razorpay) orders are created pending and marked paid by the
+    // payment verification/webhook. Other methods keep the existing behaviour.
+    const onlinePayment = payment_method === 'razorpay';
     
     if ((!items || !items.length) && (!service_bookings || !service_bookings.length)) {
       return res.status(400).json({ success: false, message: 'Cart is empty' });
@@ -250,9 +255,9 @@ exports.createOrder = async (req, res) => {
       service_latitude: service_latitude || null,
       service_longitude: service_longitude || null,
       notes,
-      status: 'processing',
-      payment_status: 'paid',
-      payment_id: txnid,
+      status: onlinePayment ? 'pending' : 'processing',
+      payment_status: onlinePayment ? 'pending' : 'paid',
+      payment_id: onlinePayment ? null : txnid,
       apply_gst: !!apply_gst,
       gst_amount: gstAmount,
       shipping_state: shipping_state || null,
@@ -268,19 +273,22 @@ exports.createOrder = async (req, res) => {
       { transaction: t }
     );
 
-    // Create a payment audit record
-    try {
-      const { Payment } = require('../models');
-      await Payment.create({
-        txnid,
-        user_id: req.user.id,
-        amount: totalAmount,
-        type: 'order',
-        status: 'success',
-        product_info: `Order-${order.order_number}`,
-        gateway_response: { order_id: order.id, mock: true }
-      });
-    } catch (_) { /* Non-critical, ignore */ }
+    // Create a paid audit record only for non-online orders. Online (Razorpay)
+    // orders get their Payment row from the Razorpay order/verify flow instead.
+    if (!onlinePayment) {
+      try {
+        const { Payment } = require('../models');
+        await Payment.create({
+          transaction_id: txnid,
+          user_id: req.user.id,
+          amount: totalAmount,
+          type: 'order',
+          status: 'success',
+          payment_for: `Order-${order.order_number}`,
+          gateway_response: { order_id: order.id, mock: true }
+        });
+      } catch (_) { /* Non-critical, ignore */ }
+    }
 
     // ── Book a Mali if requested ─────────────────────────────────────────────
     let maliBookingResults = [];

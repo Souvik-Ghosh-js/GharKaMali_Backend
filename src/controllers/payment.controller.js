@@ -1,126 +1,5 @@
 const { User, Booking, Payment, Subscription, ServicePlan, Order } = require('../models');
-const { PAYU_KEY, PAYU_SALT, PAYU_URL, BASE_URL } = process.env;
 const crypto = require('crypto');
-
-// Initiate payment — returns form data to post to PayU
-exports.initiatePayment = async (req, res) => {
-  try {
-    const { type, booking_id, subscription_id, amount, geofence_id } = req.body;
-    const user = await User.findByPk(req.user.id);
-
-    const txnid = `GKM${Date.now()}${Math.floor(Math.random() * 1000)}`;
-    let productinfo = 'GardeningService';
-    let paymentAmount = amount;
-
-    if (type === 'booking' && booking_id) {
-      const booking = await Booking.findByPk(booking_id);
-      paymentAmount = booking ? (booking.total_amount || amount) : amount;
-      productinfo = booking ? `Booking-${booking.booking_number || booking.id}` : `Booking-${booking_id}`;
-    } else if (type === 'subscription' && subscription_id) {
-      const sub = await Subscription.findByPk(subscription_id, {
-        include: [{ model: ServicePlan, as: 'plan' }]
-      });
-      paymentAmount = sub ? (sub.plan?.price || sub.amount_paid || amount) : amount;
-      productinfo = sub ? `Subscription-${sub.id}` : `Subscription-${subscription_id}`;
-    } else if (type === 'order' && req.body.order_id) {
-      const order = await Order.findByPk(req.body.order_id);
-      paymentAmount = order ? (order.total_amount || amount) : amount;
-      productinfo = order ? `Order-${order.order_number || order.id}` : `Order-${req.body.order_id}`;
-    }
-
-    // Create pending payment record
-    const payment = await Payment.create({
-      user_id: req.user.id,
-      booking_id: booking_id || null,
-      subscription_id: subscription_id || null,
-      geofence_id: geofence_id || req.body.geofence_id || null,
-      amount: paymentAmount,
-      type,
-      status: 'pending',
-      transaction_id: txnid,
-      payment_method: 'payu'
-    });
-
-    const params = {
-      key: PAYU_KEY,
-      txnid,
-      amount: parseFloat(paymentAmount).toFixed(2),
-      productinfo,
-      firstname: user.name,
-      email: user.email || `${user.phone}@gharkamali.com`,
-      phone: user.phone,
-      surl: `${BASE_URL}/api/payments/callback`,
-      furl: `${BASE_URL}/api/payments/callback`,
-      hash: ''
-    };
-
-    // Generate Hash: sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
-    const hashString = `${params.key}|${params.txnid}|${params.amount}|${params.productinfo}|${params.firstname}|${params.email}|||||||||||${PAYU_SALT}`;
-    params.hash = crypto.createHash('sha512').update(hashString).digest('hex');
-
-    res.json({
-      success: true,
-      data: {
-        payu_url: PAYU_URL,
-        params
-      }
-    });
-
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-// PayU Callback
-exports.paymentCallback = async (req, res) => {
-  const { txnid, status, hash, amount } = req.body;
-
-  try {
-    const payment = await Payment.findOne({ where: { transaction_id: txnid } });
-    if (!payment) return res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=failed&reason=payment_not_found`);
-
-    // Verify hash
-    const hashString = `${PAYU_SALT}|${status}|||||||||||${req.body.email}|${req.body.firstname}|${req.body.productinfo}|${req.body.amount}|${txnid}|${PAYU_KEY}`;
-    const expectedHash = crypto.createHash('sha512').update(hashString).digest('hex');
-
-    if (status === 'success') {
-      await payment.update({ status: 'paid', metadata: JSON.stringify(req.body) });
-
-      // If it's a wallet topup
-      if (payment.type === 'wallet_topup') {
-        const user = await User.findByPk(payment.user_id);
-        await user.update({ wallet_balance: Number(user.wallet_balance || 0) + Number(payment.amount) });
-      }
-
-      // If it's a booking
-      if (payment.booking_id) {
-        await Booking.update({ payment_status: 'paid' }, { where: { id: payment.booking_id } });
-      }
-
-      // If it's a subscription
-      if (payment.subscription_id) {
-        await Subscription.update({ status: 'active', payment_status: 'paid' }, { where: { id: payment.subscription_id } });
-      }
-
-      res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=success&txnid=${txnid}`);
-    } else {
-      await payment.update({ status: 'failed', metadata: JSON.stringify(req.body) });
-      res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=failed&txnid=${txnid}`);
-    }
-  } catch (err) {
-    console.error('Payment Callback Error:', err);
-    res.redirect(`${process.env.FRONTEND_URL}/payment/status?status=error&message=${err.message}`);
-  }
-};
-
-// PayU success/failure aliases or separate handlers
-exports.paymentSuccess = async (req, res) => {
-  return exports.paymentCallback(req, res);
-};
-
-exports.paymentFailure = async (req, res) => {
-  return exports.paymentCallback(req, res);
-};
 
 // Get my payments
 exports.getMyPayments = async (req, res) => {
@@ -218,8 +97,180 @@ exports.walletTopup = async (req, res) => {
     req.body.type = 'wallet_topup';
     req.body.amount = amount;
     req.body.geofence_id = geofence_id;
-    return exports.initiatePayment(req, res);
+    return exports.createRazorpayOrder(req, res);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+};
+
+// ─── RAZORPAY ─────────────────────────────────────────────────────────────────
+
+function getRazorpay() {
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+    throw new Error('Razorpay is not configured (set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET).');
+  }
+  const Razorpay = require('razorpay');
+  return new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+}
+
+// Authoritative amount for an entity (so the client can't tamper with totals).
+async function entityAmount(type, id) {
+  if (type === 'booking') { const b = await Booking.findByPk(id); return b ? parseFloat(b.total_amount) || 0 : 0; }
+  if (type === 'subscription') {
+    const s = await Subscription.findByPk(id, { include: [{ model: ServicePlan, as: 'plan' }] });
+    return s ? parseFloat(s.amount_paid || (s.plan && s.plan.price)) || 0 : 0;
+  }
+  if (type === 'order') { const o = await Order.findByPk(id); return o ? parseFloat(o.total_amount) || 0 : 0; }
+  return 0;
+}
+
+// Mark a single entity paid/active.
+async function fulfillEntity(type, id) {
+  if (type === 'booking') await Booking.update({ payment_status: 'paid' }, { where: { id } });
+  else if (type === 'subscription') await Subscription.update({ status: 'active' }, { where: { id } });
+  else if (type === 'order') await Order.update({ payment_status: 'paid', status: 'processing' }, { where: { id } });
+}
+
+// Mark a pending payment paid and fulfill everything it covers. A combined-cart
+// payment stores a JSON {fulfill:[{type,id},…]} list in `notes`. Idempotent —
+// safe to call from both the verify endpoint and the webhook.
+async function fulfillPayment(payment, gatewayResponse) {
+  if (payment.status === 'success') return; // already fulfilled
+  await payment.update({
+    status: 'success',
+    txn_id: gatewayResponse?.razorpay_payment_id || payment.txn_id,
+    gateway_response: gatewayResponse || null
+  });
+
+  if (payment.type === 'wallet_topup') {
+    const user = await User.findByPk(payment.user_id);
+    if (user) await user.update({ wallet_balance: Number(user.wallet_balance || 0) + Number(payment.amount) });
+    return;
+  }
+
+  // Combined cart: fulfill the whole list.
+  let fulfillList = null;
+  try { const p = payment.notes && JSON.parse(payment.notes); if (p && Array.isArray(p.fulfill)) fulfillList = p.fulfill; } catch (_) { /* not JSON */ }
+  if (fulfillList) {
+    for (const e of fulfillList) { if (e && e.type && e.id) await fulfillEntity(e.type, e.id); }
+    return;
+  }
+
+  // Single-entity payment.
+  if (payment.booking_id) await fulfillEntity('booking', payment.booking_id);
+  if (payment.subscription_id) await fulfillEntity('subscription', payment.subscription_id);
+  if (payment.type === 'order' && payment.notes && String(payment.notes).startsWith('order:')) {
+    const oid = parseInt(String(payment.notes).split(':')[1]);
+    if (oid) await fulfillEntity('order', oid);
+  }
+}
+
+// 1) Create a Razorpay order; returns the data the client needs to open checkout.
+// Accepts either a single entity (type + booking_id/subscription_id/order_id)
+// or a combined `fulfill` list (whole cart) — amounts are always summed
+// server-side so the total can't be tampered with.
+exports.createRazorpayOrder = async (req, res) => {
+  try {
+    const { type, booking_id, subscription_id, order_id, geofence_id, fulfill } = req.body;
+    let amount = 0;
+    let productinfo = 'GharKaMali';
+    let notes = null;
+    const combined = Array.isArray(fulfill) && fulfill.length > 0;
+
+    if (combined) {
+      // Combined cart — sum the authoritative amount of every entity.
+      for (const e of fulfill) {
+        if (e && e.type && e.id) amount += await entityAmount(e.type, e.id);
+      }
+      productinfo = `Cart (${fulfill.length} item${fulfill.length > 1 ? 's' : ''})`;
+      notes = JSON.stringify({ fulfill });
+    } else if (type === 'booking' && booking_id) {
+      amount = await entityAmount('booking', booking_id); productinfo = `Booking ${booking_id}`;
+    } else if (type === 'subscription' && subscription_id) {
+      amount = await entityAmount('subscription', subscription_id); productinfo = `Subscription ${subscription_id}`;
+    } else if (type === 'order' && order_id) {
+      amount = await entityAmount('order', order_id); productinfo = `Order ${order_id}`; notes = `order:${order_id}`;
+    } else {
+      amount = parseFloat(req.body.amount) || 0; // wallet_topup
+    }
+    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Invalid payment amount' });
+
+    const user = await User.findByPk(req.user.id);
+    const instance = getRazorpay();
+    const rzpOrder = await instance.orders.create({
+      amount: Math.round(amount * 100), // paise
+      currency: 'INR',
+      receipt: `GKM-${Date.now()}`,
+      notes: { user_id: String(req.user.id), type: combined ? 'cart' : (type || 'order') }
+    });
+
+    await Payment.create({
+      user_id: req.user.id,
+      booking_id: (!combined && booking_id) || null,
+      subscription_id: (!combined && subscription_id) || null,
+      geofence_id: geofence_id || null,
+      amount,
+      type: combined ? 'order' : (type || 'order'),
+      status: 'pending',
+      payment_method: 'razorpay',
+      transaction_id: rzpOrder.id, // Razorpay order id — our lookup key on verify/webhook
+      payment_for: productinfo,
+      notes
+    });
+
+    res.json({
+      success: true,
+      data: {
+        key_id: process.env.RAZORPAY_KEY_ID,
+        order_id: rzpOrder.id,
+        amount: rzpOrder.amount,
+        currency: rzpOrder.currency,
+        name: 'GharKaMali',
+        description: productinfo,
+        prefill: { name: user?.name || '', email: user?.email || '', contact: user?.phone || '' }
+      }
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// 2) Verify the signature returned by Razorpay Checkout, then fulfill.
+exports.verifyRazorpayPayment = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, message: 'Missing payment verification fields' });
+    }
+    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    if (expected !== razorpay_signature) {
+      return res.status(400).json({ success: false, message: 'Payment signature verification failed' });
+    }
+    const payment = await Payment.findOne({ where: { transaction_id: razorpay_order_id } });
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment record not found' });
+    if (payment.user_id !== req.user.id) return res.status(403).json({ success: false, message: 'This payment does not belong to you' });
+
+    await fulfillPayment(payment, { razorpay_order_id, razorpay_payment_id, razorpay_signature });
+    res.json({ success: true, message: 'Payment verified', data: { payment_id: razorpay_payment_id, type: payment.type } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// 3) Webhook — Razorpay's authoritative server-to-server confirmation (reliable
+// even if the user closes the tab). Signature-verified against the raw body.
+exports.razorpayWebhook = async (req, res) => {
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) return res.status(500).json({ success: false, message: 'Webhook secret not configured' });
+    const signature = req.headers['x-razorpay-signature'];
+    const raw = req.rawBody || Buffer.from(JSON.stringify(req.body));
+    const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+    if (expected !== signature) return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
+
+    const event = req.body.event;
+    const entity = req.body.payload && req.body.payload.payment && req.body.payload.payment.entity;
+    if ((event === 'payment.captured' || event === 'order.paid') && entity && entity.order_id) {
+      const payment = await Payment.findOne({ where: { transaction_id: entity.order_id } });
+      if (payment) await fulfillPayment(payment, { razorpay_order_id: entity.order_id, razorpay_payment_id: entity.id, source: 'webhook' });
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };

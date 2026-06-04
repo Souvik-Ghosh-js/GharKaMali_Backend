@@ -2,8 +2,8 @@
   "openapi": "3.0.0",
   "info": {
     "title": "GharKaMali API",
-    "version": "2.1.0",
-    "description": "Complete gardening platform API \u2014 Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` \u2192 `POST /auth/verify-otp` \u2192 use returned `token` as `Bearer <token>`",
+    "version": "2.2.0",
+    "description": "Complete gardening platform API — Customer, Gardener, Supervisor & Admin panels.\n\n**Static OTP for development:** `123456` (set `USE_STATIC_OTP=true` in .env)\n\n**Admin seed credentials:** Phone `9999999999` / Password `Admin@123`\n\n**Auth flow:** `POST /auth/send-otp` → `POST /auth/verify-otp` → use returned `token` as `Bearer <token>`",
     "x-frontend-notes": {
       "missing_backend_endpoints": [
         "GET /admin/blogs - does not exist; FE should use GET /blogs instead",
@@ -273,11 +273,11 @@
     },
     {
       "name": "Gardener",
-      "description": "Gardener app \u2014 jobs, location, profile, earnings"
+      "description": "Gardener app — jobs, location, profile, earnings"
     },
     {
       "name": "Bookings",
-      "description": "Customer booking management \u2014 create, track, rate"
+      "description": "Customer booking management — create, track, rate"
     },
     {
       "name": "Subscriptions",
@@ -293,7 +293,7 @@
     },
     {
       "name": "Payments",
-      "description": "PayU payment gateway & wallet"
+      "description": "Razorpay payment gateway & wallet"
     },
     {
       "name": "Plantopedia",
@@ -321,11 +321,19 @@
     },
     {
       "name": "Admin",
-      "description": "Admin panel \u2014 all management & analytics"
+      "description": "Admin panel — all management & analytics"
     },
     {
       "name": "SLA",
       "description": "SLA configuration & breach monitoring"
+    },
+    {
+      "name": "Coupons",
+      "description": "Discount coupons (customer + admin)"
+    },
+    {
+      "name": "Shop",
+      "description": "Shop products & orders"
     }
   ],
   "paths": {
@@ -373,7 +381,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Verify OTP \u2192 login or auto-register customer",
+        "summary": "Verify OTP → login or auto-register customer",
         "description": "Verifies OTP. Creates a new customer account if phone doesn't exist. Returns JWT token.",
         "requestBody": {
           "required": true,
@@ -930,7 +938,7 @@
         },
         "responses": {
           "200": {
-            "description": "Visit started, status \u2192 in_progress, WhatsApp sent to customer"
+            "description": "Visit started, status → in_progress, WhatsApp sent to customer"
           },
           "400": {
             "description": "Invalid OTP"
@@ -947,7 +955,7 @@
           "Gardener"
         ],
         "summary": "Update booking status + upload work proof (Gardener)",
-        "description": "Gardener updates status through: en_route \u2192 arrived \u2192 in_progress (via OTP) \u2192 completed/failed. Work images uploaded on completion.",
+        "description": "Gardener updates status through: en_route → arrived → in_progress (via OTP) → completed/failed. Work images uploaded on completion.",
         "security": [
           {
             "bearerAuth": []
@@ -1387,6 +1395,13 @@
                   },
                   "payment_id": {
                     "type": "string"
+                  },
+                  "payment_method": {
+                    "type": "string",
+                    "enum": [
+                      "razorpay"
+                    ],
+                    "description": "razorpay → subscription created pending, activated on payment"
                   }
                 }
               }
@@ -1570,84 +1585,6 @@
         }
       }
     },
-    "/payments/initiate": {
-      "post": {
-        "tags": [
-          "Payments"
-        ],
-        "summary": "Initiate PayU payment",
-        "description": "Returns PayU parameters. Client should POST these to PayU payment URL.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "required": [
-                  "type"
-                ],
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "booking",
-                      "subscription",
-                      "wallet_topup"
-                    ]
-                  },
-                  "booking_id": {
-                    "type": "integer"
-                  },
-                  "subscription_id": {
-                    "type": "integer"
-                  },
-                  "amount": {
-                    "type": "number",
-                    "description": "Required for wallet_topup"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "payment_id + payu_url + params to POST to PayU"
-          }
-        }
-      }
-    },
-    "/payments/success": {
-      "post": {
-        "tags": [
-          "Payments"
-        ],
-        "summary": "PayU success callback (called by PayU gateway)",
-        "description": "PayU posts here on successful payment. Verifies hash, updates booking/subscription status.",
-        "responses": {
-          "302": {
-            "description": "Redirect to frontend success page"
-          }
-        }
-      }
-    },
-    "/payments/failure": {
-      "post": {
-        "tags": [
-          "Payments"
-        ],
-        "summary": "PayU failure callback (called by PayU gateway)",
-        "responses": {
-          "302": {
-            "description": "Redirect to frontend failure page"
-          }
-        }
-      }
-    },
     "/payments/status/{txnid}": {
       "get": {
         "tags": [
@@ -1715,7 +1652,7 @@
         "tags": [
           "Payments"
         ],
-        "summary": "Initiate wallet top-up (minimum \u20b9100)",
+        "summary": "Initiate wallet top-up (minimum ₹100)",
         "security": [
           {
             "bearerAuth": []
@@ -1742,10 +1679,10 @@
         },
         "responses": {
           "200": {
-            "description": "PayU params for wallet top-up"
+            "description": "Razorpay order data (key_id, order_id, amount, currency, prefill)"
           },
           "400": {
-            "description": "Minimum top-up is \u20b9100"
+            "description": "Minimum top-up is ₹100"
           }
         }
       }
@@ -2239,8 +2176,8 @@
         "tags": [
           "Complaints"
         ],
-        "summary": "Update complaint \u2014 assign, escalate, or resolve (Admin/Supervisor)",
-        "description": "On resolve: customer notified via WhatsApp, auto penalty applied to gardener (\u20b950).",
+        "summary": "Update complaint — assign, escalate, or resolve (Admin/Supervisor)",
+        "description": "On resolve: customer notified via WhatsApp, auto penalty applied to gardener (₹50).",
         "security": [
           {
             "bearerAuth": []
@@ -3567,7 +3504,7 @@
         "tags": [
           "Admin"
         ],
-        "summary": "List all PayU transactions",
+        "summary": "List all payment transactions",
         "security": [
           {
             "bearerAuth": []
@@ -4076,7 +4013,7 @@
                   },
                   "icon": {
                     "type": "string",
-                    "example": "\ud83c\udf31"
+                    "example": "🌱"
                   },
                   "category": {
                     "type": "string",
@@ -4604,6 +4541,555 @@
         "responses": {
           "200": {
             "description": "Scheduled hikes with is_applied status"
+          }
+        }
+      }
+    },
+    "/payments/razorpay/order": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Create a Razorpay order (single entity or combined cart)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "booking",
+                      "subscription",
+                      "order",
+                      "wallet_topup"
+                    ],
+                    "description": "Single-entity payment type"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "Required only for wallet_topup; ignored otherwise (server derives it)"
+                  },
+                  "booking_id": {
+                    "type": "integer"
+                  },
+                  "subscription_id": {
+                    "type": "integer"
+                  },
+                  "order_id": {
+                    "type": "integer"
+                  },
+                  "geofence_id": {
+                    "type": "integer"
+                  },
+                  "fulfill": {
+                    "type": "array",
+                    "description": "Combined cart — pay for several entities in one transaction",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "order",
+                            "booking",
+                            "subscription"
+                          ]
+                        },
+                        "id": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "key_id, order_id, amount, currency, name, description, prefill"
+          },
+          "400": {
+            "description": "Invalid payment amount"
+          }
+        }
+      }
+    },
+    "/payments/razorpay/verify": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Verify a Razorpay payment signature and fulfill",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "razorpay_order_id",
+                  "razorpay_payment_id",
+                  "razorpay_signature"
+                ],
+                "properties": {
+                  "razorpay_order_id": {
+                    "type": "string"
+                  },
+                  "razorpay_payment_id": {
+                    "type": "string"
+                  },
+                  "razorpay_signature": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment verified & fulfilled"
+          },
+          "400": {
+            "description": "Signature verification failed"
+          },
+          "403": {
+            "description": "Payment does not belong to the user"
+          },
+          "404": {
+            "description": "Payment record not found"
+          }
+        }
+      }
+    },
+    "/payments/razorpay/webhook": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Razorpay webhook (server-to-server, X-Razorpay-Signature verified, no auth)",
+        "requestBody": {
+          "description": "Razorpay event payload",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledged"
+          },
+          "400": {
+            "description": "Invalid webhook signature"
+          }
+        }
+      }
+    },
+    "/coupons/validate": {
+      "post": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "Validate a coupon against the cart subtotal",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "code",
+                  "subtotal"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "FLAT50"
+                  },
+                  "subtotal": {
+                    "type": "number",
+                    "example": 598
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{ success, message, data: { code, discount_type, discount_value, discount_amount, description } } — success:false when invalid"
+          }
+        }
+      }
+    },
+    "/coupons": {
+      "get": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "List coupons the customer can currently apply",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of available coupons"
+          }
+        }
+      }
+    },
+    "/admin/coupons": {
+      "get": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "List all coupons (admin)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All coupons"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "Create a coupon (admin)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "code",
+                  "discount_type",
+                  "discount_value"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "WELCOME10"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "discount_type": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed"
+                    ]
+                  },
+                  "discount_value": {
+                    "type": "number",
+                    "example": 10
+                  },
+                  "min_order_amount": {
+                    "type": "number"
+                  },
+                  "max_discount": {
+                    "type": "number"
+                  },
+                  "usage_limit": {
+                    "type": "integer"
+                  },
+                  "valid_from": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "valid_to": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Coupon created"
+          },
+          "409": {
+            "description": "Code already exists"
+          }
+        }
+      }
+    },
+    "/admin/coupons/{id}": {
+      "put": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "Update a coupon (admin)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "WELCOME10"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "discount_type": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "fixed"
+                    ]
+                  },
+                  "discount_value": {
+                    "type": "number",
+                    "example": 10
+                  },
+                  "min_order_amount": {
+                    "type": "number"
+                  },
+                  "max_discount": {
+                    "type": "number"
+                  },
+                  "usage_limit": {
+                    "type": "integer"
+                  },
+                  "valid_from": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "valid_to": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Code already exists"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "Delete a coupon (admin)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/shop/orders": {
+      "post": {
+        "tags": [
+          "Shop"
+        ],
+        "summary": "Place a shop order (with payment_method:razorpay it is created pending until paid)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "product_id": {
+                          "type": "integer"
+                        },
+                        "quantity": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  },
+                  "shipping_address": {
+                    "type": "string"
+                  },
+                  "shipping_city": {
+                    "type": "string"
+                  },
+                  "shipping_pincode": {
+                    "type": "string"
+                  },
+                  "geofence_id": {
+                    "type": "integer"
+                  },
+                  "apply_gst": {
+                    "type": "boolean"
+                  },
+                  "shipping_state": {
+                    "type": "string"
+                  },
+                  "billing_gstin": {
+                    "type": "string"
+                  },
+                  "billing_business_name": {
+                    "type": "string"
+                  },
+                  "coupon_code": {
+                    "type": "string",
+                    "description": "Discount coupon applied to product subtotal"
+                  },
+                  "payment_method": {
+                    "type": "string",
+                    "enum": [
+                      "razorpay",
+                      "wallet"
+                    ],
+                    "description": "razorpay → order created pending, paid via /payments/razorpay/*"
+                  },
+                  "service_bookings": {
+                    "type": "array",
+                    "description": "On-demand gardener visits to create alongside the order"
+                  },
+                  "book_mali": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "order_id, order_number, total_amount, payment_status"
+          },
+          "400": {
+            "description": "Cart is empty / coupon error"
+          }
+        }
+      }
+    },
+    "/admin/plans/{id}/active": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Activate / deactivate (restore) a plan",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "is_active"
+                ],
+                "properties": {
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan activation toggled"
+          },
+          "404": {
+            "description": "Plan not found"
           }
         }
       }
