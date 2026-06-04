@@ -559,6 +559,15 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL"); } catch (e) { }
     // Allow 'pending' subscription status (online subscriptions awaiting payment)
     try { await sequelize.query("ALTER TABLE subscriptions MODIFY COLUMN status ENUM('pending','active','paused','cancelled','expired') DEFAULT 'active'"); } catch (e) { }
+    // Daily visitor counter: rebuild visitor_ips with per-(day,ip) uniqueness
+    // (only when it's still on the old all-time schema, so re-running is safe).
+    try {
+      const vc = await sequelize.query("SHOW COLUMNS FROM visitor_ips LIKE 'visit_date'", { type: sequelize.QueryTypes.SELECT });
+      if (!vc || vc.length === 0) {
+        await sequelize.query("DROP TABLE IF EXISTS visitor_ips");
+        await sequelize.query("CREATE TABLE visitor_ips (id INT AUTO_INCREMENT PRIMARY KEY, ip VARCHAR(45) NOT NULL, visit_date DATE NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_visit_date_ip (visit_date, ip))");
+      }
+    } catch (e) { /* table absent — sync() will create it from the model */ }
     // Add columns causing 500 errors on the remote API due to sync failures
     try { await sequelize.query("ALTER TABLE notifications ADD COLUMN target_role ENUM('admin', 'customer', 'gardener', 'all', 'user') DEFAULT 'user'"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE gardener_zones ADD COLUMN geofence_id INT"); } catch (e) { }
@@ -1571,17 +1580,21 @@ router.get('/social-proof', async (req, res) => {
     const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '{count} people are viewing this page right now';
     const visitorBase = visitorBaseSetting ? parseInt(visitorBaseSetting.value) || 0 : 1000;
 
-    // Live visitor count = admin-set base + number of UNIQUE visitor IPs.
-    // Each IP is recorded once (INSERT IGNORE), so the same person refreshing
-    // does not inflate the number.
-    const { VisitorIp } = require('../models');
-    // req.ip is the de-spoofed client IP because `trust proxy` is set in index.js
-    // (a forged X-Forwarded-For can no longer inflate the count).
+    // Live visitor count = admin base + number of UNIQUE visitor IPs TODAY.
+    // Each IP is recorded once per day (INSERT IGNORE on (visit_date, ip)), so a
+    // refresh doesn't inflate it, and the count resets automatically each day.
+    // req.ip is the de-spoofed client IP because `trust proxy` is set in index.js.
     const clientIp = req.ip || (req.connection && req.connection.remoteAddress) || null;
     if (clientIp) {
-      try { await VisitorIp.create({ ip: clientIp }, { ignoreDuplicates: true }); } catch (_) { /* duplicate IP — ignore */ }
+      try {
+        await db.query(
+          'INSERT IGNORE INTO visitor_ips (ip, visit_date, created_at, updated_at) VALUES (:ip, CURDATE(), NOW(), NOW())',
+          { replacements: { ip: clientIp }, type: db.QueryTypes.INSERT }
+        );
+      } catch (_) { /* duplicate (ip, today) — ignore */ }
     }
-    const realVisits = await VisitorIp.count();
+    const cntRows = await db.query('SELECT COUNT(*) AS c FROM visitor_ips WHERE visit_date = CURDATE()', { type: db.QueryTypes.SELECT });
+    const realVisits = Number(cntRows && cntRows[0] && cntRows[0].c) || 0;
     const liveVisitorCount = visitorBase + realVisits;
 
     // Fetch recent bookings

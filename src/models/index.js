@@ -562,8 +562,14 @@ const Coupon = sequelize.define('Coupon', {
 // in social proof (same IP refreshing is not counted again).
 const VisitorIp = sequelize.define('VisitorIp', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  ip: { type: DataTypes.STRING(45), allowNull: false, unique: true }
-}, { tableName: 'visitor_ips', underscored: true });
+  ip: { type: DataTypes.STRING(45), allowNull: false },
+  visit_date: { type: DataTypes.DATEONLY, allowNull: false }
+}, {
+  tableName: 'visitor_ips',
+  underscored: true,
+  // One row per IP per day → unique daily visitors, resetting each day.
+  indexes: [{ unique: true, fields: ['visit_date', 'ip'], name: 'uniq_visit_date_ip' }]
+});
 
 // ─── ORDER ITEM ───────────────────────────────────────────────────────────────
 const OrderItem = sequelize.define('OrderItem', {
