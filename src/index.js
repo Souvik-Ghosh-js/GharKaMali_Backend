@@ -137,7 +137,11 @@ io.on('connection', (socket) => {
 sequelize.authenticate()
   .then(() => {
     console.log('✅ Database connected');
-    return sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
+    // A schema/table drift (e.g. a new model index on a column the live table
+    // hasn't been migrated to yet) must NOT take the whole API down. Log and
+    // continue — GET /api/admin/maintenance/sync-db reconciles the schema.
+    return sequelize.sync({ alter: process.env.NODE_ENV === 'development' })
+      .catch(err => console.error('⚠️  Schema sync failed (continuing anyway):', err.message));
   })
   .then(() => {
     require('./services/cron.service');
