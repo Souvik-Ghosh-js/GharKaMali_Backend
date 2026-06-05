@@ -131,6 +131,36 @@ async function fulfillEntity(type, id) {
   else if (type === 'order') await Order.update({ payment_status: 'paid', status: 'processing' }, { where: { id } });
 }
 
+// Reverse a still-unpaid entity: cancel it and undo any side-effects taken at
+// creation time (product stock, coupon redemption). Guarded so it NEVER voids an
+// entity that has already been paid/activated (race with a late webhook).
+async function cancelEntity(type, id) {
+  if (type === 'booking') {
+    // Only cancel while still unpaid; a paid booking is untouched.
+    await Booking.update({ status: 'cancelled' }, { where: { id, payment_status: 'pending' } });
+  } else if (type === 'subscription') {
+    // Online subs start 'pending'; only those get cancelled.
+    await Subscription.update({ status: 'cancelled' }, { where: { id, status: 'pending' } });
+  } else if (type === 'order') {
+    const { Order: O, OrderItem, Product, sequelize } = require('../models');
+    const order = await O.findByPk(id);
+    if (!order || order.payment_status === 'paid') return; // don't void a paid order
+    // Restock everything this order had reserved.
+    const items = await OrderItem.findAll({ where: { order_id: id } });
+    for (const it of items) {
+      await Product.increment('stock_quantity', { by: it.quantity, where: { id: it.product_id } });
+    }
+    // Hand back the coupon redemption claimed at order creation.
+    if (order.coupon_code) {
+      await sequelize.query(
+        'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE code = :code',
+        { replacements: { code: order.coupon_code } }
+      );
+    }
+    await order.update({ status: 'cancelled', payment_status: 'failed' });
+  }
+}
+
 // Mark a pending payment paid and fulfill everything it covers. A combined-cart
 // payment stores a JSON {fulfill:[{type,id},…]} list in `notes`. Idempotent —
 // safe to call from both the verify endpoint and the webhook.
@@ -251,6 +281,39 @@ exports.verifyRazorpayPayment = async (req, res) => {
 
     await fulfillPayment(payment, { razorpay_order_id, razorpay_payment_id, razorpay_signature });
     res.json({ success: true, message: 'Payment verified', data: { payment_id: razorpay_payment_id, type: payment.type } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+};
+
+// 2b) Cancel a still-pending payment (user dismissed Checkout) and void every
+// entity it covers, so an unpaid order/booking/subscription is never left
+// lingering in "pending". Idempotent and ownership-checked. A genuinely paid
+// payment is refused (409) and a late webhook can still fulfill normally.
+exports.cancelRazorpayPayment = async (req, res) => {
+  try {
+    const lookupId = req.body.razorpay_order_id || req.body.order_id;
+    if (!lookupId) return res.status(400).json({ success: false, message: 'Missing razorpay_order_id' });
+    const payment = await Payment.findOne({ where: { transaction_id: lookupId } });
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+    if (payment.user_id !== req.user.id) return res.status(403).json({ success: false, message: 'This payment does not belong to you' });
+    if (payment.status === 'success') return res.status(409).json({ success: false, message: 'Payment already completed — cannot cancel' });
+    if (payment.status === 'failed') return res.json({ success: true, message: 'Already cancelled' }); // idempotent
+
+    await payment.update({ status: 'failed' });
+
+    // Void everything this payment covered — same shape as fulfillPayment.
+    let fulfillList = null;
+    try { const p = payment.notes && JSON.parse(payment.notes); if (p && Array.isArray(p.fulfill)) fulfillList = p.fulfill; } catch (_) { /* not JSON */ }
+    if (fulfillList) {
+      for (const e of fulfillList) { if (e && e.type && e.id) await cancelEntity(e.type, e.id); }
+    } else {
+      if (payment.booking_id) await cancelEntity('booking', payment.booking_id);
+      if (payment.subscription_id) await cancelEntity('subscription', payment.subscription_id);
+      if (payment.type === 'order' && payment.notes && String(payment.notes).startsWith('order:')) {
+        const oid = parseInt(String(payment.notes).split(':')[1]);
+        if (oid) await cancelEntity('order', oid);
+      }
+    }
+    res.json({ success: true, message: 'Payment cancelled' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 

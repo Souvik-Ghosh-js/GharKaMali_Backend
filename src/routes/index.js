@@ -612,11 +612,12 @@ router.post('/admin/notifications/broadcast', authenticate, authorize('admin'), 
 
 module.exports = router;
 
-// ── PAYMENTS (PayU) ───────────────────────────────────────────────────────────
+// ── PAYMENTS (Razorpay) ───────────────────────────────────────────────────────
 const paymentCtrl = require('../controllers/payment.controller');
 // ── Razorpay ──
 router.post('/payments/razorpay/order', authenticate, validate(V.payment.razorpayOrder), paymentCtrl.createRazorpayOrder);
 router.post('/payments/razorpay/verify', authenticate, validate(V.payment.razorpayVerify), paymentCtrl.verifyRazorpayPayment);
+router.post('/payments/razorpay/cancel', authenticate, paymentCtrl.cancelRazorpayPayment);  // user dismissed Checkout → void the unpaid order/booking/subscription
 router.post('/payments/razorpay/webhook', paymentCtrl.razorpayWebhook);  // Razorpay server-to-server (signature-verified, no auth)
 router.get('/payments/status/:txnid', authenticate, paymentCtrl.checkPaymentStatus);
 router.get('/payments/my', authenticate, paymentCtrl.getMyPayments);
