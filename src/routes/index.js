@@ -555,10 +555,20 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     // Stable URL slugs for plans & categories
     try { await sequelize.query("ALTER TABLE service_plans ADD COLUMN slug VARCHAR(120)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE product_categories ADD COLUMN slug VARCHAR(100)"); } catch (e) { }
-    // Allow 'order' payment type (Razorpay shop-order payments)
-    try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL"); } catch (e) { }
-    // Allow 'pending' subscription status (online subscriptions awaiting payment)
-    try { await sequelize.query("ALTER TABLE subscriptions MODIFY COLUMN status ENUM('pending','active','paused','cancelled','expired') DEFAULT 'active'"); } catch (e) { }
+    // Allow 'order' payment type (Razorpay shop-order payments). ALGORITHM=INPLACE:
+    // appending an enum value is metadata-only, so it skips the table copy that
+    // would otherwise fail on a table near MySQL's 64-key limit.
+    try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL, ALGORITHM=INPLACE, LOCK=NONE"); } catch (e) { }
+    // Allow 'pending' subscription status (online subscriptions awaiting payment).
+    // An enum reorder isn't INPLACE-able, and a needless COPY would fail on an
+    // index-bloated table — so only ALTER when 'pending' is genuinely missing.
+    try {
+      const sc = await sequelize.query("SHOW COLUMNS FROM subscriptions LIKE 'status'", { type: sequelize.QueryTypes.SELECT });
+      const enumDef = (sc && sc[0] && (sc[0].Type || sc[0].type)) || '';
+      if (!/'pending'/i.test(enumDef)) {
+        await sequelize.query("ALTER TABLE subscriptions MODIFY COLUMN status ENUM('pending','active','paused','cancelled','expired') NOT NULL DEFAULT 'active', ALGORITHM=COPY");
+      }
+    } catch (e) { }
     // Daily visitor counter: rebuild visitor_ips with per-(day,ip) uniqueness
     // (only when it's still on the old all-time schema, so re-running is safe).
     try {
@@ -584,7 +594,12 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE users ADD COLUMN geofence_id INT"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE users ADD COLUMN service_zone_id INT"); } catch (e) { }
 
-    await sequelize.sync({ alter: true });
+    // Do NOT use { alter: true } here. Repeated alter-syncs pile up duplicate
+    // indexes until a table hits MySQL's hard cap of 64 keys, after which EVERY
+    // future ALTER on that table fails with "Too many keys specified". Plain
+    // sync() only creates missing tables (e.g. coupons) and never duplicates
+    // indexes. Wrapped so a single bad model can't fail the whole migration.
+    try { await sequelize.sync(); } catch (e) { console.error('sync() skipped (non-fatal):', e.message); }
 
     // Backfill slugs for existing plans & categories that don't have one yet.
     const { ServicePlan, ProductCategory } = require('../models');
