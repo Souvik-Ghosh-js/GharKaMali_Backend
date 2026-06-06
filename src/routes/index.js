@@ -1596,22 +1596,15 @@ router.get('/social-proof', async (req, res) => {
     const visitorTemplate = visitorTemplateSetting ? visitorTemplateSetting.value : '{count} people are viewing this page right now';
     const visitorBase = visitorBaseSetting ? parseInt(visitorBaseSetting.value) || 0 : 1000;
 
-    // Live visitor count = admin base + number of UNIQUE visitor IPs TODAY.
-    // Each IP is recorded once per day (INSERT IGNORE on (visit_date, ip)), so a
-    // refresh doesn't inflate it, and the count resets automatically each day.
-    // req.ip is the de-spoofed client IP because `trust proxy` is set in index.js.
-    const clientIp = req.ip || (req.connection && req.connection.remoteAddress) || null;
-    if (clientIp) {
-      try {
-        await db.query(
-          'INSERT IGNORE INTO visitor_ips (ip, visit_date, created_at, updated_at) VALUES (:ip, CURDATE(), NOW(), NOW())',
-          { replacements: { ip: clientIp }, type: db.QueryTypes.INSERT }
-        );
-      } catch (_) { /* duplicate (ip, today) — ignore */ }
-    }
-    const cntRows = await db.query('SELECT COUNT(*) AS c FROM visitor_ips WHERE visit_date = CURDATE()', { type: db.QueryTypes.SELECT });
-    const realVisits = Number(cntRows && cntRows[0] && cntRows[0].c) || 0;
-    const liveVisitorCount = visitorBase + realVisits;
+    // Live visitor count: a smooth, plausibly-random figure that stays within
+    // [350, 700]. It's a CONTINUOUS function of time (layered sine waves), so it
+    // drifts gently and never jumps (e.g. 700 → 400) no matter how often it's
+    // polled. A tiny per-request jitter keeps it changing on every load.
+    const _t = Date.now() / 1000;
+    const _wave = Math.sin(_t / 290) * 0.55 + Math.sin(_t / 127) * 0.30 + Math.sin(_t / 47) * 0.15; // ~[-1, 1]
+    const _jitter = (Math.random() - 0.5) * 4; // ±2
+    let liveVisitorCount = Math.round(525 + 175 * _wave + _jitter);
+    liveVisitorCount = Math.max(350, Math.min(700, liveVisitorCount));
 
     // Fetch recent bookings
     const rows = await db.query(`

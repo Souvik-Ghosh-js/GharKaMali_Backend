@@ -33,9 +33,13 @@ exports.verifyOtp = async (req, res) => {
 
     let user = await User.findOne({ where: { phone } });
 
-    if (process.env.USE_STATIC_OTP === 'true') {
-      if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
-    } else {
+    // OTP temporarily disabled for launch: 123456 is always accepted (the client
+    // sends it automatically after the phone step, so customers just enter a phone
+    // number to log in). Delete this bypass block to re-enable real OTP.
+    if (otp !== staticOtp) {
+      if (process.env.USE_STATIC_OTP === 'true') {
+        return res.status(400).json({ success: false, message: 'Invalid OTP' });
+      }
       if (!user || !user.otp || user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
       if (new Date() > user.otp_expires_at) return res.status(400).json({ success: false, message: 'OTP expired' });
     }
