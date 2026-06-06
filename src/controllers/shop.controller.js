@@ -19,7 +19,9 @@ exports.getCategories = async (req, res) => {
 // List products with filters
 exports.getProducts = async (req, res) => {
   try {
-    const { category, search, min_price, max_price, zone_id, geofence_id, limit = 20, page = 1 } = req.query;
+    const { category, search, min_price, max_price, zone_id, geofence_id, sort } = req.query;
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const lim = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 500);
     const where = { is_active: true };
 
     let productMarkup = 0;
@@ -30,20 +32,10 @@ exports.getProducts = async (req, res) => {
     }
 
     if (category) {
-      const { Op: Op2 } = require('sequelize');
       const catObj = await ProductCategory.findOne({
-        where: { [Op2.or]: [{ slug: category }, { name: category }] }
+        where: { [Op.or]: [{ slug: category }, { name: category }] }
       });
-      if (catObj) where.category_id = catObj.id;
-      else where.category_id = -1; // No match → return empty
-    }
-
-    // When searching: SQL filters on safe TEXT columns, JS handles JSON columns
-    if (search) {
-      where[Op.or] = [
-        { name: { [Op.like]: `%${search}%` } },
-        { description: { [Op.like]: `%${search}%` } },
-      ];
+      where.category_id = catObj ? catObj.id : -1; // no match → empty result
     }
 
     if (min_price || max_price) {
@@ -52,41 +44,43 @@ exports.getProducts = async (req, res) => {
       if (max_price) where.price[Op.lte] = parseFloat(max_price);
     }
 
-    // Fetch more rows when searching so JS can widen results via JSON field matching
-    const fetchLimit = search ? 200 : parseInt(limit);
-
-    const items = await Product.findAll({
-      where,
-      include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }],
-      order: [['created_at', 'DESC']],
-      limit: fetchLimit,
-      offset: search ? 0 : (parseInt(page) - 1) * parseInt(limit)
-    });
-
-    // ── Location-based availability filter ────────────────────────────────────
-    let filteredItems = items;
+    // Location availability filtered in SQL so pagination counts stay accurate.
     const gfIdForFilter = geofence_id || (req.user ? req.user.geofence_id : null);
     if (gfIdForFilter) {
-      const gfVal = Number(gfIdForFilter);
-      filteredItems = items.filter(p => {
-        const ids = p.available_geofence_ids;
-        if (!ids || !Array.isArray(ids) || ids.length === 0) return true;
-        return ids.map(Number).includes(gfVal);
-      });
+      const gf = Number(gfIdForFilter);
+      if (!Number.isNaN(gf)) {
+        where[Op.and] = [
+          ...(where[Op.and] || []),
+          sequelize.literal(`(available_geofence_ids IS NULL OR JSON_LENGTH(available_geofence_ids) = 0 OR JSON_CONTAINS(available_geofence_ids, '${gf}') OR JSON_CONTAINS(available_geofence_ids, '"${gf}"'))`),
+        ];
+      }
     }
 
-    let products = filteredItems.map(p => {
-      const json = p.toJSON();
+    // Server-side sort (so it spans all pages, not just the current one).
+    let order;
+    if (sort === 'price_asc') order = [['price', 'ASC']];
+    else if (sort === 'price_desc') order = [['price', 'DESC']];
+    else if (sort === 'rating') order = [['rating', 'DESC'], ['created_at', 'DESC']];
+    else order = [['created_at', 'DESC']]; // featured / newest
+
+    const applyMarkup = (json) => {
       if (productMarkup > 0) {
         json.price = parseFloat(json.price) + productMarkup;
         json.mrp = json.mrp ? parseFloat(json.mrp) + productMarkup : null;
         json.location_markup = productMarkup;
       }
       return json;
-    });
+    };
+    const catInclude = [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }];
+    const meta = (total) => ({ total, page: pageNum, pages: Math.max(1, Math.ceil(total / lim)), limit: lim });
 
-    // ── Relevance sort + JSON field widening when searching ───────────────────
+    // ── Search: SQL prefilter on name/description, JS relevance rank, then page ──
     if (search) {
+      where[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { description: { [Op.like]: `%${search}%` } },
+      ];
+      const rows = await Product.findAll({ where, include: catInclude, order, limit: 500 });
       const q = search.toLowerCase();
       const score = (p) => {
         const name = (p.name || '').toLowerCase();
@@ -105,14 +99,23 @@ exports.getProducts = async (req, res) => {
         if (faqsStr.includes(q)) return 10;
         return 0;
       };
-      // Include products that match via JSON fields even if SQL missed them
-      products = products.filter(p => score(p) > 0);
-      products = products.sort((a, b) => score(b) - score(a));
-      // Respect the original limit after JS filtering
-      products = products.slice(0, parseInt(limit));
+      const ranked = rows.map(p => applyMarkup(p.toJSON()))
+        .filter(p => score(p) > 0)
+        .sort((a, b) => score(b) - score(a));
+      const start = (pageNum - 1) * lim;
+      return res.json({ success: true, data: ranked.slice(start, start + lim), ...meta(ranked.length) });
     }
 
-    res.json({ success: true, data: products });
+    // ── Browse: SQL pagination with accurate total ──
+    const { count, rows } = await Product.findAndCountAll({
+      where,
+      include: catInclude,
+      order,
+      limit: lim,
+      offset: (pageNum - 1) * lim,
+      distinct: true,
+    });
+    res.json({ success: true, data: rows.map(p => applyMarkup(p.toJSON())), ...meta(count) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
