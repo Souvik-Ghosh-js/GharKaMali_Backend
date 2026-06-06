@@ -448,6 +448,8 @@ exports.getMyBookings = async (req, res) => {
   }
 };
 
+
+
 // Get booking detail
 exports.getBookingDetail = async (req, res) => {
   try {
@@ -457,7 +459,7 @@ exports.getBookingDetail = async (req, res) => {
         { model: User, as: 'customer', attributes: ['id', 'name', 'phone', 'profile_image'] },
         { model: User, as: 'gardener', attributes: ['id', 'name', 'phone', 'profile_image'], include: [{ model: GardenerProfile, as: 'gardenerProfile' }] },
         { model: ServiceZone, as: 'zone' },
-        { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1 },
+        { model: BookingTracking, as: 'tracking', order: [['created_at', 'DESC']], limit: 1, separate: true },
         { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon' }] },
         { model: BookingTimeAddon, as: 'timeAddons' },
         { model: Geofence, as: 'geofenceRef', attributes: ['id', 'name', 'visit_minutes', 'time_addon_minutes', 'time_addon_price'] }
