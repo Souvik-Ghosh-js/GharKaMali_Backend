@@ -105,7 +105,7 @@ router.get('/geofences', async (req, res) => {
     const { Geofence } = require('../models');
     const geofences = await Geofence.findAll({
       where: { is_active: true },
-      attributes: ['id', 'name', 'city', 'base_price', 'price_per_plant', 'min_plants', 'surge_multiplier'],
+      attributes: ['id', 'name', 'city', 'base_price', 'price_per_plant', 'min_plants', 'surge_multiplier', 'polygon_coords'],
       order: [['city', 'ASC'], ['name', 'ASC']],
     });
     res.json({ success: true, data: geofences });
