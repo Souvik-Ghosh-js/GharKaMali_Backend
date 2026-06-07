@@ -57,7 +57,8 @@ exports.subscribe = async (req, res) => {
       auto_renew: auto_renew !== false,
       visits_total: plan.visits_per_month,
       visits_used: 0,
-      amount_paid: plan.price,
+      // Monthly price = plan price + ₹25 per additional plant.
+      amount_paid: parseFloat(plan.price) + ((parseInt(plant_count) || 0) * 25),
       service_address,
       service_latitude,
       service_longitude,

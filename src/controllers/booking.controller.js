@@ -225,8 +225,9 @@ exports.createBooking = async (req, res) => {
     const basePrice = parseFloat(zone.base_price) || 0;
     const surge = parseFloat(zone.surge_multiplier) || 1.0;
 
-    const extraPlants = Math.max(0, pCount - minPlants);
-    const baseAmount = (basePrice + (extraPlants * pricePerPlant)) * surge;
+    // Pricing model: a flat ₹25 per plant added on top of the zone base price.
+    const ADDITIONAL_PLANT_RATE = 25;
+    const baseAmount = basePrice + (pCount * ADDITIONAL_PLANT_RATE);
 
     // Wallet payment: check balance before confirming (addons calculated after this, so we pre-check base only here)
     if (payment_method === 'wallet') {
