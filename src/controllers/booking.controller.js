@@ -315,10 +315,15 @@ exports.createBooking = async (req, res) => {
       });
     }
 
+    // 18% GST is added on top of every booking (base + add-ons). total_amount is
+    // GST-inclusive; the tax invoice derives the tax split from it (total / 1.18).
+    const GST_RATE = 0.18;
+    const grandTotal = Math.round((baseAmount + addonTotal) * (1 + GST_RATE) * 100) / 100;
+
     // Wallet payment: ensure sufficient balance BEFORE creating the booking,
     // so the wallet can't be driven negative.
     if (payment_method === 'wallet') {
-      const totalCharge = baseAmount + addonTotal;
+      const totalCharge = grandTotal;
       const walletUser = await User.findByPk(req.user.id, { attributes: ['wallet_balance'] });
       const balance = parseFloat(walletUser?.wallet_balance) || 0;
       if (balance < totalCharge) {
@@ -344,7 +349,7 @@ exports.createBooking = async (req, res) => {
       service_longitude,
       plant_count: plant_count || 1,
       base_amount: baseAmount,
-      total_amount: baseAmount + addonTotal,
+      total_amount: grandTotal,
       customer_notes,
       payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
     });
@@ -356,7 +361,7 @@ exports.createBooking = async (req, res) => {
 
     // Deduct wallet balance if wallet payment (full total including addons)
     if (payment_method === 'wallet') {
-      const totalCharge = baseAmount + addonTotal;
+      const totalCharge = grandTotal;
       await User.decrement({ wallet_balance: totalCharge }, { where: { id: req.user.id } });
       await User.increment({ total_spent: totalCharge }, { where: { id: req.user.id } });
     }
