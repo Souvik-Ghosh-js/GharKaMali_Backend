@@ -1,6 +1,6 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService, BookingTimeAddon } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService, BookingTimeAddon, sequelize } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
@@ -229,77 +229,9 @@ exports.createBooking = async (req, res) => {
     const ADDITIONAL_PLANT_RATE = 25;
     const baseAmount = basePrice + (pCount * ADDITIONAL_PLANT_RATE);
 
-    // Wallet payment: check balance before confirming (addons calculated after this, so we pre-check base only here)
-    if (payment_method === 'wallet') {
-      const customer = await User.findByPk(req.user.id);
-      if (parseFloat(customer.wallet_balance) < baseAmount) {
-        return res.status(400).json({ success: false, message: `Insufficient wallet balance. Required: ₹${baseAmount.toFixed(2)}, Available: ₹${parseFloat(customer.wallet_balance).toFixed(2)}` });
-      }
-    }
+    // (Wallet balance is checked authoritatively inside the transaction below,
+    //  against the full GST-inclusive total with the user row locked.)
 
-    // Find best gardener — must be in this geofence zone and free at the requested time
-    let gardener_id = null;
-
-    // Helper: check if a gardener is free at the requested date/time (2-hr window)
-    const isGardenerFreeAtSlot = async (gId) => {
-      const conflicts = await Booking.findAll({
-        where: {
-          gardener_id: gId,
-          scheduled_date,
-          status: { [Op.notIn]: ['cancelled', 'failed'] }
-        },
-        attributes: ['scheduled_time']
-      });
-      const requestedMins = moment(scheduled_time, 'HH:mm');
-      return !conflicts.some(b => {
-        const bookingMins = moment(b.scheduled_time, 'HH:mm:ss');
-        return Math.abs(requestedMins.diff(bookingMins, 'minutes')) < 120;
-      });
-    };
-
-    // 1. Try preferred gardener first (must be in zone and free)
-    if (preferred_gardener_id) {
-      const inZone = await GardenerZone.findOne({ where: { gardener_id: preferred_gardener_id, geofence_id: activeZoneId } });
-      const g = inZone ? await GardenerProfile.findOne({ where: { user_id: preferred_gardener_id, is_available: true } }) : null;
-      if (g && await isGardenerFreeAtSlot(preferred_gardener_id)) gardener_id = preferred_gardener_id;
-    }
-
-    // 2. Auto-assign: find best available gardener assigned to this geofence
-    if (!gardener_id) {
-      const zoneAssignments = await GardenerZone.findAll({ where: { geofence_id: activeZoneId }, attributes: ['gardener_id'] });
-      const zoneGardenerIds = zoneAssignments.map(gz => gz.gardener_id);
-
-      if (zoneGardenerIds.length === 0) {
-        return res.status(400).json({ success: false, message: 'No gardeners are available in your area. Please try again later or contact support.' });
-      }
-
-      // Find available gardeners in zone, ordered by rating desc
-      const candidates = await GardenerProfile.findAll({
-        where: { user_id: { [Op.in]: zoneGardenerIds }, is_available: true },
-        include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true, role: 'gardener' } }],
-        order: [['rating', 'DESC']]
-      });
-
-      for (const candidate of candidates) {
-        if (await isGardenerFreeAtSlot(candidate.user_id)) {
-          gardener_id = candidate.user_id;
-          break;
-        }
-      }
-
-      if (!gardener_id) {
-        if (is_instant) {
-          return res.status(409).json({
-            success: false,
-            no_instant_slot: true,
-            message: 'No gardener is free for an instant visit right now. Please schedule a later slot.'
-          });
-        }
-        return res.status(400).json({ success: false, message: 'No gardener is available for the selected date and time slot. Please choose a different slot.' });
-      }
-    }
-
-    const otp = genVisitOTP();
     // Calculate addon total before creating booking
     const { addons } = req.body;
     let addonTotal = 0;
@@ -320,50 +252,136 @@ exports.createBooking = async (req, res) => {
     const GST_RATE = 0.18;
     const grandTotal = Math.round((baseAmount + addonTotal) * (1 + GST_RATE) * 100) / 100;
 
-    // Wallet payment: ensure sufficient balance BEFORE creating the booking,
-    // so the wallet can't be driven negative.
-    if (payment_method === 'wallet') {
-      const totalCharge = grandTotal;
-      const walletUser = await User.findByPk(req.user.id, { attributes: ['wallet_balance'] });
-      const balance = parseFloat(walletUser?.wallet_balance) || 0;
-      if (balance < totalCharge) {
-        return res.status(400).json({ success: false, message: `Insufficient wallet balance. This booking needs ₹${totalCharge.toFixed(0)} but your wallet has ₹${balance.toFixed(0)}.` });
+    // ── Gardener assignment + booking creation are done inside a single DB
+    // transaction so two simultaneous bookings can't grab the same gardener for
+    // an overlapping slot (double-book race). We lock each candidate gardener's
+    // profile row FOR UPDATE before checking their slot, so concurrent requests
+    // targeting the same gardener serialize — the second one waits for the first
+    // to commit, then sees the just-created booking in its conflict check.
+    let gardener_id = null;
+    let booking;
+    try {
+      booking = await sequelize.transaction(async (t) => {
+        // Helper: lock the gardener's profile row, then check they're free at the
+        // requested date/time (2-hr window). The lock is what serializes racers.
+        const isGardenerFreeAtSlot = async (gId) => {
+          await GardenerProfile.findOne({ where: { user_id: gId }, transaction: t, lock: t.LOCK.UPDATE });
+          const conflicts = await Booking.findAll({
+            where: {
+              gardener_id: gId,
+              scheduled_date,
+              status: { [Op.notIn]: ['cancelled', 'failed'] }
+            },
+            attributes: ['scheduled_time'],
+            transaction: t
+          });
+          const requestedMins = moment(scheduled_time, 'HH:mm');
+          return !conflicts.some(b => {
+            const bookingMins = moment(b.scheduled_time, 'HH:mm:ss');
+            return Math.abs(requestedMins.diff(bookingMins, 'minutes')) < 120;
+          });
+        };
+
+        // 1. Try preferred gardener first (must be in zone and free)
+        if (preferred_gardener_id) {
+          const inZone = await GardenerZone.findOne({ where: { gardener_id: preferred_gardener_id, geofence_id: activeZoneId }, transaction: t });
+          const g = inZone ? await GardenerProfile.findOne({ where: { user_id: preferred_gardener_id, is_available: true }, transaction: t }) : null;
+          if (g && await isGardenerFreeAtSlot(preferred_gardener_id)) gardener_id = preferred_gardener_id;
+        }
+
+        // 2. Auto-assign: find best available gardener assigned to this geofence
+        if (!gardener_id) {
+          const zoneAssignments = await GardenerZone.findAll({ where: { geofence_id: activeZoneId }, attributes: ['gardener_id'], transaction: t });
+          const zoneGardenerIds = zoneAssignments.map(gz => gz.gardener_id);
+
+          if (zoneGardenerIds.length === 0) {
+            const e = new Error('No gardeners are available in your area. Please try again later or contact support.');
+            e.httpStatus = 400;
+            throw e;
+          }
+
+          // Find available gardeners in zone, ordered by rating desc
+          const candidates = await GardenerProfile.findAll({
+            where: { user_id: { [Op.in]: zoneGardenerIds }, is_available: true },
+            include: [{ model: User, as: 'user', where: { is_active: true, is_approved: true, role: 'gardener' } }],
+            order: [['rating', 'DESC']],
+            transaction: t
+          });
+
+          for (const candidate of candidates) {
+            if (await isGardenerFreeAtSlot(candidate.user_id)) {
+              gardener_id = candidate.user_id;
+              break;
+            }
+          }
+
+          if (!gardener_id) {
+            const e = new Error(is_instant
+              ? 'No gardener is free for an instant visit right now. Please schedule a later slot.'
+              : 'No gardener is available for the selected date and time slot. Please choose a different slot.');
+            e.httpStatus = 409;
+            e.noInstantSlot = !!is_instant;
+            throw e;
+          }
+        }
+
+        // Wallet payment: ensure sufficient balance BEFORE creating the booking,
+        // so the wallet can't be driven negative.
+        if (payment_method === 'wallet') {
+          const walletUser = await User.findByPk(req.user.id, { attributes: ['wallet_balance'], transaction: t, lock: t.LOCK.UPDATE });
+          const balance = parseFloat(walletUser?.wallet_balance) || 0;
+          if (balance < grandTotal) {
+            const e = new Error(`Insufficient wallet balance. This booking needs ₹${grandTotal.toFixed(0)} but your wallet has ₹${balance.toFixed(0)}.`);
+            e.httpStatus = 400;
+            throw e;
+          }
+        }
+
+        const otp = genVisitOTP();
+        const created = await Booking.create({
+          booking_number: genBookingNumber(),
+          customer_id: req.user.id,
+          gardener_id,
+          zone_id: activeZoneId,
+          geofence_id: activeZoneId, // Map the selected geofence ID
+          booking_type: 'ondemand',
+          is_instant: !!is_instant,
+          status: gardener_id ? 'assigned' : 'pending',
+          assigned_at: gardener_id ? new Date() : null,
+          scheduled_date,
+          scheduled_time,
+          otp,
+          service_address,
+          service_latitude,
+          service_longitude,
+          plant_count: plant_count || 1,
+          base_amount: baseAmount,
+          total_amount: grandTotal,
+          customer_notes,
+          payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
+        }, { transaction: t });
+
+        // Create BookingAddOn records
+        if (resolvedAddons.length > 0) {
+          await BookingAddOn.bulkCreate(resolvedAddons.map(a => ({ booking_id: created.id, ...a })), { transaction: t });
+        }
+
+        // Deduct wallet balance if wallet payment (full total including addons)
+        if (payment_method === 'wallet') {
+          await User.decrement({ wallet_balance: grandTotal }, { where: { id: req.user.id }, transaction: t });
+          await User.increment({ total_spent: grandTotal }, { where: { id: req.user.id }, transaction: t });
+        }
+
+        return created;
+      });
+    } catch (txErr) {
+      // Assignment/wallet failures throw a controlled httpStatus; surface them as-is.
+      if (txErr.httpStatus) {
+        const body = { success: false, message: txErr.message };
+        if (txErr.noInstantSlot) body.no_instant_slot = true;
+        return res.status(txErr.httpStatus).json(body);
       }
-    }
-
-    const booking = await Booking.create({
-      booking_number: genBookingNumber(),
-      customer_id: req.user.id,
-      gardener_id,
-      zone_id: activeZoneId,
-      geofence_id: activeZoneId, // Map the selected geofence ID
-      booking_type: 'ondemand',
-      is_instant: !!is_instant,
-      status: gardener_id ? 'assigned' : 'pending',
-      assigned_at: gardener_id ? new Date() : null,
-      scheduled_date,
-      scheduled_time,
-      otp,
-      service_address,
-      service_latitude,
-      service_longitude,
-      plant_count: plant_count || 1,
-      base_amount: baseAmount,
-      total_amount: grandTotal,
-      customer_notes,
-      payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
-    });
-
-    // Create BookingAddOn records
-    if (resolvedAddons.length > 0) {
-      await BookingAddOn.bulkCreate(resolvedAddons.map(a => ({ booking_id: booking.id, ...a })));
-    }
-
-    // Deduct wallet balance if wallet payment (full total including addons)
-    if (payment_method === 'wallet') {
-      const totalCharge = grandTotal;
-      await User.decrement({ wallet_balance: totalCharge }, { where: { id: req.user.id } });
-      await User.increment({ total_spent: totalCharge }, { where: { id: req.user.id } });
+      throw txErr; // unexpected → bubble to the outer catch (500)
     }
 
     // Log booking creation
