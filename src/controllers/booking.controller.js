@@ -219,7 +219,7 @@ exports.createBooking = async (req, res) => {
     const zone = await Geofence.findByPk(activeZoneId);
     if (!zone) return res.status(404).json({ success: false, message: 'Service zone not found' });
 
-    const pCount = parseInt(plant_count) || 1;
+    const pCount = parseInt(plant_count) || 0; // additional plants beyond the plan's free coverage (optional)
     const minPlants = zone.min_plants || 1;
     const pricePerPlant = parseFloat(zone.price_per_plant) || 0;
     const basePrice = parseFloat(zone.base_price) || 0;

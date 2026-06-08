@@ -62,7 +62,7 @@ exports.subscribe = async (req, res) => {
       service_address,
       service_latitude,
       service_longitude,
-      plant_count: plant_count || 1,
+      plant_count: parseInt(plant_count) || 0, // additional plants beyond the plan's free coverage (optional)
       payment_id
     });
 
