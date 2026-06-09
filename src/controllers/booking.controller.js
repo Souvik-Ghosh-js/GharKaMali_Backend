@@ -403,6 +403,13 @@ exports.createBooking = async (req, res) => {
     const customer = await User.findByPk(req.user.id);
     await sendWhatsApp(customer.phone, templates.bookingConfirmed(customer.name, scheduled_date, scheduled_time || 'Morning'));
 
+    // Notify finance for wallet bookings (paid immediately). Online (Razorpay)
+    // bookings are reported from fulfillEntity once payment is verified, so they
+    // are NOT emailed here to avoid duplicates / reporting unpaid bookings.
+    if (payment_method === 'wallet') {
+      require('../services/financeMail').notifyBooking(booking.id, 'Wallet');
+    }
+
     // ── NOTIFY ─────────────────────────────────────────────────────────────
     const notificationService = require('../services/notification.service');
 

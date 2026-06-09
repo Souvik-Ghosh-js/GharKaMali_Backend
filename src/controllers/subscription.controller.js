@@ -88,6 +88,10 @@ exports.subscribe = async (req, res) => {
         type: 'success',
         data: { subscription_id: subscription.id }
       });
+
+      // Notify finance — this branch only runs for subscriptions activated without
+      // an online payment (e.g. wallet). Online subs are reported from fulfillEntity.
+      require('../services/financeMail').notifySubscription(subscription.id, payment_method || 'Wallet');
     }
 
     res.status(201).json({ success: true, message: pendingPayment ? 'Subscription created — complete payment to activate' : 'Subscription activated', data: subscription });

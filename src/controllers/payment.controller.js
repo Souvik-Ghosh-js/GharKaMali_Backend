@@ -129,6 +129,21 @@ async function fulfillEntity(type, id) {
   if (type === 'booking') await Booking.update({ payment_status: 'paid' }, { where: { id } });
   else if (type === 'subscription') await Subscription.update({ status: 'active' }, { where: { id } });
   else if (type === 'order') await Order.update({ payment_status: 'paid', status: 'processing' }, { where: { id } });
+
+  // Report the confirmed payment to finance (best-effort, never blocks fulfilment).
+  notifyFinanceOfEntity(type, id);
+}
+
+// Build + send the finance notification for a now-paid entity. Fire-and-forget.
+async function notifyFinanceOfEntity(type, id) {
+  try {
+    const financeMail = require('../services/financeMail');
+    if (type === 'booking')           await financeMail.notifyBooking(id, 'Razorpay (online)');
+    else if (type === 'subscription') await financeMail.notifySubscription(id, 'Razorpay (online)');
+    else if (type === 'order')        await financeMail.notifyOrder(id, 'Razorpay (online)');
+  } catch (err) {
+    console.error('[finance-email] notify failed:', err.message);
+  }
 }
 
 // Reverse a still-unpaid entity: cancel it and undo any side-effects taken at

@@ -393,6 +393,13 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    // Notify finance for paid-at-creation (non-online) orders. Online (Razorpay)
+    // orders are reported from fulfillEntity once payment is verified, so they are
+    // NOT emailed here to avoid duplicates / reporting unpaid orders.
+    if (!onlinePayment) {
+      require('../services/financeMail').notifyOrder(order.id, payment_method || 'COD');
+    }
+
     return res.json({
       success: true,
       message: book_mali
