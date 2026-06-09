@@ -2,6 +2,7 @@ const { Op, literal } = require('sequelize');
 const { Subscription, ServicePlan, User, Booking, ServiceZone, Geofence } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const moment = require('moment');
+const { nowIST, todayIST } = require('../utils/time');
 const bookingCtrl = require('./booking.controller');
 
 const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -42,8 +43,8 @@ exports.subscribe = async (req, res) => {
     const plan = await ServicePlan.findByPk(plan_id);
     if (!plan || !plan.is_active) return res.status(404).json({ success: false, message: 'Plan not found' });
 
-    const startDate = moment().format('YYYY-MM-DD');
-    const endDate = moment().add(plan.duration_days, 'days').format('YYYY-MM-DD');
+    const startDate = todayIST();
+    const endDate = nowIST().add(plan.duration_days, 'days').format('YYYY-MM-DD');
 
     const subscription = await Subscription.create({
       customer_id: req.user.id,
@@ -118,7 +119,7 @@ exports.getMySubscriptions = async (req, res) => {
       const plain = sub.toJSON();
       plain.scheduled_visits_count = (plain.bookings || []).filter(b => b.status !== 'cancelled').length;
       const upcoming = (plain.bookings || [])
-        .filter(b => b.status !== 'cancelled' && b.scheduled_date >= moment().format('YYYY-MM-DD'))
+        .filter(b => b.status !== 'cancelled' && b.scheduled_date >= todayIST())
         .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
       plain.next_visit_date = upcoming.length > 0 ? upcoming[0].scheduled_date : null;
       return plain;
@@ -149,7 +150,7 @@ exports.cancelSubscription = async (req, res) => {
         where: { 
           subscription_id: subscription.id, 
           status: 'pending',
-          scheduled_date: { [Op.gt]: moment().format('YYYY-MM-DD') }
+          scheduled_date: { [Op.gt]: todayIST() }
         } 
       }
     );

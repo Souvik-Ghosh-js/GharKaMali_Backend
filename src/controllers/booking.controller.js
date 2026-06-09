@@ -12,6 +12,10 @@ const moment = require('moment');
 // ───────────────────────────────────────────────────────────────────────────
 const DEFAULT_INSTANT_ETA_MINUTES = 50;
 
+// IST helpers — the server runs in UTC, so any wall-clock slot/date must be
+// computed in IST to match the IST-stored booking timestamps. See utils/time.js.
+const { IST_OFFSET_MINUTES, nowIST } = require('../utils/time');
+
 // Helper: create booking log entry
 const logBookingEvent = async (booking_id, event_type, actor_id, actor_role, meta, description) => {
   try {
@@ -132,8 +136,9 @@ exports.checkInstantAvailability = async (req, res) => {
 
     const etaMinutes = DEFAULT_INSTANT_ETA_MINUTES;
 
-    // Today + (now + eta) in HH:mm — the slot we'd assign.
-    const target = moment().add(etaMinutes, 'minutes');
+    // Today + (now + eta) in HH:mm — the slot we'd assign. Computed in IST so it
+    // matches createBooking and the IST-stored booking timestamps.
+    const target = nowIST().add(etaMinutes, 'minutes');
     const targetDate = target.format('YYYY-MM-DD');
     const targetTime = target.format('HH:mm');
 
@@ -196,8 +201,12 @@ exports.createBooking = async (req, res) => {
 
     // Instant booking — server-side computes the slot. The client cannot pick
     // the time. ETA is currently a flat default; will be distance-based later.
+    // NOTE: compute in IST (+05:30). The server process runs in UTC, so a bare
+    // moment() would store the slot 5h30m behind wall-clock (a 14:22 IST booking
+    // would show "09:42"). The DB connection already stores timestamps in IST,
+    // so the slot must match.
     if (is_instant) {
-      const target = moment().add(DEFAULT_INSTANT_ETA_MINUTES, 'minutes');
+      const target = nowIST().add(DEFAULT_INSTANT_ETA_MINUTES, 'minutes');
       scheduled_date = target.format('YYYY-MM-DD');
       scheduled_time = target.format('HH:mm');
     } else {
