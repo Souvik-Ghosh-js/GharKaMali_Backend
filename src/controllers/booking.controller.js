@@ -195,7 +195,7 @@ exports.createBooking = async (req, res) => {
       zone_id, geofence_id, scheduled_date, scheduled_time,
       service_address, service_latitude, service_longitude,
       flat_no, building, area, landmark, city, state, pincode,
-      plant_count, customer_notes, preferred_gardener_id, payment_method,
+      plant_count, plan_id, customer_notes, preferred_gardener_id, payment_method,
       is_instant
     } = req.body;
 
@@ -228,7 +228,15 @@ exports.createBooking = async (req, res) => {
     const zone = await Geofence.findByPk(activeZoneId);
     if (!zone) return res.status(404).json({ success: false, message: 'Service zone not found' });
 
-    const pCount = parseInt(plant_count) || 0; // additional plants beyond the plan's free coverage (optional)
+    // The chosen plan defines how many plants are COVERED (max_plants). Anything
+    // the customer adds on top is "extra plants" billed at ₹25 each.
+    const plan = plan_id ? await ServicePlan.findByPk(plan_id) : null;
+    const coveredPlants = plan ? (parseInt(plan.max_plants) || 0) : 0;
+
+    const extraCount = parseInt(plant_count) || 0; // additional plants beyond plan coverage (optional)
+    const pCount = extraCount; // pricing uses the extra plants only
+    // Total plants serviced = plan coverage + extras (falls back to extras if no plan).
+    const totalPlants = (coveredPlants + extraCount) || extraCount || 1;
     const minPlants = zone.min_plants || 1;
     const pricePerPlant = parseFloat(zone.price_per_plant) || 0;
     const basePrice = parseFloat(zone.base_price) || 0;
@@ -363,7 +371,8 @@ exports.createBooking = async (req, res) => {
           service_address,
           service_latitude,
           service_longitude,
-          plant_count: plant_count || 1,
+          plant_count: totalPlants,   // total plants serviced (plan coverage + extras)
+          extra_plants: extraCount,   // additional plants the customer added (₹25 each)
           base_amount: baseAmount,
           total_amount: grandTotal,
           customer_notes,
