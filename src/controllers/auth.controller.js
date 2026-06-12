@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 const { User, GardenerProfile, Geofence, ServiceZone } = require('../models');
 const { generateToken } = require('../middleware/auth');
-const { generateOTP, sendOTP, sendWhatsApp, templates } = require('../services/otp.service');
+const { generateOTP, sendOTP, sendWhatsApp, templates, OTP_EXPIRY_MINUTES } = require('../services/otp.service');
 const { resolveGeofence } = require('../utils/geo');
 
 // Send OTP
@@ -13,12 +13,29 @@ exports.sendOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
     const otp = process.env.USE_STATIC_OTP === 'true' ? (process.env.STATIC_OTP || '123456') : generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-    await User.update({ otp, otp_expires_at: expiresAt }, { where: { phone } });
-    // If user doesn't exist, we'll create on verify
-    await sendOTP(phone, otp);
+    // Store the OTP against the phone. New numbers have no user row yet, so we
+    // create a minimal "pending" record (completed on verify) — otherwise the OTP
+    // would be lost and verification could never succeed for first-time users.
+    const existing = await User.findOne({ where: { phone } });
+    if (existing) {
+      await existing.update({ otp, otp_expires_at: expiresAt });
+    } else {
+      const referralCode = `GKM${phone.slice(-6)}`;
+      await User.create({
+        name: 'Customer', phone, role: 'customer',
+        is_active: true, is_approved: true, referral_code: referralCode,
+        otp, otp_expires_at: expiresAt,
+      });
+    }
 
+    const sent = await sendOTP(phone, otp);
+    if (!sent.success && process.env.USE_STATIC_OTP !== 'true') {
+      return res.status(502).json({ success: false, message: 'Failed to send OTP. Please try again.' });
+    }
+
+    // Only echo the OTP back in dev/static mode — never in production.
     res.json({ success: true, message: 'OTP sent successfully', ...(process.env.USE_STATIC_OTP === 'true' ? { otp } : {}) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -29,28 +46,34 @@ exports.sendOtp = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp, name, fcm_token, lat, lng } = req.body;
-    const staticOtp = process.env.STATIC_OTP || '123456';
 
     let user = await User.findOne({ where: { phone } });
 
-    // OTP temporarily disabled for launch: 123456 is always accepted (the client
-    // sends it automatically after the phone step, so customers just enter a phone
-    // number to log in). Delete this bypass block to re-enable real OTP.
-    if (otp !== staticOtp) {
-      if (process.env.USE_STATIC_OTP === 'true') {
-        return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    // In static/dev mode, the configured static OTP is accepted for any phone.
+    const staticMode = process.env.USE_STATIC_OTP === 'true';
+    const staticOtp = process.env.STATIC_OTP || '123456';
+
+    if (staticMode) {
+      if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    } else {
+      // Real OTP: must match the code stored at sendOtp and not be expired.
+      if (!user || !user.otp) return res.status(400).json({ success: false, message: 'Please request an OTP first' });
+      if (user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+      if (!user.otp_expires_at || new Date() > user.otp_expires_at) {
+        return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
       }
-      if (!user || !user.otp || user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
-      if (new Date() > user.otp_expires_at) return res.status(400).json({ success: false, message: 'OTP expired' });
     }
 
     if (!user) {
-      // New customer registration
+      // New customer (only reachable in static mode — real OTP creates the row at sendOtp).
       const referralCode = `GKM${phone.slice(-6)}`;
       user = await User.create({ name: name || 'Customer', phone, role: 'customer', is_active: true, is_approved: true, referral_code: referralCode });
+    } else if (name && (!user.name || user.name === 'Customer')) {
+      // Capture the real name on first successful login if provided.
+      user.name = name;
     }
 
-    await user.update({ otp: null, otp_expires_at: null, last_login: new Date(), ...(fcm_token ? { fcm_token } : {}) });
+    await user.update({ otp: null, otp_expires_at: null, last_login: new Date(), name: user.name, ...(fcm_token ? { fcm_token } : {}) });
 
     if (lat != null && lng != null) {
       const gf = await resolveGeofence(parseFloat(lat), parseFloat(lng));
@@ -193,8 +216,10 @@ exports.gardenerLogin = async (req, res) => {
     if (process.env.USE_STATIC_OTP === 'true') {
       if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
     } else {
-      if (user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
-      if (new Date() > user.otp_expires_at) return res.status(400).json({ success: false, message: 'OTP expired' });
+      if (!user.otp || user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
+      if (!user.otp_expires_at || new Date() > user.otp_expires_at) {
+        return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
+      }
     }
 
     await user.update({ otp: null, last_login: new Date(), ...(fcm_token ? { fcm_token } : {}) });
