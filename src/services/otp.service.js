@@ -14,36 +14,59 @@ const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10);
 //   "Your GharKaMali login verification code is ##var1##. This code will expire
 //    in ##var2## minutes. For security never share this code with anyone."
 // var1 = the OTP, var2 = expiry minutes. Sender ID: GKMOTP.
+//
+// Per MSG91's Flow API docs, template variables are passed as VAR1, VAR2, …
+// (uppercase). They are still configurable via env (MSG91_VAR_OTP /
+// MSG91_VAR_EXPIRY) in case a template uses custom names. Defaults: VAR1 = OTP,
+// VAR2 = expiry minutes.
 const sendOTP = async (phone, otp) => {
   if (process.env.USE_STATIC_OTP === 'true') {
     console.log(`[DEV] OTP for ${phone}: ${otp}`);
     return { success: true, method: 'static' };
   }
-  try {
-    const response = await axios.post(
-      'https://control.msg91.com/api/v5/flow/',
+
+  // Trim — a stray space/newline in the env value is a common cause of MSG91's
+  // "Template ID Missing or Invalid Template" error.
+  const templateId = (process.env.MSG91_TEMPLATE_ID || '').trim();
+  const authkey = (process.env.MSG91_AUTH_KEY || '').trim();
+  const senderId = (process.env.MSG91_SENDER_ID || 'GKMOTP').trim();
+  const varOtp = (process.env.MSG91_VAR_OTP || 'VAR1').trim();
+  const varExpiry = (process.env.MSG91_VAR_EXPIRY || 'VAR2').trim();
+
+  if (!templateId || !authkey) {
+    console.error('MSG91 error: MSG91_TEMPLATE_ID and MSG91_AUTH_KEY must be set.');
+    return { success: false, error: 'MSG91 not configured' };
+  }
+
+  const payload = {
+    template_id: templateId,
+    sender: senderId,
+    short_url: '0',
+    recipients: [
       {
-        template_id: process.env.MSG91_TEMPLATE_ID,
-        short_url: '0',
-        recipients: [
-          {
-            mobiles: `91${phone}`,
-            var1: otp,
-            var2: String(OTP_EXPIRY_MINUTES),
-          },
-        ],
+        mobiles: `91${phone}`,
+        [varOtp]: otp,
+        [varExpiry]: String(OTP_EXPIRY_MINUTES),
       },
-      {
-        headers: {
-          authkey: process.env.MSG91_AUTH_KEY,
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-        },
-      }
-    );
+    ],
+  };
+
+  try {
+    const response = await axios.post('https://control.msg91.com/api/v5/flow', payload, {
+      headers: {
+        authkey,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+    });
+    // MSG91 returns HTTP 200 even on logical failures — surface its type field.
+    if (response.data && response.data.type === 'error') {
+      console.error('MSG91 error (200/error):', response.data);
+      return { success: false, error: response.data };
+    }
     return { success: true, method: 'msg91', response: response.data };
   } catch (err) {
-    console.error('MSG91 error:', err.response?.data || err.message);
+    console.error('MSG91 error:', err.response?.status, JSON.stringify(err.response?.data || err.message));
     return { success: false, error: err.response?.data || err.message };
   }
 };
