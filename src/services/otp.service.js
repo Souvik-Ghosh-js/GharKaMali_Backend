@@ -15,10 +15,10 @@ const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10);
 //    in ##var2## minutes. For security never share this code with anyone."
 // var1 = the OTP, var2 = expiry minutes. Sender ID: GKMOTP.
 //
-// Per MSG91's Flow API docs, template variables are passed as VAR1, VAR2, …
-// (uppercase). They are still configurable via env (MSG91_VAR_OTP /
-// MSG91_VAR_EXPIRY) in case a template uses custom names. Defaults: VAR1 = OTP,
-// VAR2 = expiry minutes.
+// Variable KEYS must match the names inside the template's ##...## placeholders.
+// Our MSG91 template uses ##var1## (the OTP) and ##var2## (expiry minutes), so the
+// request sends lowercase var1/var2. Configurable via env (MSG91_VAR_OTP /
+// MSG91_VAR_EXPIRY) if a template uses different names.
 const sendOTP = async (phone, otp) => {
   if (process.env.USE_STATIC_OTP === 'true') {
     console.log(`[DEV] OTP for ${phone}: ${otp}`);
@@ -30,8 +30,8 @@ const sendOTP = async (phone, otp) => {
   const templateId = (process.env.MSG91_TEMPLATE_ID || '').trim();
   const authkey = (process.env.MSG91_AUTH_KEY || '').trim();
   const senderId = (process.env.MSG91_SENDER_ID || 'GKMOTP').trim();
-  const varOtp = (process.env.MSG91_VAR_OTP || 'VAR1').trim();
-  const varExpiry = (process.env.MSG91_VAR_EXPIRY || 'VAR2').trim();
+  const varOtp = (process.env.MSG91_VAR_OTP || 'var1').trim();
+  const varExpiry = (process.env.MSG91_VAR_EXPIRY || 'var2').trim();
 
   if (!templateId || !authkey) {
     console.error('MSG91 error: MSG91_TEMPLATE_ID and MSG91_AUTH_KEY must be set.');

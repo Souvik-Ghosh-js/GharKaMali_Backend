@@ -14,8 +14,8 @@ if (phone.length !== 10) {
 const templateId = (process.env.MSG91_TEMPLATE_ID || '').trim();
 const authkey = (process.env.MSG91_AUTH_KEY || '').trim();
 const senderId = (process.env.MSG91_SENDER_ID || 'GKMOTP').trim();
-const varOtp = (process.env.MSG91_VAR_OTP || 'VAR1').trim();
-const varExpiry = (process.env.MSG91_VAR_EXPIRY || 'VAR2').trim();
+const varOtp = (process.env.MSG91_VAR_OTP || 'var1').trim();
+const varExpiry = (process.env.MSG91_VAR_EXPIRY || 'var2').trim();
 const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
 const payload = {
