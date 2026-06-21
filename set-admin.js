@@ -5,7 +5,7 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const { User, sequelize } = require('./src/models');
 
-const NEW_PHONE = '7827705643';
+const NEW_PHONE = '9178277056';
 const NEW_PASSWORD = 'gkmadmin@123';
 
 (async () => {
