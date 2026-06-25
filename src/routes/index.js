@@ -273,6 +273,21 @@ router.get('/admin/bookings/:id', authenticate, authorize('admin', 'supervisor')
 router.get('/admin/subscriptions', authenticate, authorize('admin'), subscriptionCtrl.getAllSubscriptions);
 router.get('/admin/customers', authenticate, authorize('admin'), adminCtrl.getCustomers);
 
+// ── INVOICES (admin downloadable PDF tax invoices) ──────────────────────────────
+const { streamInvoice } = require('../services/invoice.service');
+const invoiceHandler = (type) => async (req, res) => {
+  try {
+    await streamInvoice(type, req.params.id, res);
+  } catch (err) {
+    // Only send JSON if nothing has been streamed yet (PDF sets headers early).
+    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
+    else res.end();
+  }
+};
+router.get('/admin/bookings/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('booking'));
+router.get('/admin/subscriptions/:id/invoice', authenticate, authorize('admin'), invoiceHandler('subscription'));
+router.get('/admin/shop/orders/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('order'));
+
 router.post('/admin/rewards', authenticate, authorize('admin'), adminCtrl.createRewardPenalty);
 router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewardPenalties);
 
