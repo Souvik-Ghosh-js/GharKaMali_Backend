@@ -239,7 +239,12 @@ exports.selectDates = async (req, res) => {
     if (!subscription) return res.status(404).json({ success: false, message: 'Subscription not found' });
     if (subscription.status !== 'active') return res.status(400).json({ success: false, message: 'Subscription is not active' });
 
-    const existingBookings = await Booking.count({ where: { subscription_id: subscription.id } });
+    // Count only non-cancelled bookings against the visit allowance, so a customer
+    // who cancels a visit can reschedule it (cancelled bookings are kept for history,
+    // not deleted). Matches the display count in getMySubscriptions.
+    const existingBookings = await Booking.count({
+      where: { subscription_id: subscription.id, status: { [Op.ne]: 'cancelled' } }
+    });
     const remainingToSchedule = subscription.visits_total - existingBookings;
 
     if (dates.length > remainingToSchedule) {
