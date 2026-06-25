@@ -44,7 +44,7 @@ async function notifyBooking(id, paymentLabel) {
         'Status': b.status,
         'Payment Method': paymentLabel,
         'Payment Status': b.payment_status,
-        'Booked At (IST)': dt(b.created_at),
+        'Booked At (IST)': dt(b.created_at || b.createdAt),
       },
       customer: {
         'Name': c ? c.name : `#${b.customer_id}`,
@@ -98,7 +98,7 @@ async function notifySubscription(id, paymentLabel) {
         'Plan': s.plan ? s.plan.name : '—',
         'Status': s.status,
         'Payment Method': paymentLabel,
-        'Subscribed At (IST)': dt(s.created_at),
+        'Subscribed At (IST)': dt(s.created_at || s.createdAt),
       },
       customer: {
         'Name': c ? c.name : `#${s.customer_id}`,
@@ -178,7 +178,7 @@ async function notifyOrder(id, paymentLabel) {
         'Payment Status': o.payment_status,
         'GST Invoice': o.apply_gst ? 'Yes' : 'No',
         'Coupon': o.coupon_code || '—',
-        'Ordered At (IST)': dt(o.created_at),
+        'Ordered At (IST)': dt(o.created_at || o.createdAt),
       },
       customer: {
         'Name': c ? c.name : `#${o.customer_id}`,

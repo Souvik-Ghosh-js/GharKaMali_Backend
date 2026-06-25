@@ -15,14 +15,26 @@ const {
 
 const BRAND = {
   name: process.env.BRAND_NAME || 'GharKaMali',
-  tagline: process.env.BRAND_TAGLINE || 'Your Garden, Our Care',
+  tagline: process.env.INVOICE_TAGLINE || 'Professional gardening made simple',
   site: process.env.BRAND_SITE || 'https://gharkamali.com',
   email: process.env.FINANCE_EMAIL || 'finance@gharkamali.com',
 };
 
 const money = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
-const dOnly = (d) => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
+const dt = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : '—';
+const dOnly = (d) => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' }) : '—';
+
+// "09:00:00" / "09:00" -> "9:00 AM". Returns the input unchanged if unparseable.
+const fmtTime = (t) => {
+  if (!t) return 'Flexible';
+  const m = String(t).match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return String(t);
+  let h = parseInt(m[1], 10);
+  const min = m[2];
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${min} ${ampm}`;
+};
 
 // ── DATA BUILDERS ────────────────────────────────────────────────────────────
 // Each returns a normalized invoice object: { kind, reference, date, customer,
@@ -47,14 +59,15 @@ async function buildBookingInvoice(id) {
   return {
     kind: 'Booking',
     reference: b.booking_number || `BKG-${b.id}`,
-    date: b.created_at,
+    date: b.created_at || b.createdAt || b.scheduled_date,
     customer: { name: c?.name || `#${b.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details: {
       'Booking Type': b.booking_type === 'subscription' ? 'Subscription Visit' : 'On-Demand',
       'Status': b.status,
       'Payment Status': b.payment_status,
+      'Booked On': dt(b.created_at || b.createdAt),
       'Service Date': dOnly(b.scheduled_date),
-      'Service Time': b.scheduled_time || 'Flexible',
+      'Service Time': fmtTime(b.scheduled_time),
       'Zone / Area': b.geofenceRef ? `${b.geofenceRef.name}${b.geofenceRef.city ? ', ' + b.geofenceRef.city : ''}` : '—',
       'Service Address': b.service_address || '—',
       'Plants Serviced': b.plant_count ?? '—',
@@ -87,7 +100,7 @@ async function buildSubscriptionInvoice(id) {
   return {
     kind: 'Subscription',
     reference: `SUB-${s.id}`,
-    date: s.created_at,
+    date: s.created_at || s.createdAt || s.start_date,
     customer: { name: c?.name || `#${s.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details: {
       'Plan': s.plan?.name || '—',
@@ -153,7 +166,7 @@ async function buildOrderInvoice(id) {
   return {
     kind: 'Order',
     reference: o.order_number || `ORD-${o.id}`,
-    date: o.created_at,
+    date: o.created_at || o.createdAt,
     customer: { name: c?.name || `#${o.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details,
     items,
@@ -207,9 +220,13 @@ function renderInvoicePDF(inv, res) {
   dy += 16;
   doc.fontSize(8.5).font('Helvetica');
   for (const [k, v] of Object.entries(inv.details)) {
-    doc.fillColor(GREY).text(`${k}:`, 320, dy, { width: 90, continued: false });
-    doc.fillColor('#000').text(String(v), 412, dy, { width: 133 });
-    dy += 13;
+    const val = String(v);
+    // Advance by the actual rendered height so multi-line values (e.g. a long
+    // service address) don't overlap the next row.
+    const valHeight = doc.heightOfString(val, { width: 133 });
+    doc.fillColor(GREY).text(`${k}:`, 320, dy, { width: 90 });
+    doc.fillColor('#000').text(val, 412, dy, { width: 133 });
+    dy += Math.max(13, valHeight + 2);
   }
 
   // Line items table
