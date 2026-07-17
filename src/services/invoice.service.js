@@ -14,10 +14,10 @@ const {
 } = require('../models');
 
 const BRAND = {
-  name: process.env.BRAND_NAME || 'GharKaMali',
-  tagline: process.env.INVOICE_TAGLINE || 'Professional gardening made simple',
+  name: process.env.BRAND_NAME || 'Plantura Care Pvt Ltd',
+  tagline: process.env.INVOICE_TAGLINE || 'Trusted plant care and gardening services',
   site: process.env.BRAND_SITE || 'https://gharkamali.com',
-  email: process.env.FINANCE_EMAIL || 'finance@gharkamali.com',
+  email: process.env.FINANCE_EMAIL || 'support@gharkamali.com',
 };
 
 const money = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -50,6 +50,7 @@ async function buildBookingInvoice(id) {
   });
   if (!b) return null;
   const c = b.customer;
+  const customerName = c?.name || b.customer_name || b.customerName || b.customer?.full_name || 'Customer';
   const base = Number(b.base_amount) || 0;
   const total = Number(b.total_amount) || 0;
   // total is GST-inclusive (× 1.18); derive the tax split for the breakdown.
@@ -60,7 +61,7 @@ async function buildBookingInvoice(id) {
     kind: 'Booking',
     reference: b.booking_number || `BKG-${b.id}`,
     date: b.created_at || b.createdAt || b.scheduled_date,
-    customer: { name: c?.name || `#${b.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
+    customer: { name: customerName || `#${b.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details: {
       'Booking Type': b.booking_type === 'subscription' ? 'Subscription Visit' : 'On-Demand',
       'Status': b.status,
@@ -93,6 +94,7 @@ async function buildSubscriptionInvoice(id) {
   });
   if (!s) return null;
   const c = s.customer;
+  const customerName = c?.name || s.customer_name || s.customerName || s.customer?.full_name || 'Customer';
   const total = Number(s.amount_paid) || 0;
   const taxable = +(total / 1.18).toFixed(2);
   const gst = +(total - taxable).toFixed(2);
@@ -101,7 +103,7 @@ async function buildSubscriptionInvoice(id) {
     kind: 'Subscription',
     reference: `SUB-${s.id}`,
     date: s.created_at || s.createdAt || s.start_date,
-    customer: { name: c?.name || `#${s.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
+    customer: { name: customerName || `#${s.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details: {
       'Plan': s.plan?.name || '—',
       'Status': s.status,
@@ -134,6 +136,7 @@ async function buildOrderInvoice(id) {
   });
   if (!o) return null;
   const c = o.customer;
+  const customerName = c?.name || o.customer_name || o.customerName || o.customer?.full_name || 'Customer';
   const total = Number(o.total_amount) || 0;
   const gst = Number(o.gst_amount) || 0;
   const discount = Number(o.discount_amount) || 0;
@@ -167,7 +170,7 @@ async function buildOrderInvoice(id) {
     kind: 'Order',
     reference: o.order_number || `ORD-${o.id}`,
     date: o.created_at || o.createdAt,
-    customer: { name: c?.name || `#${o.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
+    customer: { name: customerName || `#${o.customer_id}`, phone: c?.phone || '—', email: c?.email || '—' },
     details,
     items,
     breakdown,
@@ -202,6 +205,7 @@ function renderInvoicePDF(inv, res) {
     .text(`Invoice: ${inv.reference}`, 0, 80, { align: 'right' })
     .text(`Date: ${dt(inv.date)}`, 0, 94, { align: 'right' })
     .text(`Type: ${inv.kind}`, 0, 108, { align: 'right' });
+  doc.fillColor(GREY).fontSize(9).font('Helvetica').text(`Billed To: ${inv.customer.name}`, 50, 116);
 
   doc.moveTo(50, 130).lineTo(545, 130).strokeColor(GOLD).lineWidth(2).stroke();
 
@@ -266,7 +270,7 @@ function renderInvoicePDF(inv, res) {
   // Footer
   doc.fillColor(GREY).fontSize(8).font('Helvetica')
     .text('This is a computer-generated tax invoice and does not require a signature.', 50, 760, { align: 'center', width: 495 })
-    .text(`${BRAND.name} · ${BRAND.site}`, 50, 772, { align: 'center', width: 495 });
+    .text(`${BRAND.name} · ${BRAND.site} · ${BRAND.email}`, 50, 772, { align: 'center', width: 495 });
 
   doc.end();
 }

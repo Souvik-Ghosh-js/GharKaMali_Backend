@@ -28,6 +28,7 @@ async function notifyBooking(id, paymentLabel) {
     });
     if (!b) return;
     const c = b.customer;
+    const customerName = c?.name || b.customer_name || b.customerName || b.customer?.full_name || 'Customer';
     const base = Number(b.base_amount) || 0;
     const total = Number(b.total_amount) || 0;
     // total is GST-inclusive (× 1.18). Derive the tax split for the breakdown.
@@ -47,7 +48,7 @@ async function notifyBooking(id, paymentLabel) {
         'Booked At (IST)': dt(b.created_at || b.createdAt),
       },
       customer: {
-        'Name': c ? c.name : `#${b.customer_id}`,
+        'Name': customerName || `#${b.customer_id}`,
         'Phone': c ? c.phone : '—',
         'Email': c ? c.email : '—',
       },
@@ -85,6 +86,7 @@ async function notifySubscription(id, paymentLabel) {
     });
     if (!s) return;
     const c = s.customer;
+    const customerName = c?.name || s.customer_name || s.customerName || s.customer?.full_name || 'Customer';
     const total = Number(s.amount_paid) || 0;
     const taxable = +(total / 1.18).toFixed(2);
     const gst = +(total - taxable).toFixed(2);
@@ -101,7 +103,7 @@ async function notifySubscription(id, paymentLabel) {
         'Subscribed At (IST)': dt(s.created_at || s.createdAt),
       },
       customer: {
-        'Name': c ? c.name : `#${s.customer_id}`,
+        'Name': customerName || `#${s.customer_id}`,
         'Phone': c ? c.phone : '—',
         'Email': c ? c.email : '—',
       },
@@ -139,6 +141,7 @@ async function notifyOrder(id, paymentLabel) {
     });
     if (!o) return;
     const c = o.customer;
+    const customerName = c?.name || o.customer_name || o.customerName || o.customer?.full_name || 'Customer';
     const total = Number(o.total_amount) || 0;
     const gst = Number(o.gst_amount) || 0;
     const discount = Number(o.discount_amount) || 0;
@@ -181,7 +184,7 @@ async function notifyOrder(id, paymentLabel) {
         'Ordered At (IST)': dt(o.created_at || o.createdAt),
       },
       customer: {
-        'Name': c ? c.name : `#${o.customer_id}`,
+        'Name': customerName || `#${o.customer_id}`,
         'Phone': c ? c.phone : '—',
         'Email': c ? c.email : '—',
       },
