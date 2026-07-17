@@ -73,6 +73,15 @@ exports.verifyOtp = async (req, res) => {
       user.name = name;
     }
 
+    const needsName = !user.name || user.name.trim() === '' || user.name === 'Customer';
+    if (needsName && !name) {
+      const userData = user.toJSON();
+      delete userData.password;
+      delete userData.otp;
+      delete userData.otp_expires_at;
+      return res.json({ success: true, message: 'Name is required to complete login', data: { requires_name: true, user: userData } });
+    }
+
     await user.update({ otp: null, otp_expires_at: null, last_login: new Date(), name: user.name, ...(fcm_token ? { fcm_token } : {}) });
 
     if (lat != null && lng != null) {
