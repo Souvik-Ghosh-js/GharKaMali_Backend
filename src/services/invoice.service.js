@@ -11,21 +11,29 @@
 // split all match the website. Keep the three builders below in sync with those
 // two website files if the invoice ever changes.
 // ─────────────────────────────────────────────────────────────────────────────
+const path = require('path');
+const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const {
   Booking, Subscription, Order, OrderItem, Product, User, ServicePlan, Geofence,
   BookingAddOn, AddOnService,
 } = require('../models');
 
-// Legal seller identity — must match the website invoice header.
+// Seller identity — GharKaMali is the brand; Plantura Care Pvt Ltd is the
+// registered legal entity. Both appear on the invoice, matching the website.
 const SELLER = {
-  name: process.env.INVOICE_COMPANY || 'Plantura Care Pvt Ltd',
+  brand: process.env.INVOICE_BRAND || 'GharKaMali',
+  legalName: process.env.INVOICE_COMPANY || 'Plantura Care Pvt Ltd',
   tagline: process.env.INVOICE_TAGLINE || 'Trusted plant care and gardening services',
   gstin: process.env.INVOICE_GSTIN || '09AAQCP7633P1ZD',
   address: process.env.INVOICE_ADDRESS || 'Noida, Uttar Pradesh — 201301',
   supportEmail: process.env.INVOICE_SUPPORT_EMAIL || 'support@gharkamali.com',
   site: process.env.INVOICE_SITE || 'gharkamali.com',
 };
+
+// Bundled logo (copied from the website's /public/logo.png). Resolved once.
+const LOGO_PATH = path.join(__dirname, '..', 'assets', 'logo.png');
+const HAS_LOGO = (() => { try { return fs.existsSync(LOGO_PATH); } catch { return false; } })();
 
 const money = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dLong = (d) => (d ? new Date(d) : new Date()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' });
@@ -243,11 +251,20 @@ function renderInvoicePDF(inv, res) {
   doc.pipe(res);
 
   // ── Header ──
-  doc.fillColor(FOREST).fontSize(22).font('Helvetica-Bold').text(SELLER.name, L, 40);
-  doc.fillColor(SAGE).fontSize(9).font('Helvetica').text(SELLER.tagline, L, 68);
+  // Logo (top-left) then brand name + registered entity + GSTIN beneath it.
+  let brandX = L;
+  let brandY = 40;
+  if (HAS_LOGO) {
+    try {
+      doc.image(LOGO_PATH, L, 38, { height: 40 }); // scales width by aspect ratio
+      brandY = 84; // push text below the logo
+    } catch { /* fall through to text-only header */ }
+  }
+  doc.fillColor(FOREST).fontSize(20).font('Helvetica-Bold').text(SELLER.brand, brandX, brandY);
+  doc.fillColor(SAGE).fontSize(8).font('Helvetica').text(`A unit of ${SELLER.legalName}`, brandX, brandY + 24);
   doc.fillColor(SAGE).fontSize(8)
-    .text(`GSTIN: ${SELLER.gstin}`, L, 84)
-    .text(SELLER.address, L, 95);
+    .text(`GSTIN: ${SELLER.gstin}`, brandX, brandY + 35)
+    .text(SELLER.address, brandX, brandY + 46);
 
   doc.fillColor(FOREST).fontSize(20).font('Helvetica-Bold').text('TAX INVOICE', 0, 40, { align: 'right', width: R });
   doc.fillColor(SAGE).fontSize(10).font('Helvetica')
@@ -257,10 +274,12 @@ function renderInvoicePDF(inv, res) {
   doc.fillColor('#16a34a').fontSize(9).font('Helvetica-Bold')
     .text(inv.statusBadge, 0, 96, { align: 'right', width: R });
 
-  doc.moveTo(L, 118).lineTo(R, 118).strokeColor(FOREST).lineWidth(2).stroke();
+  // Divider positioned below whichever side (logo/brand block vs invoice meta) is taller.
+  const dividerY = Math.max(brandY + 60, 118);
+  doc.moveTo(L, dividerY).lineTo(R, dividerY).strokeColor(FOREST).lineWidth(2).stroke();
 
-  // ── Bill To + Meta (two columns) ──
-  let y = 132;
+  // ── Bill To + Meta (two columns) ── (start below the header divider)
+  let y = dividerY + 14;
   doc.fillColor(SAGE).fontSize(9).font('Helvetica-Bold').text('BILL TO', L, y);
   doc.fillColor(SAGE).fontSize(9).font('Helvetica-Bold').text(inv.kind === 'Order' ? 'ORDER INFO' : `${inv.kind.toUpperCase()} INFO`, 320, y);
   y += 14;
