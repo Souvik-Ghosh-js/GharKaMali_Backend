@@ -232,10 +232,64 @@ async function buildOrderInvoice(id) {
   };
 }
 
+// Admin-created manual invoice — renders from the stored ManualInvoice snapshot
+// so it looks identical to booking/subscription/order invoices.
+async function buildManualInvoice(id) {
+  const { ManualInvoice } = require('../models');
+  const m = await ManualInvoice.findByPk(id);
+  if (!m) return null;
+  const total = Number(m.total_amount) || 0;
+  const subtotal = Number(m.subtotal) || Math.round((total / 1.18) * 100) / 100;
+  const gstAmt = Number(m.gst_amount) || Math.round((total - subtotal) * 100) / 100;
+  const halfGst = gstAmt / 2;
+  const isUP = m.is_up;
+
+  const items = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => ({
+    name: l.name, amount: Number(l.amount) || 0,
+  }));
+
+  const taxRows = isUP
+    ? [
+        { label: 'SGST (9%)', value: money(halfGst) },
+        { label: 'CGST (9%)', value: money(halfGst) },
+      ]
+    : [{ label: 'IGST (18%)', value: money(gstAmt) }];
+
+  const billToLines = [
+    m.service_address || '—',
+    `${m.city || ''} ${m.pincode || ''}`.trim(),
+    m.state || '',
+  ].filter((l) => l && l.trim());
+
+  return {
+    kind: 'Invoice',
+    reference: m.invoice_number,
+    dateLong: dLong(m.created_at || m.createdAt),
+    statusBadge: 'PAID',
+    billTo: { name: m.customer_name || 'Customer', lines: billToLines },
+    meta: {
+      'Invoice No': m.invoice_number,
+      'Phone': m.customer_phone || '—',
+      ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
+    },
+    items,
+    hasQty: false,
+    subtotalLabel: 'Subtotal (excl. GST)',
+    subtotal,
+    taxRows,
+    shippingFree: false,
+    total,
+    gstNote: isUP
+      ? 'SGST @ 9% + CGST @ 9% applied (intra-state — Uttar Pradesh). This is a computer-generated invoice and does not require a physical signature.'
+      : 'IGST @ 18% applied (inter-state supply). This is a computer-generated invoice and does not require a physical signature.',
+  };
+}
+
 const BUILDERS = {
   booking: buildBookingInvoice,
   subscription: buildSubscriptionInvoice,
   order: buildOrderInvoice,
+  manual: buildManualInvoice,
 };
 
 // ── PDF RENDERER — layout mirrors the website invoice HTML ────────────────────
@@ -391,4 +445,4 @@ async function streamInvoice(type, id, res) {
   renderInvoicePDF(inv, res);
 }
 
-module.exports = { streamInvoice, buildBookingInvoice, buildSubscriptionInvoice, buildOrderInvoice };
+module.exports = { streamInvoice, buildBookingInvoice, buildSubscriptionInvoice, buildOrderInvoice, buildManualInvoice };

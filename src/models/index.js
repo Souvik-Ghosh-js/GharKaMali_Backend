@@ -699,6 +699,44 @@ const SystemSetting = sequelize.define('SystemSetting', {
   updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'system_settings', underscored: true });
 
+// ─── MANUAL INVOICE (admin-created, for offline customers) ───────────────────
+// One row per admin-generated invoice. May be pure invoice-only (no booking) or
+// linked to a Booking / Subscription the admin also created from the same form.
+const ManualInvoice = sequelize.define('ManualInvoice', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  invoice_number: { type: DataTypes.STRING(30), unique: true, allowNull: false },
+  // 'ondemand' | 'plan' — what was billed.
+  invoice_type: { type: DataTypes.ENUM('ondemand', 'plan'), defaultValue: 'ondemand' },
+  // What the admin did with it: invoice_only | booking | subscription.
+  outcome: { type: DataTypes.ENUM('invoice_only', 'booking', 'subscription'), defaultValue: 'invoice_only' },
+  plan_id: { type: DataTypes.INTEGER, references: { model: 'service_plans', key: 'id' } },
+  // Snapshot of customer details from the form (offline customers may not be users).
+  customer_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  customer_name: { type: DataTypes.STRING(100), allowNull: false },
+  customer_phone: { type: DataTypes.STRING(15) },
+  customer_email: { type: DataTypes.STRING(100) },
+  service_address: { type: DataTypes.TEXT },
+  city: { type: DataTypes.STRING(100) },
+  state: { type: DataTypes.STRING(100) },
+  pincode: { type: DataTypes.STRING(10) },
+  scheduled_date: { type: DataTypes.DATEONLY },
+  scheduled_time: { type: DataTypes.TIME },
+  plant_count: { type: DataTypes.INTEGER, defaultValue: 0 },
+  notes: { type: DataTypes.TEXT },
+  // Line items snapshot: [{ name, amount }]
+  line_items: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  // GST-INCLUSIVE total (matches booking/subscription convention); the split is
+  // derived from it (total / 1.18) exactly like the invoice service.
+  subtotal: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  gst_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  is_up: { type: DataTypes.BOOLEAN, defaultValue: true },
+  // Links populated when the admin also created a real record.
+  booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
+  subscription_id: { type: DataTypes.INTEGER, references: { model: 'subscriptions', key: 'id' } },
+  created_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+}, { tableName: 'manual_invoices' });
+
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
 ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
@@ -832,7 +870,14 @@ ProductZonePrice.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'zone' });
 Product.hasMany(ProductZonePrice, { foreignKey: 'product_id', as: 'zonePrices' });
 Geofence.hasMany(ProductZonePrice, { foreignKey: 'geofence_id', as: 'productPrices' });
 
+ManualInvoice.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+ManualInvoice.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+ManualInvoice.belongsTo(ServicePlan, { foreignKey: 'plan_id', as: 'plan' });
+ManualInvoice.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+ManualInvoice.belongsTo(Subscription, { foreignKey: 'subscription_id', as: 'subscription' });
+
 module.exports = {
+  ManualInvoice,
   Product,
   ProductCategory,
   Order,

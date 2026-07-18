@@ -288,6 +288,12 @@ router.get('/admin/bookings/:id/invoice', authenticate, authorize('admin', 'supe
 router.get('/admin/subscriptions/:id/invoice', authenticate, authorize('admin'), invoiceHandler('subscription'));
 router.get('/admin/shop/orders/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('order'));
 
+// ── MANUAL INVOICE / BOOKING (admin-created, for offline customers) ─────────────
+const manualInvoiceCtrl = require('../controllers/manualInvoice.controller');
+router.post('/admin/manual-invoice', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.createManualInvoice);
+router.get('/admin/manual-invoices', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.listManualInvoices);
+router.get('/admin/manual-invoices/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('manual'));
+
 router.post('/admin/rewards', authenticate, authorize('admin'), adminCtrl.createRewardPenalty);
 router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewardPenalties);
 
