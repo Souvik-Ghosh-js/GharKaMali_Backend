@@ -261,7 +261,7 @@ function renderInvoicePDF(inv, res) {
     } catch { /* fall through to text-only header */ }
   }
   doc.fillColor(FOREST).fontSize(20).font('Helvetica-Bold').text(SELLER.brand, brandX, brandY);
-  doc.fillColor(SAGE).fontSize(8).font('Helvetica').text(`A unit of ${SELLER.legalName}`, brandX, brandY + 24);
+  doc.fillColor(SAGE).fontSize(8).font('Helvetica').text(`${SELLER.legalName}`, brandX, brandY + 24);
   doc.fillColor(SAGE).fontSize(8)
     .text(`GSTIN: ${SELLER.gstin}`, brandX, brandY + 35)
     .text(SELLER.address, brandX, brandY + 46);
