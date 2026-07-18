@@ -334,11 +334,18 @@ function renderInvoicePDF(inv, res) {
   });
 
   // ── Subtotal / tax / shipping (right aligned) ──
+  // Two non-overlapping columns: label ends at LABEL_END, value starts at
+  // VALUE_X. Both are right-aligned within their own box so nothing collides.
+  const LABEL_X = 300;
+  const VALUE_X = 445;             // value column starts here
+  const VALUE_W = R - VALUE_X;     // width of the value column (to right edge)
+  const LABEL_W = VALUE_X - LABEL_X - 10; // label box, with a 10pt gutter before value
   ty += 8;
   const putRow = (label, value, opts = {}) => {
     doc.fillColor(opts.color || GREY).fontSize(9.5).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
-      .text(label, 300, ty, { width: 150, align: 'right' });
-    doc.fillColor(opts.valueColor || '#1a2e1a').text(value, 0, ty, { align: 'right', width: rightW - 8 });
+      .text(label, LABEL_X, ty, { width: LABEL_W, align: 'right' });
+    doc.fillColor(opts.valueColor || '#1a2e1a')
+      .text(value, VALUE_X, ty, { width: VALUE_W, align: 'right' });
     ty += 16;
   };
   putRow(inv.subtotalLabel, money(inv.subtotal));
@@ -347,11 +354,11 @@ function renderInvoicePDF(inv, res) {
 
   // ── Total ──
   ty += 4;
-  doc.moveTo(300, ty).lineTo(R, ty).strokeColor(FOREST).lineWidth(2).stroke();
+  doc.moveTo(LABEL_X, ty).lineTo(R, ty).strokeColor(FOREST).lineWidth(2).stroke();
   ty += 8;
   doc.fillColor(FOREST).fontSize(13).font('Helvetica-Bold')
-    .text('Total Amount', 300, ty, { width: 150, align: 'right' })
-    .text(money(inv.total), 0, ty, { align: 'right', width: rightW - 8 });
+    .text('Total Amount', LABEL_X, ty, { width: LABEL_W, align: 'right' })
+    .text(money(inv.total), VALUE_X, ty, { width: VALUE_W, align: 'right' });
   ty += 30;
 
   // ── GST note ──
@@ -365,8 +372,8 @@ function renderInvoicePDF(inv, res) {
 
   // ── Footer ──
   doc.fillColor(SAGE).fontSize(8.5).font('Helvetica')
-    .text(`${SELLER.name} · ${SELLER.supportEmail} · ${SELLER.site}`, L, 790, { align: 'center', width: rightW })
-    .text('Thank you for choosing GharKaMali! 🌿', L, 802, { align: 'center', width: rightW });
+    .text(`${SELLER.brand} (a unit of ${SELLER.legalName}) · ${SELLER.supportEmail} · ${SELLER.site}`, L, 790, { align: 'center', width: rightW })
+    .text('Thank you for choosing GharKaMali!', L, 802, { align: 'center', width: rightW });
 
   doc.end();
 }
