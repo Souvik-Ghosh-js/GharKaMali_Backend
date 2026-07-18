@@ -14,9 +14,11 @@
 const { Op } = require('sequelize');
 const {
   ManualInvoice, Booking, Subscription, ServicePlan, Geofence, GardenerZone,
-  GardenerProfile, User, sequelize,
+  GardenerProfile, User, BookingLog, sequelize,
 } = require('../models');
 const { nowIST, todayIST } = require('../utils/time');
+const notificationService = require('../services/notification.service');
+const { notify: pushNotify } = require('../services/push.service');
 
 const GST_RATE = 0.18;
 const ADDITIONAL_PLANT_RATE = 25;
@@ -24,6 +26,28 @@ const ADDITIONAL_PLANT_RATE = 25;
 const genInvoiceNumber = () => `INV${Date.now().toString().slice(-8)}`;
 const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;
 const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
+
+// Resolve service coordinates for an admin booking (no external geocoder wired):
+//   explicit form coords → zone polygon centroid → customer's saved coords → null.
+// A booking with null lat/long simply won't plot on maps, which is acceptable for
+// offline/admin bookings and avoids storing bogus 0,0 (Gulf of Guinea) points.
+const centroidOf = (zone) => {
+  try {
+    const pts = JSON.parse(zone.polygon_coords);
+    if (!Array.isArray(pts) || !pts.length) return null;
+    const sum = pts.reduce((a, [lat, lng]) => ({ lat: a.lat + Number(lat), lng: a.lng + Number(lng) }), { lat: 0, lng: 0 });
+    return { lat: sum.lat / pts.length, lng: sum.lng / pts.length };
+  } catch { return null; }
+};
+const resolveCoords = (formLat, formLng, zone, customer) => {
+  if (formLat != null && formLng != null && (Number(formLat) || Number(formLng))) {
+    return { lat: Number(formLat), lng: Number(formLng) };
+  }
+  const c = zone ? centroidOf(zone) : null;
+  if (c) return c;
+  if (customer?.latitude && customer?.longitude) return { lat: Number(customer.latitude), lng: Number(customer.longitude) };
+  return { lat: null, lng: null };
+};
 
 // Same intra-state test as invoice.service.js / the website.
 const isUPAddress = (...parts) => {
@@ -75,6 +99,7 @@ exports.createManualInvoice = async (req, res) => {
     // service details
     scheduled_date, scheduled_time, plant_count, notes,
     zone_id, geofence_id,
+    service_latitude, service_longitude, // optional coords (else geocode/fallback)
     // pricing
     line_items,                          // optional [{name, amount}] custom lines
     override_total,                      // optional GST-inclusive override
@@ -136,6 +161,7 @@ exports.createManualInvoice = async (req, res) => {
       if (outcome === 'booking') {
         let gardener_id = null;
         const activeZoneId = geofence_id || zone_id || customer?.geofence_id || null;
+        const zone = activeZoneId ? await Geofence.findByPk(activeZoneId, { transaction: t }) : null;
 
         if (assign_mode === 'pick' && pickedGardenerId) {
           gardener_id = pickedGardenerId;
@@ -156,6 +182,9 @@ exports.createManualInvoice = async (req, res) => {
           }
         }
 
+        // Resolve coordinates (form → zone centroid → customer → 0 fallback).
+        const { lat, lng } = resolveCoords(service_latitude, service_longitude, zone, customer);
+
         booking = await Booking.create({
           booking_number: genBookingNumber(),
           customer_id: customer.id,
@@ -169,14 +198,33 @@ exports.createManualInvoice = async (req, res) => {
           scheduled_time: scheduled_time || '09:00:00',
           otp: genVisitOTP(),
           service_address: service_address || '—',
-          service_latitude: 0,
-          service_longitude: 0,
+          // Live bookings table still has NOT NULL on these; use 0 when unknown.
+          service_latitude: lat != null ? lat : 0,
+          service_longitude: lng != null ? lng : 0,
           plant_count: parseInt(plant_count) || 0,
           base_amount: subtotal,
           total_amount: total,
           payment_status: 'paid',
           customer_notes: notes || null,
         }, { transaction: t });
+
+        // Audit trail — mirrors the customer-flow BookingLog entries.
+        try {
+          await BookingLog.create({
+            booking_id: booking.id, event_type: 'created',
+            actor_id: req.user.id, actor_role: 'admin',
+            meta: { source: 'manual_invoice', zone_id: activeZoneId },
+            description: `Booking ${booking.booking_number} created by admin (manual invoice)`,
+          }, { transaction: t });
+          if (gardener_id) {
+            await BookingLog.create({
+              booking_id: booking.id, event_type: 'assigned',
+              actor_id: req.user.id, actor_role: 'admin',
+              meta: { gardener_id },
+              description: assign_mode === 'auto' ? 'Auto-assigned to gardener' : 'Assigned to gardener by admin',
+            }, { transaction: t });
+          }
+        } catch (e) { console.error('[manualInvoice] BookingLog failed:', e.message); }
       }
 
       // ── Create a real Subscription ──
@@ -254,8 +302,40 @@ exports.createManualInvoice = async (req, res) => {
         created_by: req.user.id,
       }, { transaction: t });
 
-      return { invoice, booking, subscription };
+      return { invoice, booking, subscription, gardenerId: booking?.gardener_id || null };
     });
+
+    // ── Post-commit notifications (best-effort; never fail the request) ──
+    // Fired AFTER commit so a rolled-back booking never triggers a notification.
+    if (result.booking && result.gardenerId) {
+      const b = result.booking;
+      (async () => {
+        try {
+          const g = await User.findByPk(result.gardenerId, { attributes: ['id', 'name', 'fcm_token'] });
+          if (g?.fcm_token) {
+            await pushNotify.newJobAssigned(g.fcm_token, b.booking_number, b.service_address, b.scheduled_date);
+          }
+          await notificationService.notifyUser(result.gardenerId, {
+            title: '📅 New Job Assigned',
+            body: `You have a new visit ${b.booking_number} scheduled for ${b.scheduled_date}.`,
+            type: 'info',
+            data: { booking_id: b.id },
+          });
+        } catch (e) { console.error('[manualInvoice] gardener notify failed:', e.message); }
+      })();
+    }
+    if (result.booking || result.subscription) {
+      (async () => {
+        try {
+          await notificationService.notifyAdmins({
+            title: result.subscription ? '💎 New Subscription (Manual)' : '🧾 New Booking (Manual)',
+            body: `${customer_name} — ${result.invoice.invoice_number}${result.booking ? ` / ${result.booking.booking_number}` : ''}`,
+            type: 'success',
+            data: { invoice_id: result.invoice.id, booking_id: result.booking?.id || null, subscription_id: result.subscription?.id || null },
+          });
+        } catch (e) { console.error('[manualInvoice] admin notify failed:', e.message); }
+      })();
+    }
 
     res.status(201).json({
       success: true,

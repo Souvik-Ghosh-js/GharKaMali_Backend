@@ -154,8 +154,10 @@ const Booking = sequelize.define('Booking', {
   completed_at: { type: DataTypes.DATE },
   gardener_arrived_at: { type: DataTypes.DATE },
   service_address: { type: DataTypes.TEXT, allowNull: false },
-  service_latitude: { type: DataTypes.DECIMAL(10, 8), allowNull: false },
-  service_longitude: { type: DataTypes.DECIMAL(11, 8), allowNull: false },
+  // Nullable: admin/offline bookings may have no coordinates. Customer-app
+  // bookings always supply them. Null simply means "not plottable on a map".
+  service_latitude: { type: DataTypes.DECIMAL(10, 8) },
+  service_longitude: { type: DataTypes.DECIMAL(11, 8) },
   plant_count: { type: DataTypes.INTEGER, defaultValue: 1 },
   extra_plants: { type: DataTypes.INTEGER, defaultValue: 0 },
   base_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
