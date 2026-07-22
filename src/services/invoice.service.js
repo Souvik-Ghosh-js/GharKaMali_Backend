@@ -441,11 +441,12 @@ function renderInvoicePDF(inv, res) {
   // Column widths — must sum to W.
   // Column widths MUST sum to exactly W (523pt) or the table overflows the page.
   const cols = intra
-    ? [18, 118, 52, 22, 28, 48, 55, 34, 48, 48, 52]   // #, Desc, HSN, Qty, Unit, Unit Price, Taxable, GST%, CGST, SGST, Total = 523
+    ? [18, 116, 50, 21, 26, 46, 54, 40, 50, 50, 52]   // #, Desc, HSN, Qty, Unit, Unit Price, Taxable, GST%, CGST, SGST, Total = 523
     : [20, 150, 58, 26, 30, 56, 62, 42, 0, 0, 79];    // IGST variant (CGST/SGST columns collapsed) = 523
+  const CUR = `(${RS})`;
   const headers = intra
-    ? ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', 'Unit Price\n(Rs.)', 'Taxable Value\n(Rs.)', 'GST Rate\n(%)', 'CGST\n(Rs.)', 'SGST\n(Rs.)', 'Total\n(Rs.)']
-    : ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', 'Unit Price\n(Rs.)', 'Taxable Value\n(Rs.)', 'GST Rate\n(%)', '', '', 'IGST + Total\n(Rs.)'];
+    ? ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', `Unit Price\n${CUR}`, `Taxable\nValue ${CUR}`, 'GST\nRate (%)', `CGST\n${CUR}`, `SGST\n${CUR}`, `Total\n${CUR}`]
+    : ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', `Unit Price\n${CUR}`, `Taxable\nValue ${CUR}`, 'GST\nRate (%)', '', '', `IGST +\nTotal ${CUR}`];
 
   const xs = [];
   let acc = L;
@@ -585,8 +586,12 @@ function renderInvoicePDF(inv, res) {
       .strokeColor(LINE).lineWidth(0.6).stroke();
     doc.fillColor(GREEN).font(FB).fontSize(7.2).text('Scan & Pay', qrX, y + 10, { width: QR_SIZE, align: 'left' });
     try { doc.image(inv.qrBuffer, qrX, y + 22, { fit: [QR_SIZE, QR_SIZE] }); } catch { /* ignore */ }
-    doc.font(F).fontSize(5.6).fillColor(MUTED)
-      .text(`UPI ID: ${BANK.upi}`, qrX - 4, y + 26 + QR_SIZE, { width: QR_SIZE + 30 });
+    // Keep the UPI caption inside the card (right edge = L + leftW − 8pt padding).
+    const upiX = qrX - 6;
+    doc.font(F).fontSize(5.4).fillColor(MUTED)
+      .text(`UPI ID: ${BANK.upi}`, upiX, y + 26 + QR_SIZE, {
+        width: (L + leftW - 8) - upiX, lineBreak: false, ellipsis: true,
+      });
   } else {
     doc.font(F).fontSize(6.8).fillColor(MUTED)
       .text(`UPI ID: ${BANK.upi}`, L + 12, kY + 3, { width: leftW - 24 });
