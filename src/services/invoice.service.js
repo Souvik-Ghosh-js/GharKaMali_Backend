@@ -30,10 +30,10 @@ const exists = (p) => { try { return fs.existsSync(p); } catch { return false; }
 
 const LOGO_PATH = path.join(ASSETS, 'logo.png');
 const HAS_LOGO = exists(LOGO_PATH);
-// Optional handwritten signature. Drop a PNG here and it is embedded above the
-// "Authorised Signatory" line; if absent the line renders on its own.
-const SIGN_PATH = path.join(ASSETS, 'signature.png');
-const HAS_SIGN = exists(SIGN_PATH);
+// Handwritten signature, embedded above the "Authorised Signatory" line.
+// Accepts sign.png or signature.png; if neither exists the line renders alone.
+const SIGN_PATH = [path.join(ASSETS, 'sign.png'), path.join(ASSETS, 'signature.png')].find(exists) || null;
+const HAS_SIGN = !!SIGN_PATH;
 
 // Bundled DejaVu Sans (SIL Open Font License) — PDFKit's built-in Helvetica has
 // no Rupee glyph, so the whole document uses these to render "₹" correctly.
@@ -454,7 +454,7 @@ function renderInvoicePDF(inv, res) {
 
   const headH = 30;
   const drawTableHeader = () => {
-    doc.rect(L, y, W, headH).fill(GREEN);
+    doc.roundedRect(L, y, W, headH, 6).fill(GREEN);
     doc.fillColor('#fff').font(FB).fontSize(6.8);
     headers.forEach((h, i) => {
       if (!cols[i]) return;
@@ -546,7 +546,7 @@ function renderInvoicePDF(inv, res) {
     tY += 17;
   });
   const gtY = tY + 4;
-  doc.rect(rightX, gtY, rightW, 30).fill(GREEN);
+  doc.roundedRect(rightX, gtY, rightW, 30, 6).fill(GREEN);
   doc.fillColor('#fff').font(FB).fontSize(10.5)
     .text('GRAND TOTAL', rightX + 12, gtY + 11, { width: tLabelW - 6 });
   doc.fontSize(12.5).text(`${RS} ${num(inv.totals.grand)}`, tValX, gtY + 9, { width: tValW, align: 'right' });
@@ -625,7 +625,12 @@ function renderInvoicePDF(inv, res) {
 
   // Handwritten signature (optional asset) sits just above the ruled line.
   if (HAS_SIGN) {
-    try { doc.image(SIGN_PATH, sigX + 4, y - 4, { fit: [88, 30] }); } catch { /* ignore */ }
+    // Sits just above the ruled line (line is at y+28), bottom-aligned to it so
+    // the pen stroke visually rests on the line as in the approved design.
+    const SIG_H = 32, SIG_W = 74;
+    try {
+      doc.image(SIGN_PATH, sigX + 6, y + 28 - SIG_H, { fit: [SIG_W, SIG_H], align: 'left', valign: 'bottom' });
+    } catch { /* asset unreadable — fall through to the plain line */ }
   }
   // Signature line sits above the caption, inside its own column.
   doc.moveTo(sigX, y + 28).lineTo(R, y + 28).strokeColor(TEXT).lineWidth(0.7).stroke();
