@@ -25,8 +25,27 @@ const {
 } = require('../config/invoice.config');
 const { getOrCreateInvoiceNumber } = require('./invoiceNumber.service');
 
-const LOGO_PATH = path.join(__dirname, '..', 'assets', 'logo.png');
-const HAS_LOGO = (() => { try { return fs.existsSync(LOGO_PATH); } catch { return false; } })();
+const ASSETS = path.join(__dirname, '..', 'assets');
+const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
+
+const LOGO_PATH = path.join(ASSETS, 'logo.png');
+const HAS_LOGO = exists(LOGO_PATH);
+// Optional handwritten signature. Drop a PNG here and it is embedded above the
+// "Authorised Signatory" line; if absent the line renders on its own.
+const SIGN_PATH = path.join(ASSETS, 'signature.png');
+const HAS_SIGN = exists(SIGN_PATH);
+
+// Bundled DejaVu Sans (SIL Open Font License) — PDFKit's built-in Helvetica has
+// no Rupee glyph, so the whole document uses these to render "₹" correctly.
+const FONT_DIR = path.join(ASSETS, 'fonts');
+const FONT_REG_PATH = path.join(FONT_DIR, 'DejaVuSans.ttf');
+const FONT_BOLD_PATH = path.join(FONT_DIR, 'DejaVuSans-Bold.ttf');
+const HAS_UNICODE_FONT = exists(FONT_REG_PATH) && exists(FONT_BOLD_PATH);
+// Font aliases used throughout the renderer.
+const F = HAS_UNICODE_FONT ? 'Body' : 'Helvetica';
+const FB = HAS_UNICODE_FONT ? 'BodyBold' : 'Helvetica-Bold';
+// Rupee sign only when we have a font that can draw it.
+const RS = HAS_UNICODE_FONT ? '₹' : 'Rs.';
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
 const num = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -312,6 +331,14 @@ function renderInvoicePDF(inv, res) {
   const L = 36;                 // left margin
   const R = 559;                // right edge (595 - 36)
   const W = R - L;
+
+  // Register the bundled Unicode fonts so "₹" renders (Helvetica lacks the glyph).
+  if (HAS_UNICODE_FONT) {
+    try {
+      doc.registerFont('Body', FONT_REG_PATH);
+      doc.registerFont('BodyBold', FONT_BOLD_PATH);
+    } catch { /* fall back to Helvetica aliases */ }
+  }
   doc.pipe(res);
 
   let y = 30;
@@ -320,22 +347,34 @@ function renderInvoicePDF(inv, res) {
   if (HAS_LOGO) {
     try { doc.image(LOGO_PATH, L, y, { fit: [110, 58] }); } catch { /* ignore */ }
   }
-  const coX = L + 125;
-  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(13).text(COMPANY.legalName, coX, y);
-  doc.fillColor(TEXT).font('Helvetica').fontSize(8).text(`(Brand Name: ${COMPANY.brand})`, coX, y + 16);
-  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(8).text(`CIN: ${COMPANY.cin}`, coX, y + 28);
-  doc.font('Helvetica-Bold').fontSize(8).text('Registered Office:', coX, y + 42);
-  let addrY = y + 53;
-  doc.font('Helvetica').fontSize(8).fillColor(TEXT);
-  COMPANY.addressLines.forEach((ln) => { doc.text(ln, coX, addrY); addrY += 10; });
+  const coX = L + 118;
+  // The right-hand meta box starts at R-250; keep the company block clear of it
+  // (with an 8pt gutter) so no header text can ever run into it.
+  const META_X = R - 250;
+  const coW = META_X - 8 - coX;
+  // Header lines FLOW from measured heights so a wrapping company name can never
+  // be overlapped by the lines beneath it.
+  let hY = y;
+  const coNameH = doc.font(FB).fontSize(11).heightOfString(COMPANY.legalName, { width: coW });
+  doc.fillColor(DARK).text(COMPANY.legalName, coX, hY, { width: coW });
+  hY += Math.max(14, coNameH + 1);
+  doc.fillColor(TEXT).font(F).fontSize(7.2).text(`(Brand Name: ${COMPANY.brand})`, coX, hY, { width: coW, lineBreak: false, ellipsis: true });
+  hY += 11;
+  doc.fillColor(TEXT).font(FB).fontSize(7.2).text(`CIN: ${COMPANY.cin}`, coX, hY, { width: coW, lineBreak: false, ellipsis: true });
+  hY += 13;
+  doc.font(FB).fontSize(7.2).text('Registered Office:', coX, hY, { width: coW });
+  let addrY = hY + 11;
+  doc.font(F).fontSize(7).fillColor(TEXT);
+  COMPANY.addressLines.forEach((ln) => { doc.text(ln, coX, addrY, { width: coW, lineBreak: false, ellipsis: true }); addrY += 9.5; });
   addrY += 3;
-  doc.fillColor(TEXT).fontSize(8)
-    .text(`Phone:  ${COMPANY.phone}`, coX, addrY)
-    .text(`Email:  ${COMPANY.email}`, coX, addrY + 11)
-    .text(`Web:    ${COMPANY.website}`, coX, addrY + 22);
+  const clip = { width: coW, lineBreak: false, ellipsis: true };
+  doc.fillColor(TEXT).fontSize(7)
+    .text(`Phone:  ${COMPANY.phone}`, coX, addrY, clip)
+    .text(`Email:  ${COMPANY.email}`, coX, addrY + 10, clip)
+    .text(`Web:    ${COMPANY.website}`, coX, addrY + 20, clip);
 
   // TAX INVOICE title
-  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(19).text('TAX INVOICE', R - 200, y, { width: 200, align: 'right' });
+  doc.fillColor(GREEN).font(FB).fontSize(19).text('TAX INVOICE', R - 200, y, { width: 200, align: 'right' });
 
   // Meta box
   const boxX = R - 250, boxY = y + 32, boxW = 250;
@@ -349,13 +388,13 @@ function renderInvoicePDF(inv, res) {
     ['Payment Status', inv.paymentStatus],
   ];
   const boxH = meta.length * 15 + 12;
-  doc.roundedRect(boxX, boxY, boxW, boxH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.roundedRect(boxX, boxY, boxW, boxH, 8).lineWidth(0.8).strokeColor(LINE).stroke();
   let mY = boxY + 8;
   meta.forEach(([k, v]) => {
-    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(k, boxX + 10, mY, { width: 88 });
+    doc.font(F).fontSize(8).fillColor(MUTED).text(k, boxX + 10, mY, { width: 88 });
     doc.fillColor(MUTED).text(':', boxX + 100, mY);
     const isPaid = k === 'Payment Status';
-    doc.font(isPaid ? 'Helvetica-Bold' : 'Helvetica').fillColor(isPaid ? GREEN : TEXT)
+    doc.font(isPaid ? FB : F).fillColor(isPaid ? GREEN : TEXT)
       .text(String(v), boxX + 108, mY, { width: boxW - 118 });
     mY += 15;
   });
@@ -364,28 +403,32 @@ function renderInvoicePDF(inv, res) {
 
   // ═══ BILL TO / SERVICE DETAILS ═══
   const panelH = 118;
-  doc.roundedRect(L, y, W, panelH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.roundedRect(L, y, W, panelH, 8).lineWidth(0.8).strokeColor(LINE).stroke();
   const midX = L + W / 2;
   doc.moveTo(midX, y + 10).lineTo(midX, y + panelH - 10).strokeColor(LINE).lineWidth(0.6).stroke();
 
-  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('BILL TO', L + 14, y + 12);
+  doc.fillColor(GREEN).font(FB).fontSize(8.5).text('BILL TO', L + 14, y + 12);
   doc.fillColor(GREEN).text('SERVICE DETAILS', midX + 14, y + 12);
 
   let bY = y + 28;
-  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(9.5).text(inv.billTo.name, L + 14, bY, { width: W / 2 - 28 });
-  bY += 14;
-  doc.font('Helvetica').fontSize(8).fillColor(TEXT);
+  // Advance by the name's ACTUAL height — long names wrap to 2+ lines and would
+  // otherwise be overlapped by the address block.
+  const nameW = W / 2 - 28;
+  const nameH = doc.font(FB).fontSize(9.5).heightOfString(inv.billTo.name, { width: nameW });
+  doc.fillColor(TEXT).text(inv.billTo.name, L + 14, bY, { width: nameW });
+  bY += Math.max(14, nameH + 2);
+  doc.font(F).fontSize(8).fillColor(TEXT);
   inv.billTo.lines.forEach((ln) => {
     const h = doc.heightOfString(ln, { width: W / 2 - 28 });
     doc.text(ln, L + 14, bY, { width: W / 2 - 28 });
     bY += Math.max(10, h);
   });
-  if (inv.billTo.phone) { doc.font('Helvetica-Bold').text(`Phone: ${inv.billTo.phone}`, L + 14, bY); bY += 11; }
-  if (inv.billTo.gstin) { doc.font('Helvetica-Bold').text(`GSTIN: ${inv.billTo.gstin}`, L + 14, bY); }
+  if (inv.billTo.phone) { doc.font(FB).text(`Phone: ${inv.billTo.phone}`, L + 14, bY); bY += 11; }
+  if (inv.billTo.gstin) { doc.font(FB).text(`GSTIN: ${inv.billTo.gstin}`, L + 14, bY); }
 
   let sY = y + 28;
   Object.entries(inv.serviceDetails).forEach(([k, v]) => {
-    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(k, midX + 14, sY, { width: 92 });
+    doc.font(F).fontSize(8).fillColor(MUTED).text(k, midX + 14, sY, { width: 92 });
     doc.text(':', midX + 108, sY);
     doc.fillColor(TEXT).text(String(v), midX + 116, sY, { width: W / 2 - 130 });
     sY += 13;
@@ -409,19 +452,38 @@ function renderInvoicePDF(inv, res) {
   cols.forEach((w) => { xs.push(acc); acc += w; });
 
   const headH = 30;
-  doc.rect(L, y, W, headH).fill(GREEN);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(6.8);
-  headers.forEach((h, i) => {
-    if (!cols[i]) return;
-    const align = i === 1 ? 'left' : (i >= 5 ? 'right' : 'center');
-    doc.text(h, xs[i] + 3, y + 6, { width: cols[i] - 6, align, lineGap: 1 });
-  });
-  y += headH;
+  const drawTableHeader = () => {
+    doc.rect(L, y, W, headH).fill(GREEN);
+    doc.fillColor('#fff').font(FB).fontSize(6.8);
+    headers.forEach((h, i) => {
+      if (!cols[i]) return;
+      const align = i === 1 ? 'left' : (i >= 5 ? 'right' : 'center');
+      doc.text(h, xs[i] + 3, y + 6, { width: cols[i] - 6, align, lineGap: 1 });
+    });
+    y += headH;
+  };
+  drawTableHeader();
 
-  doc.font('Helvetica').fontSize(7.4);
+  // Reserve room for the summary block (words + totals + bank + terms + footer)
+  // so the table breaks to a new page instead of colliding with it.
+  const PAGE_BOTTOM = 812;
+  // Measured height of everything that follows the table (words/totals + bank +
+  // terms/signatory + footer). Kept tight so short invoices stay on one page.
+  const SUMMARY_RESERVE = 290;
+
+  doc.font(F).fontSize(7.4);
   inv.rows.forEach((r, idx) => {
-    const descH = doc.heightOfString(r.description, { width: cols[1] - 6 });
+    const descH = doc.font(F).fontSize(7.4).heightOfString(r.description, { width: cols[1] - 6 });
     const rowH = Math.max(26, descH + 12);
+
+    // Page-break when this row would run into the reserved summary area.
+    if (y + rowH > PAGE_BOTTOM - SUMMARY_RESERVE && idx < inv.rows.length) {
+      doc.addPage();
+      y = 40;
+      drawTableHeader();
+      doc.font(F).fontSize(7.4);
+    }
+
     if (idx % 2 === 1) doc.rect(L, y, W, rowH).fill(PANEL);
     const cells = intra
       ? [String(idx + 1), r.description, r.hsn, String(r.qty), r.unit, num(r.unitPrice), num(r.taxable), `${r.gstRate}%`, num(r.cgst), num(r.sgst), num(r.total)]
@@ -430,7 +492,7 @@ function renderInvoicePDF(inv, res) {
       if (!cols[i]) return;
       const align = i === 1 ? 'left' : (i >= 5 ? 'right' : 'center');
       const bold = i === cells.length - 1;
-      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT)
+      doc.font(bold ? FB : F).fontSize(7.4).fillColor(TEXT)
         .text(c, xs[i] + 3, y + 6, { width: cols[i] - 6, align });
     });
     doc.moveTo(L, y + rowH).lineTo(R, y + rowH).strokeColor(LINE).lineWidth(0.5).stroke();
@@ -439,13 +501,19 @@ function renderInvoicePDF(inv, res) {
 
   y += 14;
 
+  // If the summary block wouldn't fit below the table, start a fresh page.
+  if (y + SUMMARY_RESERVE > PAGE_BOTTOM) {
+    doc.addPage();
+    y = 40;
+  }
+
   // ═══ AMOUNT IN WORDS + TOTALS ═══
   const leftW = W * 0.52;
   const rightX = L + leftW + 12;
   const rightW = R - rightX;
 
   const words = amountInWords(inv.totals.grand);
-  const wordsH = doc.font('Helvetica').fontSize(8.5).heightOfString(words, { width: leftW - 60 }) + 34;
+  const wordsH = doc.font(F).fontSize(8.5).heightOfString(words, { width: leftW - 60 }) + 34;
 
   const totalRows = [
     ['Total Taxable Value', inv.totals.taxable],
@@ -458,81 +526,147 @@ function renderInvoicePDF(inv, res) {
   const blockH = Math.max(wordsH, totalsH);
 
   // Amount in words panel
-  doc.roundedRect(L, y, leftW, blockH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.roundedRect(L, y, leftW, blockH, 8).lineWidth(0.8).strokeColor(LINE).stroke();
   doc.circle(L + 22, y + 20, 11).fill(GREEN);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(11).text('Rs', L + 15, y + 15);
-  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('Amount in Words', L + 40, y + 12);
-  doc.fillColor(TEXT).font('Helvetica').fontSize(8.5).text(words, L + 40, y + 26, { width: leftW - 54 });
+  doc.fillColor('#fff').font(FB).fontSize(11).text(RS, L + 16, y + 14);
+  doc.fillColor(GREEN).font(FB).fontSize(8.5).text('Amount in Words', L + 40, y + 12);
+  doc.fillColor(TEXT).font(F).fontSize(8.5).text(words, L + 40, y + 26, { width: leftW - 54 });
 
-  // Totals
+  // Totals — label and value get separate, non-overlapping columns so a long
+  // label or a large amount can never collide (the "Total AmouRst" bug).
+  const tLabelX = rightX + 10;
+  const tLabelW = rightW * 0.52;
+  const tValX = tLabelX + tLabelW + 6;
+  const tValW = R - tValX - 6;
   let tY = y;
   totalRows.forEach(([label, val]) => {
-    doc.fillColor(TEXT).font('Helvetica').fontSize(8.5).text(label, rightX + 10, tY + 4, { width: rightW * 0.55 });
-    doc.font('Helvetica-Bold').text(`Rs. ${num(val)}`, rightX, tY + 4, { width: rightW - 12, align: 'right' });
+    doc.fillColor(TEXT).font(F).fontSize(8.5).text(label, tLabelX, tY + 4, { width: tLabelW });
+    doc.font(FB).text(`${RS} ${num(val)}`, tValX, tY + 4, { width: tValW, align: 'right' });
     tY += 17;
   });
   const gtY = tY + 4;
   doc.rect(rightX, gtY, rightW, 30).fill(GREEN);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(11).text('GRAND TOTAL', rightX + 12, gtY + 10);
-  doc.fontSize(13).text(`Rs. ${num(inv.totals.grand)}`, rightX, gtY + 8, { width: rightW - 12, align: 'right' });
+  doc.fillColor('#fff').font(FB).fontSize(10.5)
+    .text('GRAND TOTAL', rightX + 12, gtY + 11, { width: tLabelW - 6 });
+  doc.fontSize(12.5).text(`${RS} ${num(inv.totals.grand)}`, tValX, gtY + 9, { width: tValW, align: 'right' });
 
   y += blockH + 16;
 
-  // ═══ BANK DETAILS ═══
-  const bankH = 74;
-  doc.roundedRect(L, y, leftW, bankH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
-  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8).text('BANK DETAILS', L + 12, y + 10);
+  // ═══ BANK DETAILS (+ Scan & Pay QR) ═══
+  // Two columns inside one rounded card: account details | UPI QR code.
   const bank = [
     ['Bank Name', BANK.name], ['A/C Name', BANK.accountName],
     ['A/C Number', BANK.accountNumber], ['IFSC Code', BANK.ifsc],
   ];
-  let kY = y + 24;
+  const BANK_ROW_H = 12;
+  const QR_SIZE = 62;
+  const hasQR = !!inv.qrBuffer;
+  const bankRowsH = 26 + bank.length * BANK_ROW_H;
+  const bankH = Math.max(bankRowsH, hasQR ? QR_SIZE + 34 : 0) + 14;
+  const qrColW = hasQR ? QR_SIZE + 26 : 0;
+  const detailW = leftW - qrColW;
+
+  doc.roundedRect(L, y, leftW, bankH, 8).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.fillColor(GREEN).font(FB).fontSize(8).text('BANK DETAILS', L + 12, y + 10);
+  let kY = y + 26;
   bank.forEach(([k, v]) => {
-    doc.font('Helvetica').fontSize(7.4).fillColor(MUTED).text(k, L + 12, kY, { width: 60 });
-    doc.text(':', L + 74, kY);
-    doc.fillColor(TEXT).text(v, L + 82, kY, { width: leftW - 96 });
-    kY += 11;
+    doc.font(F).fontSize(6.6).fillColor(MUTED).text(k, L + 12, kY, { width: 52 });
+    doc.text(':', L + 66, kY);
+    // lineBreak:false keeps long values (e.g. the legal name) on one line so the
+    // next row can never be overlapped.
+    doc.fillColor(TEXT).text(v, L + 74, kY, { width: detailW - 86, lineBreak: false, ellipsis: true });
+    kY += BANK_ROW_H;
   });
-  doc.font('Helvetica').fontSize(6.6).fillColor(MUTED)
-    .text(`UPI ID: ${BANK.upi}`, L + 12, y + bankH - 12);
+
+  if (hasQR) {
+    const qrX = L + detailW + 4;
+    // Divider between details and the QR column.
+    doc.moveTo(qrX - 6, y + 10).lineTo(qrX - 6, y + bankH - 10)
+      .strokeColor(LINE).lineWidth(0.6).stroke();
+    doc.fillColor(GREEN).font(FB).fontSize(7.2).text('Scan & Pay', qrX, y + 10, { width: QR_SIZE, align: 'left' });
+    try { doc.image(inv.qrBuffer, qrX, y + 22, { fit: [QR_SIZE, QR_SIZE] }); } catch { /* ignore */ }
+    doc.font(F).fontSize(5.6).fillColor(MUTED)
+      .text(`UPI ID: ${BANK.upi}`, qrX - 4, y + 26 + QR_SIZE, { width: QR_SIZE + 30 });
+  } else {
+    doc.font(F).fontSize(6.8).fillColor(MUTED)
+      .text(`UPI ID: ${BANK.upi}`, L + 12, kY + 3, { width: leftW - 24 });
+  }
 
   y += bankH + 14;
 
   // ═══ TERMS + THANK YOU + SIGNATORY ═══
-  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('Terms & Conditions', L, y);
+  // Three non-overlapping columns across the page width:
+  //   terms | thank-you | signatory
+  const termsW = W * 0.44;
+  const thanksX = L + termsW + 10;
+  const thanksW = W * 0.26;
+  const sigX = thanksX + thanksW + 10;
+  const sigW = R - sigX;
+
+  doc.fillColor(GREEN).font(FB).fontSize(8.5).text('Terms & Conditions', L, y);
   let tcY = y + 14;
-  doc.font('Helvetica').fontSize(7).fillColor(TEXT);
+  doc.font(F).fontSize(7).fillColor(TEXT);
   TERMS.forEach((t) => {
-    doc.text(`•  ${t}`, L, tcY, { width: leftW - 10 });
-    tcY += 11;
+    const h = doc.heightOfString(`•  ${t}`, { width: termsW });
+    doc.text(`•  ${t}`, L, tcY, { width: termsW });
+    tcY += Math.max(11, h + 2);
   });
 
-  doc.fillColor(GREEN).font('Helvetica-BoldOblique').fontSize(13).text('Thank You!', L + leftW + 20, y + 4, { width: 120, align: 'center' });
-  doc.fillColor(TEXT).font('Helvetica').fontSize(7.6)
-    .text('For choosing GharKaMali.', L + leftW + 10, y + 24, { width: 140, align: 'center' })
-    .text('We grow happiness at your home.', L + leftW + 10, y + 34, { width: 140, align: 'center' });
+  doc.fillColor(GREEN).font('Helvetica-BoldOblique').fontSize(13)
+    .text('Thank You!', thanksX, y + 2, { width: thanksW, align: 'center' });
+  doc.fillColor(TEXT).font(F).fontSize(7.4)
+    .text('For choosing GharKaMali.', thanksX, y + 22, { width: thanksW, align: 'center' })
+    .text('We grow happiness at your home.', thanksX, y + 33, { width: thanksW, align: 'center' });
 
-  const sigX = R - 165;
-  doc.moveTo(sigX, y + 30).lineTo(R, y + 30).strokeColor(TEXT).lineWidth(0.7).stroke();
-  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(8).text('Authorised Signatory', sigX, y + 36, { width: 165, align: 'left' });
-  doc.font('Helvetica').fontSize(7).fillColor(MUTED)
-    .text(`For ${COMPANY.legalName}`, sigX, y + 47, { width: 165 })
-    .text(`(Brand Name: ${COMPANY.brand})`, sigX, y + 57, { width: 165 });
+  // Handwritten signature (optional asset) sits just above the ruled line.
+  if (HAS_SIGN) {
+    try { doc.image(SIGN_PATH, sigX + 4, y - 4, { fit: [88, 30] }); } catch { /* ignore */ }
+  }
+  // Signature line sits above the caption, inside its own column.
+  doc.moveTo(sigX, y + 28).lineTo(R, y + 28).strokeColor(TEXT).lineWidth(0.7).stroke();
+  doc.fillColor(TEXT).font(FB).fontSize(8)
+    .text('Authorised Signatory', sigX, y + 34, { width: sigW });
+  doc.font(F).fontSize(6.8).fillColor(MUTED)
+    .text(`For ${COMPANY.legalName}`, sigX, y + 46, { width: sigW })
+    .text(`(Brand Name: ${COMPANY.brand})`, sigX, y + 56, { width: sigW });
 
-  y = Math.max(tcY, y + 72) + 10;
+  y = Math.max(tcY, y + 70) + 12;
 
   // ═══ FOOTER BADGES ═══
+  // Pinned to the bottom of the page (as in the approved design). Content above
+  // is kept clear of it by SUMMARY_RESERVE, so it never overlaps.
   const footH = 26;
-  const footY = Math.min(y, 800 - footH);
+  const footY = 842 - footH;
   doc.rect(0, footY, 595, footH).fill(PANEL);
   const seg = 595 / FOOTER_BADGES.length;
   FOOTER_BADGES.forEach((b, i) => {
-    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(6.4)
+    doc.fillColor(GREEN).font(FB).fontSize(6.4)
       .text(b, i * seg, footY + 10, { width: seg, align: 'center' });
     if (i) doc.moveTo(i * seg, footY + 6).lineTo(i * seg, footY + footH - 6).strokeColor(LINE).lineWidth(0.5).stroke();
   });
 
   doc.end();
+}
+
+// Build a UPI deep-link QR ("Scan & Pay"). Returns a PNG Buffer, or null if the
+// qrcode package is unavailable — the invoice still renders without it.
+async function buildUpiQr(amount) {
+  try {
+    const QRCode = require('qrcode');
+    const params = new URLSearchParams({
+      pa: BANK.upi,                       // payee address
+      pn: COMPANY.legalName,              // payee name
+      cu: 'INR',
+    });
+    if (amount != null && Number(amount) > 0) params.set('am', Number(amount).toFixed(2));
+    const upiUrl = `upi://pay?${params.toString()}`;
+    return await QRCode.toBuffer(upiUrl, {
+      type: 'png', errorCorrectionLevel: 'M', margin: 1, width: 240,
+      color: { dark: '#111111', light: '#ffffff' },
+    });
+  } catch {
+    return null; // qrcode not installed / generation failed — render without QR
+  }
 }
 
 // ── PUBLIC ───────────────────────────────────────────────────────────────────
@@ -542,6 +676,9 @@ async function streamInvoice(type, id, res) {
 
   const inv = await builder(id);
   if (!inv) { res.status(404).json({ success: false, message: `${type} not found` }); return; }
+
+  // Pre-generate the UPI "Scan & Pay" QR (async) so the sync renderer can embed it.
+  inv.qrBuffer = await buildUpiQr(inv.totals?.grand);
 
   const safe = String(inv.invoiceNumber).replace(/[^\w.-]+/g, '-');
   res.setHeader('Content-Type', 'application/pdf');
