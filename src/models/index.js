@@ -701,6 +701,31 @@ const SystemSetting = sequelize.define('SystemSetting', {
   updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'system_settings', underscored: true });
 
+// ─── INVOICE COUNTER (financial-year sequential numbering) ───────────────────
+// One row per financial year ("25-26") holding the last issued sequence. Used to
+// mint GST-compliant sequential invoice numbers like GKM/25-26/000123.
+const InvoiceCounter = sequelize.define('InvoiceCounter', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  financial_year: { type: DataTypes.STRING(10), allowNull: false, unique: true },
+  last_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+}, { tableName: 'invoice_counters', underscored: true });
+
+// ─── ISSUED INVOICE NUMBERS ──────────────────────────────────────────────────
+// Persists the invoice number assigned to a given entity so re-downloading an
+// invoice always returns the SAME number (a tax invoice number must be stable).
+const IssuedInvoice = sequelize.define('IssuedInvoice', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  entity_type: { type: DataTypes.ENUM('booking', 'subscription', 'order', 'manual'), allowNull: false },
+  entity_id: { type: DataTypes.INTEGER, allowNull: false },
+  invoice_number: { type: DataTypes.STRING(40), allowNull: false, unique: true },
+  financial_year: { type: DataTypes.STRING(10), allowNull: false },
+  seq: { type: DataTypes.INTEGER, allowNull: false },
+}, {
+  tableName: 'issued_invoices',
+  underscored: true,
+  indexes: [{ unique: true, fields: ['entity_type', 'entity_id'] }],
+});
+
 // ─── MANUAL INVOICE (admin-created, for offline customers) ───────────────────
 // One row per admin-generated invoice. May be pure invoice-only (no booking) or
 // linked to a Booking / Subscription the admin also created from the same form.
@@ -880,6 +905,8 @@ ManualInvoice.belongsTo(Subscription, { foreignKey: 'subscription_id', as: 'subs
 
 module.exports = {
   ManualInvoice,
+  InvoiceCounter,
+  IssuedInvoice,
   Product,
   ProductCategory,
   Order,

@@ -294,6 +294,29 @@ router.post('/admin/manual-invoice', authenticate, authorize('admin', 'superviso
 router.get('/admin/manual-invoices', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.listManualInvoices);
 router.get('/admin/manual-invoices/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('manual'));
 
+// ── CUSTOMER-FACING INVOICES ────────────────────────────────────────────────────
+// The website and mobile app download the SAME PDF the admin does, so every
+// channel produces a byte-identical invoice. Ownership is enforced: a customer
+// may only download an invoice for their own booking / subscription / order.
+const ownedInvoiceHandler = (type, model, ownerField = 'customer_id') => async (req, res) => {
+  try {
+    const { Booking, Subscription, Order } = require('../models');
+    const Models = { Booking, Subscription, Order };
+    const record = await Models[model].findByPk(req.params.id, { attributes: ['id', ownerField] });
+    if (!record) return res.status(404).json({ success: false, message: `${type} not found` });
+    if (record[ownerField] !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'You can only download your own invoice' });
+    }
+    await streamInvoice(type, req.params.id, res);
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
+    else res.end();
+  }
+};
+router.get('/bookings/:id/invoice', authenticate, ownedInvoiceHandler('booking', 'Booking'));
+router.get('/subscriptions/:id/invoice', authenticate, ownedInvoiceHandler('subscription', 'Subscription'));
+router.get('/shop/orders/:id/invoice', authenticate, ownedInvoiceHandler('order', 'Order'));
+
 router.post('/admin/rewards', authenticate, authorize('admin'), adminCtrl.createRewardPenalty);
 router.get('/admin/rewards', authenticate, authorize('admin'), adminCtrl.getRewardPenalties);
 

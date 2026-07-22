@@ -1,166 +1,197 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Invoice service — the single source of truth for GharKaMali tax invoices.
+// Invoice service — THE single source of truth for every GharKaMali tax invoice.
 //
-// This mirrors the CUSTOMER WEBSITE invoices EXACTLY (the website is the
-// reference design). Admin dashboard and the mobile app both call the same
-// /invoice endpoints, so every channel produces an identical document:
-//   - website:  GharKaMali_Website/src/app/shop/orders/[id]/page.tsx (downloadBill)
-//   - website:  GharKaMali_Website/src/app/bookings/[id]/page.tsx    (downloadBill)
+// Admin dashboard, the customer website, and the mobile app all download the PDF
+// produced here, so there is exactly one invoice implementation and zero drift.
 //
-// Legal identity, GSTIN, and the SGST+CGST (intra-state UP) vs IGST (inter-state)
-// split all match the website. Keep the three builders below in sync with those
-// two website files if the invoice ever changes.
+// Layout follows the approved GST tax-invoice design: logo + company block,
+// boxed invoice meta, Bill To / Service Details panels, an HSN/SAC line-item
+// table with per-line CGST/SGST (or IGST), amount in words, bank details,
+// terms & conditions, signatory, and footer badges.
+//
+// Company constants, HSN mapping, state codes and number-to-words live in
+// src/config/invoice.config.js.
 // ─────────────────────────────────────────────────────────────────────────────
 const path = require('path');
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const {
-  Booking, Subscription, Order, OrderItem, Product, User, ServicePlan, Geofence,
-  BookingAddOn, AddOnService,
+  Booking, Subscription, Order, OrderItem, Product, ProductCategory, User,
+  ServicePlan, Geofence, BookingAddOn, AddOnService, ManualInvoice,
 } = require('../models');
+const {
+  COMPANY, BANK, TERMS, FOOTER_BADGES, SERVICE_SAC, hsnForProduct,
+  placeOfSupply, amountInWords,
+} = require('../config/invoice.config');
+const { getOrCreateInvoiceNumber } = require('./invoiceNumber.service');
 
-// Seller identity — GharKaMali is the brand; Plantura Care Pvt Ltd is the
-// registered legal entity. Both appear on the invoice, matching the website.
-const SELLER = {
-  brand: process.env.INVOICE_BRAND || 'GharKaMali',
-  legalName: process.env.INVOICE_COMPANY || 'Plantura Care Pvt Ltd',
-  tagline: process.env.INVOICE_TAGLINE || 'Trusted plant care and gardening services',
-  gstin: process.env.INVOICE_GSTIN || '09AAQCP7633P1ZD',
-  address: process.env.INVOICE_ADDRESS || 'Noida, Uttar Pradesh — 201301',
-  supportEmail: process.env.INVOICE_SUPPORT_EMAIL || 'support@gharkamali.com',
-  site: process.env.INVOICE_SITE || 'gharkamali.com',
-};
-
-// Bundled logo (copied from the website's /public/logo.png). Resolved once.
 const LOGO_PATH = path.join(__dirname, '..', 'assets', 'logo.png');
 const HAS_LOGO = (() => { try { return fs.existsSync(LOGO_PATH); } catch { return false; } })();
 
-const money = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// ── Formatting helpers ───────────────────────────────────────────────────────
+const num = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dLong = (d) => (d ? new Date(d) : new Date()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' });
 const dShort = (d) => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Mirrors the website's intra-state test: UP addresses (Noida / Greater Noida /
-// Ghaziabad / "uttar pradesh") get SGST+CGST; everything else gets IGST.
-const isUPAddress = (...parts) => {
+// Intra-state (home state) → CGST+SGST; otherwise IGST.
+const HOME_STATE_KEYWORDS = ['uttar pradesh', 'noida', 'greater noida', 'ghaziabad'];
+const isIntraState = (...parts) => {
   const addr = parts.filter(Boolean).join(' ').toLowerCase();
-  return addr.includes('uttar pradesh') || addr.includes('noida') ||
-    addr.includes('greater noida') || addr.includes('ghaziabad');
+  return HOME_STATE_KEYWORDS.some((k) => addr.includes(k));
 };
 
-// ── DATA BUILDERS — each returns a normalized invoice object ──────────────────
-// { kind, reference, dateLong, dateShort, statusBadge, seller(fixed),
-//   billTo{name,lines[]}, meta{label:value}, items[{name,qty?,price?,amount}],
-//   hasQty, subtotalLabel, subtotal, taxRows[{label,value}], shippingFree,
-//   total, gstNote }
+/**
+ * Turn raw line inputs into fully-taxed invoice rows.
+ * Each input: { description, hsn, qty, unit, unitPrice, gstRate, taxableOverride? }
+ * `inclusive` = the unitPrice already contains GST (bookings/subscriptions).
+ */
+function buildLineRows(inputs, { inclusive, intra }) {
+  return inputs.map((it) => {
+    const qty = Number(it.qty) || 1;
+    const gstRate = Number(it.gstRate) || 0;
+    const gross = it.taxableOverride != null
+      ? Number(it.taxableOverride)
+      : round2((Number(it.unitPrice) || 0) * qty);
+    // For GST-inclusive pricing, back out the taxable value.
+    const taxable = inclusive && gstRate
+      ? round2(gross / (1 + gstRate / 100))
+      : gross;
+    const tax = round2(taxable * (gstRate / 100));
+    const half = round2(tax / 2);
+    const unitPrice = it.unitPrice != null
+      ? round2(inclusive && gstRate ? Number(it.unitPrice) / (1 + gstRate / 100) : Number(it.unitPrice))
+      : round2(taxable / qty);
+    return {
+      description: it.description,
+      hsn: it.hsn || SERVICE_SAC,
+      qty,
+      unit: it.unit || 'Nos',
+      unitPrice,
+      taxable,
+      gstRate,
+      cgst: intra ? half : 0,
+      sgst: intra ? half : 0,
+      igst: intra ? 0 : tax,
+      total: round2(taxable + tax),
+    };
+  });
+}
+
+function totalsFrom(rows) {
+  const taxable = round2(rows.reduce((s, r) => s + r.taxable, 0));
+  const cgst = round2(rows.reduce((s, r) => s + r.cgst, 0));
+  const sgst = round2(rows.reduce((s, r) => s + r.sgst, 0));
+  const igst = round2(rows.reduce((s, r) => s + r.igst, 0));
+  const grand = round2(taxable + cgst + sgst + igst);
+  return { taxable, cgst, sgst, igst, totalGst: round2(cgst + sgst + igst), grand };
+}
+
+// ── BUILDERS ─────────────────────────────────────────────────────────────────
 
 async function buildBookingInvoice(id) {
   const b = await Booking.findByPk(id, {
     include: [
-      { model: User, as: 'customer', attributes: ['name', 'phone', 'email'] },
-      { model: Subscription, as: 'subscription', include: [{ model: ServicePlan, as: 'plan', attributes: ['name'] }] },
+      { model: User, as: 'customer', attributes: ['name', 'phone', 'email', 'address', 'city', 'state', 'pincode'] },
+      { model: User, as: 'gardener', attributes: ['name'] },
+      { model: Subscription, as: 'subscription', include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'visits_per_month', 'max_plants'] }] },
       { model: BookingAddOn, as: 'addons', include: [{ model: AddOnService, as: 'addon', attributes: ['name', 'price'] }] },
-      { model: Geofence, as: 'geofenceRef', attributes: ['name', 'city'] },
+      { model: Geofence, as: 'geofenceRef', attributes: ['name', 'city', 'state'] },
     ],
   });
   if (!b) return null;
+
   const c = b.customer;
+  const state = c?.state || b.geofenceRef?.state || '';
+  const intra = isIntraState(b.service_address, state, b.geofenceRef?.city);
+  const plan = b.subscription?.plan;
   const total = Number(b.total_amount) || 0;
-  // Booking totals are GST-INCLUSIVE (× 1.18) — derive taxable + GST like website.
-  const subtotal = Math.round((total / 1.18) * 100) / 100;
-  const gstAmt = Math.round((total - subtotal) * 100) / 100;
-  const halfGst = gstAmt / 2;
-  const baseAmt = Number(b.base_amount) || subtotal;
-  const isUP = isUPAddress(b.service_address);
-  // A booking's plan name comes via its subscription (bookings have no direct plan).
-  const planName = b.subscription?.plan?.name;
+  const base = Number(b.base_amount) || total;
 
-  // Line items mirror the website: the visit line + one line per add-on.
-  const items = [
-    { name: `Gardener Visit${planName ? ` — ${planName}` : ''} (${b.plant_count || 0} plants)`, amount: baseAmt },
-    ...(Array.isArray(b.addons) ? b.addons : []).map((a) => ({
-      name: a.addon?.name || 'Add-on',
-      amount: (Number(a.price) || Number(a.addon?.price) || 0) * (a.quantity || 1),
-    })),
-  ];
+  const inputs = [{
+    description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
+    hsn: SERVICE_SAC, qty: 1, unit: plan ? 'Plan' : 'Visit',
+    unitPrice: base, gstRate: 18,
+  }];
+  for (const a of (b.addons || [])) {
+    inputs.push({
+      description: a.addon?.name || 'Add-on', hsn: SERVICE_SAC,
+      qty: a.quantity || 1, unit: 'Nos',
+      unitPrice: Number(a.price) || Number(a.addon?.price) || 0, gstRate: 18,
+    });
+  }
 
-  const taxRows = isUP
-    ? [
-        { label: 'SGST (9%)', value: money(halfGst) },
-        { label: 'CGST (9%)', value: money(halfGst) },
-      ]
-    : [{ label: 'IGST (18%)', value: money(gstAmt) }];
+  const rows = buildLineRows(inputs, { inclusive: true, intra });
+  const invoiceNumber = await getOrCreateInvoiceNumber('booking', b.id, b.created_at || b.createdAt);
 
   return {
-    kind: 'Booking',
-    reference: b.booking_number || `BKG-${b.id}`,
-    dateLong: dLong(b.created_at || b.createdAt),
-    statusBadge: (b.payment_status || 'PAID').toUpperCase(),
-    billTo: { name: c?.name || 'Customer', lines: [b.service_address || '—'] },
-    meta: {
-      'Booking No': b.booking_number || `BKG-${b.id}`,
-      'Date': `${dShort(b.scheduled_date)} ${b.scheduled_time || ''}`.trim(),
-      'Payment': b.payment_status || 'Paid',
+    invoiceNumber,
+    invoiceDate: dLong(b.created_at || b.createdAt),
+    referenceLabel: 'Booking ID', referenceValue: b.booking_number || `BKG-${b.id}`,
+    placeOfSupply: placeOfSupply(state),
+    paymentMode: 'Online', paymentStatus: (b.payment_status || 'PAID').toUpperCase(),
+    billTo: {
+      name: c?.name || 'Customer',
+      lines: [b.service_address, [c?.city, c?.state].filter(Boolean).join(', '), c?.pincode].filter(Boolean),
+      phone: c?.phone, gstin: null,
     },
-    items,
-    hasQty: false,
-    subtotalLabel: 'Subtotal (excl. GST)',
-    subtotal,
-    taxRows,
-    shippingFree: false,
-    total,
-    gstNote: isUP
-      ? 'SGST @ 9% + CGST @ 9% applied (intra-state — Uttar Pradesh). This is a computer-generated invoice and does not require a physical signature.'
-      : 'IGST @ 18% applied (inter-state supply). This is a computer-generated invoice and does not require a physical signature.',
+    serviceDetails: {
+      'Service Date': dShort(b.scheduled_date),
+      'Service Type': plan ? 'Plan Visit' : 'On-Demand Visit',
+      'No. of Plants': b.plant_count ? `${b.plant_count} Plants` : '—',
+      ...(plan?.visits_per_month ? { 'Visit Count': `${plan.visits_per_month} Visits` } : {}),
+      ...(plan ? { 'Membership Plan': plan.name } : {}),
+      'Technician': b.gardener?.name || 'To be assigned',
+    },
+    rows, totals: totalsFrom(rows), intra,
   };
 }
 
 async function buildSubscriptionInvoice(id) {
   const s = await Subscription.findByPk(id, {
     include: [
-      { model: User, as: 'customer', attributes: ['name', 'phone', 'email'] },
-      { model: ServicePlan, as: 'plan', attributes: ['name', 'price', 'visits_per_month'] },
+      { model: User, as: 'customer', attributes: ['name', 'phone', 'email', 'city', 'state', 'pincode'] },
+      { model: ServicePlan, as: 'plan', attributes: ['name', 'price', 'visits_per_month', 'max_plants', 'duration_days'] },
+      { model: User, as: 'gardener', attributes: ['name'] },
     ],
   });
   if (!s) return null;
+
   const c = s.customer;
+  const state = c?.state || '';
+  const intra = isIntraState(s.service_address, state);
   const total = Number(s.amount_paid) || 0;
-  const subtotal = Math.round((total / 1.18) * 100) / 100;
-  const gstAmt = Math.round((total - subtotal) * 100) / 100;
-  const halfGst = gstAmt / 2;
-  const isUP = isUPAddress(s.service_address);
+  const plan = s.plan;
 
-  const items = [
-    { name: `${s.plan?.name || 'Subscription'} Plan${s.plan?.visits_per_month ? ` — ${s.plan.visits_per_month} visits/month` : ''}`, amount: subtotal },
-  ];
+  const inputs = [{
+    description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
+    hsn: SERVICE_SAC, qty: 1, unit: 'Plan',
+    taxableOverride: total, gstRate: 18,
+  }];
 
-  const taxRows = isUP
-    ? [
-        { label: 'SGST (9%)', value: money(halfGst) },
-        { label: 'CGST (9%)', value: money(halfGst) },
-      ]
-    : [{ label: 'IGST (18%)', value: money(gstAmt) }];
+  const rows = buildLineRows(inputs, { inclusive: true, intra });
+  const invoiceNumber = await getOrCreateInvoiceNumber('subscription', s.id, s.created_at || s.createdAt);
 
   return {
-    kind: 'Subscription',
-    reference: `SUB-${s.id}`,
-    dateLong: dLong(s.created_at || s.createdAt),
-    statusBadge: (s.status || 'ACTIVE').toUpperCase(),
-    billTo: { name: c?.name || 'Customer', lines: [s.service_address || '—'] },
-    meta: {
-      'Subscription No': `SUB-${s.id}`,
+    invoiceNumber,
+    invoiceDate: dLong(s.created_at || s.createdAt),
+    referenceLabel: 'Subscription ID', referenceValue: `SUB-${s.id}`,
+    placeOfSupply: placeOfSupply(state),
+    paymentMode: 'Online', paymentStatus: (s.status || 'ACTIVE').toUpperCase(),
+    billTo: {
+      name: c?.name || 'Customer',
+      lines: [s.service_address, [c?.city, c?.state].filter(Boolean).join(', '), c?.pincode].filter(Boolean),
+      phone: c?.phone, gstin: null,
+    },
+    serviceDetails: {
       'Start Date': dShort(s.start_date),
       'End Date': dShort(s.end_date),
+      'Service Type': 'Plan Subscription',
+      'No. of Plants': plan?.max_plants ? `Up to ${plan.max_plants} Plants` : '—',
+      'Visit Count': plan?.visits_per_month ? `${plan.visits_per_month} Visits / month` : '—',
+      'Membership Plan': plan?.name || '—',
     },
-    items,
-    hasQty: false,
-    subtotalLabel: 'Subtotal (excl. GST)',
-    subtotal,
-    taxRows,
-    shippingFree: false,
-    total,
-    gstNote: isUP
-      ? 'SGST @ 9% + CGST @ 9% applied (intra-state — Uttar Pradesh). This is a computer-generated invoice and does not require a physical signature.'
-      : 'IGST @ 18% applied (inter-state supply). This is a computer-generated invoice and does not require a physical signature.',
+    rows, totals: totalsFrom(rows), intra,
   };
 }
 
@@ -168,120 +199,96 @@ async function buildOrderInvoice(id) {
   const o = await Order.findByPk(id, {
     include: [
       { model: User, as: 'customer', attributes: ['name', 'phone', 'email'] },
-      { model: OrderItem, as: 'items', include: [{ model: Product, as: 'product', attributes: ['name', 'gst_rate'] }] },
+      {
+        model: OrderItem, as: 'items',
+        include: [{ model: Product, as: 'product', attributes: ['name', 'gst_rate', 'category_id'], include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }] }],
+      },
     ],
   });
   if (!o) return null;
+
   const c = o.customer;
-  const total = Number(o.total_amount) || 0;
-  const gstAmt = Number(o.gst_amount) || 0;
-  // Order totals are GST-ADDITIVE: subtotal = total − gst (matches website).
-  const subtotal = total - gstAmt;
-  const halfGst = gstAmt / 2;
-  const gstRate = o.items?.[0]?.product?.gst_rate || 0;
-  const isUP = isUPAddress(o.shipping_state, o.shipping_city, o.shipping_address);
-  const customerName = c?.name || o.billing_business_name || 'Customer';
+  const intra = isIntraState(o.shipping_state, o.shipping_city, o.shipping_address);
 
-  const items = (o.items || []).map((it) => ({
-    name: it.product?.name || 'Product',
-    qty: it.quantity,
-    price: Number(it.price),
-    amount: Number(it.quantity) * Number(it.price),
-  }));
+  const inputs = (o.items || []).map((it) => {
+    const pName = it.product?.name || 'Product';
+    const cName = it.product?.category?.name || '';
+    const { hsn, unit } = hsnForProduct(pName, cName);
+    return {
+      description: pName, hsn, unit,
+      qty: it.quantity, unitPrice: Number(it.price),
+      // Shop prices are GST-exclusive; apply_gst decides whether tax is charged.
+      gstRate: o.apply_gst ? (Number(it.product?.gst_rate) || 0) : 0,
+    };
+  });
 
-  let taxRows = [];
-  if (o.apply_gst && gstAmt > 0) {
-    taxRows = isUP
-      ? [
-          { label: `SGST (${gstRate / 2}%)`, value: money(halfGst) },
-          { label: `CGST (${gstRate / 2}%)`, value: money(halfGst) },
-        ]
-      : [{ label: `IGST (${gstRate}%)`, value: money(gstAmt) }];
-  }
-
-  const billToLines = [
-    o.shipping_address || '—',
-    `${o.shipping_city || ''} ${o.shipping_pincode || ''}`.trim(),
-    o.shipping_state || '',
-  ].filter((l) => l && l.trim());
-  if (o.billing_gstin) billToLines.push(`GSTIN: ${o.billing_gstin}`);
+  const rows = buildLineRows(inputs, { inclusive: false, intra });
+  const invoiceNumber = await getOrCreateInvoiceNumber('order', o.id, o.created_at || o.createdAt);
 
   return {
-    kind: 'Order',
-    reference: o.order_number || `ORD-${o.id}`,
-    dateLong: dLong(o.created_at || o.createdAt),
-    statusBadge: (o.payment_status || 'PAID').toUpperCase(),
-    billTo: { name: customerName, lines: billToLines },
-    meta: {
-      'Order Date': dShort(o.created_at || o.createdAt),
-      'Order No': o.order_number || `ORD-${o.id}`,
-      'Payment': o.payment_status || 'Paid',
+    invoiceNumber,
+    invoiceDate: dLong(o.created_at || o.createdAt),
+    referenceLabel: 'Order ID', referenceValue: o.order_number || `ORD-${o.id}`,
+    placeOfSupply: placeOfSupply(o.shipping_state),
+    paymentMode: 'Online', paymentStatus: (o.payment_status || 'PAID').toUpperCase(),
+    billTo: {
+      name: c?.name || o.billing_business_name || 'Customer',
+      lines: [o.shipping_address, [o.shipping_city, o.shipping_state].filter(Boolean).join(', '), o.shipping_pincode].filter(Boolean),
+      phone: c?.phone, gstin: o.billing_gstin || null,
     },
-    items,
-    hasQty: true,
-    subtotalLabel: 'Subtotal',
-    subtotal,
-    taxRows,
-    shippingFree: true,
-    total,
-    gstNote: (o.apply_gst && gstAmt > 0)
-      ? (isUP
-          ? `SGST @ ${gstRate / 2}% + CGST @ ${gstRate / 2}% applied (intra-state — Uttar Pradesh). Subject to reverse charge: No. This is a computer-generated invoice and does not require a physical signature.`
-          : `IGST @ ${gstRate}% applied (inter-state supply). Subject to reverse charge: No. This is a computer-generated invoice and does not require a physical signature.`)
-      : null,
+    serviceDetails: {
+      'Order Date': dShort(o.created_at || o.createdAt),
+      'Order Status': o.status || '—',
+      'Items': String((o.items || []).length),
+      ...(o.coupon_code ? { 'Coupon': o.coupon_code } : {}),
+      'Shipping': 'FREE',
+    },
+    rows, totals: totalsFrom(rows), intra,
+    discount: Number(o.discount_amount) || 0,
   };
 }
 
-// Admin-created manual invoice — renders from the stored ManualInvoice snapshot
-// so it looks identical to booking/subscription/order invoices.
 async function buildManualInvoice(id) {
-  const { ManualInvoice } = require('../models');
-  const m = await ManualInvoice.findByPk(id);
+  const m = await ManualInvoice.findByPk(id, {
+    include: [{ model: ServicePlan, as: 'plan', attributes: ['name', 'visits_per_month', 'max_plants'] }],
+  });
   if (!m) return null;
-  const total = Number(m.total_amount) || 0;
-  const subtotal = Number(m.subtotal) || Math.round((total / 1.18) * 100) / 100;
-  const gstAmt = Number(m.gst_amount) || Math.round((total - subtotal) * 100) / 100;
-  const halfGst = gstAmt / 2;
-  const isUP = m.is_up;
 
-  const items = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => ({
-    name: l.name, amount: Number(l.amount) || 0,
+  const intra = m.is_up;
+  const inputs = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => ({
+    description: l.name, hsn: l.hsn || SERVICE_SAC,
+    qty: l.qty || 1, unit: l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit'),
+    taxableOverride: Number(l.amount) || 0, gstRate: 18,
   }));
+  // Fall back to a single line from the stored total if no items were captured.
+  if (!inputs.length) {
+    inputs.push({
+      description: 'Gardening & Plant Maintenance Service', hsn: SERVICE_SAC,
+      qty: 1, unit: 'Visit', taxableOverride: Number(m.total_amount) || 0, gstRate: 18,
+    });
+  }
 
-  const taxRows = isUP
-    ? [
-        { label: 'SGST (9%)', value: money(halfGst) },
-        { label: 'CGST (9%)', value: money(halfGst) },
-      ]
-    : [{ label: 'IGST (18%)', value: money(gstAmt) }];
-
-  const billToLines = [
-    m.service_address || '—',
-    `${m.city || ''} ${m.pincode || ''}`.trim(),
-    m.state || '',
-  ].filter((l) => l && l.trim());
+  const rows = buildLineRows(inputs, { inclusive: true, intra });
+  const invoiceNumber = await getOrCreateInvoiceNumber('manual', m.id, m.created_at || m.createdAt);
 
   return {
-    kind: 'Invoice',
-    reference: m.invoice_number,
-    dateLong: dLong(m.created_at || m.createdAt),
-    statusBadge: 'PAID',
-    billTo: { name: m.customer_name || 'Customer', lines: billToLines },
-    meta: {
-      'Invoice No': m.invoice_number,
-      'Phone': m.customer_phone || '—',
-      ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
+    invoiceNumber,
+    invoiceDate: dLong(m.created_at || m.createdAt),
+    referenceLabel: 'Reference', referenceValue: m.invoice_number,
+    placeOfSupply: placeOfSupply(m.state),
+    paymentMode: 'Offline', paymentStatus: 'PAID',
+    billTo: {
+      name: m.customer_name,
+      lines: [m.service_address, [m.city, m.state].filter(Boolean).join(', '), m.pincode].filter(Boolean),
+      phone: m.customer_phone, gstin: null,
     },
-    items,
-    hasQty: false,
-    subtotalLabel: 'Subtotal (excl. GST)',
-    subtotal,
-    taxRows,
-    shippingFree: false,
-    total,
-    gstNote: isUP
-      ? 'SGST @ 9% + CGST @ 9% applied (intra-state — Uttar Pradesh). This is a computer-generated invoice and does not require a physical signature.'
-      : 'IGST @ 18% applied (inter-state supply). This is a computer-generated invoice and does not require a physical signature.',
+    serviceDetails: {
+      ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
+      'Service Type': m.invoice_type === 'plan' ? 'Plan' : 'On-Demand Visit',
+      'No. of Plants': m.plant_count ? `${m.plant_count} Plants` : '—',
+      ...(m.plan ? { 'Membership Plan': m.plan.name } : {}),
+    },
+    rows, totals: totalsFrom(rows), intra,
   };
 }
 
@@ -292,147 +299,243 @@ const BUILDERS = {
   manual: buildManualInvoice,
 };
 
-// ── PDF RENDERER — layout mirrors the website invoice HTML ────────────────────
-function renderInvoicePDF(inv, res) {
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
-  const FOREST = '#03411a';
-  const SAGE = '#6b8f71';
-  const GREY = '#555555';
-  const L = 40;              // left margin
-  const R = 555;            // right edge (A4 595 − 40)
-  const rightW = R - L;
+// ── PDF RENDERER ─────────────────────────────────────────────────────────────
+const GREEN = '#1a6b3c';
+const DARK = '#14532d';
+const TEXT = '#1f2937';
+const MUTED = '#6b7280';
+const LINE = '#d1d5db';
+const PANEL = '#f9fafb';
 
+function renderInvoicePDF(inv, res) {
+  const doc = new PDFDocument({ size: 'A4', margin: 0 });
+  const L = 36;                 // left margin
+  const R = 559;                // right edge (595 - 36)
+  const W = R - L;
   doc.pipe(res);
 
-  // ── Header ──
-  // Logo (top-left) then brand name + registered entity + GSTIN beneath it.
-  let brandX = L;
-  let brandY = 40;
+  let y = 30;
+
+  // ═══ HEADER ═══
   if (HAS_LOGO) {
-    try {
-      doc.image(LOGO_PATH, L, 38, { height: 40 }); // scales width by aspect ratio
-      brandY = 84; // push text below the logo
-    } catch { /* fall through to text-only header */ }
+    try { doc.image(LOGO_PATH, L, y, { fit: [110, 58] }); } catch { /* ignore */ }
   }
-  doc.fillColor(FOREST).fontSize(20).font('Helvetica-Bold').text(SELLER.brand, brandX, brandY);
-  doc.fillColor(SAGE).fontSize(8).font('Helvetica').text(`${SELLER.legalName}`, brandX, brandY + 24);
-  doc.fillColor(SAGE).fontSize(8)
-    .text(`GSTIN: ${SELLER.gstin}`, brandX, brandY + 35)
-    .text(SELLER.address, brandX, brandY + 46);
+  const coX = L + 125;
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(13).text(COMPANY.legalName, coX, y);
+  doc.fillColor(TEXT).font('Helvetica').fontSize(8).text(`(Brand Name: ${COMPANY.brand})`, coX, y + 16);
+  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(8).text(`CIN: ${COMPANY.cin}`, coX, y + 28);
+  doc.font('Helvetica-Bold').fontSize(8).text('Registered Office:', coX, y + 42);
+  let addrY = y + 53;
+  doc.font('Helvetica').fontSize(8).fillColor(TEXT);
+  COMPANY.addressLines.forEach((ln) => { doc.text(ln, coX, addrY); addrY += 10; });
+  addrY += 3;
+  doc.fillColor(TEXT).fontSize(8)
+    .text(`Phone:  ${COMPANY.phone}`, coX, addrY)
+    .text(`Email:  ${COMPANY.email}`, coX, addrY + 11)
+    .text(`Web:    ${COMPANY.website}`, coX, addrY + 22);
 
-  doc.fillColor(FOREST).fontSize(20).font('Helvetica-Bold').text('TAX INVOICE', 0, 40, { align: 'right', width: R });
-  doc.fillColor(SAGE).fontSize(10).font('Helvetica')
-    .text(`#${inv.reference}`, 0, 66, { align: 'right', width: R })
-    .text(inv.dateLong, 0, 80, { align: 'right', width: R });
-  // Status badge
-  doc.fillColor('#16a34a').fontSize(9).font('Helvetica-Bold')
-    .text(inv.statusBadge, 0, 96, { align: 'right', width: R });
+  // TAX INVOICE title
+  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(19).text('TAX INVOICE', R - 200, y, { width: 200, align: 'right' });
 
-  // Divider positioned below whichever side (logo/brand block vs invoice meta) is taller.
-  const dividerY = Math.max(brandY + 60, 118);
-  doc.moveTo(L, dividerY).lineTo(R, dividerY).strokeColor(FOREST).lineWidth(2).stroke();
+  // Meta box
+  const boxX = R - 250, boxY = y + 32, boxW = 250;
+  const meta = [
+    ['Invoice No.', inv.invoiceNumber],
+    ['Invoice Date', inv.invoiceDate],
+    [inv.referenceLabel, inv.referenceValue],
+    ['Place of Supply', inv.placeOfSupply],
+    ['Invoice Type', 'Original for Recipient'],
+    ['Payment Mode', inv.paymentMode],
+    ['Payment Status', inv.paymentStatus],
+  ];
+  const boxH = meta.length * 15 + 12;
+  doc.roundedRect(boxX, boxY, boxW, boxH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  let mY = boxY + 8;
+  meta.forEach(([k, v]) => {
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(k, boxX + 10, mY, { width: 88 });
+    doc.fillColor(MUTED).text(':', boxX + 100, mY);
+    const isPaid = k === 'Payment Status';
+    doc.font(isPaid ? 'Helvetica-Bold' : 'Helvetica').fillColor(isPaid ? GREEN : TEXT)
+      .text(String(v), boxX + 108, mY, { width: boxW - 118 });
+    mY += 15;
+  });
 
-  // ── Bill To + Meta (two columns) ── (start below the header divider)
-  let y = dividerY + 14;
-  doc.fillColor(SAGE).fontSize(9).font('Helvetica-Bold').text('BILL TO', L, y);
-  doc.fillColor(SAGE).fontSize(9).font('Helvetica-Bold').text(inv.kind === 'Order' ? 'ORDER INFO' : `${inv.kind.toUpperCase()} INFO`, 320, y);
+  y = Math.max(addrY + 40, boxY + boxH + 14);
+
+  // ═══ BILL TO / SERVICE DETAILS ═══
+  const panelH = 118;
+  doc.roundedRect(L, y, W, panelH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  const midX = L + W / 2;
+  doc.moveTo(midX, y + 10).lineTo(midX, y + panelH - 10).strokeColor(LINE).lineWidth(0.6).stroke();
+
+  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('BILL TO', L + 14, y + 12);
+  doc.fillColor(GREEN).text('SERVICE DETAILS', midX + 14, y + 12);
+
+  let bY = y + 28;
+  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(9.5).text(inv.billTo.name, L + 14, bY, { width: W / 2 - 28 });
+  bY += 14;
+  doc.font('Helvetica').fontSize(8).fillColor(TEXT);
+  inv.billTo.lines.forEach((ln) => {
+    const h = doc.heightOfString(ln, { width: W / 2 - 28 });
+    doc.text(ln, L + 14, bY, { width: W / 2 - 28 });
+    bY += Math.max(10, h);
+  });
+  if (inv.billTo.phone) { doc.font('Helvetica-Bold').text(`Phone: ${inv.billTo.phone}`, L + 14, bY); bY += 11; }
+  if (inv.billTo.gstin) { doc.font('Helvetica-Bold').text(`GSTIN: ${inv.billTo.gstin}`, L + 14, bY); }
+
+  let sY = y + 28;
+  Object.entries(inv.serviceDetails).forEach(([k, v]) => {
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(k, midX + 14, sY, { width: 92 });
+    doc.text(':', midX + 108, sY);
+    doc.fillColor(TEXT).text(String(v), midX + 116, sY, { width: W / 2 - 130 });
+    sY += 13;
+  });
+
+  y += panelH + 16;
+
+  // ═══ LINE ITEMS TABLE ═══
+  const intra = inv.intra;
+  // Column widths — must sum to W.
+  // Column widths MUST sum to exactly W (523pt) or the table overflows the page.
+  const cols = intra
+    ? [18, 118, 52, 22, 28, 48, 55, 34, 48, 48, 52]   // #, Desc, HSN, Qty, Unit, Unit Price, Taxable, GST%, CGST, SGST, Total = 523
+    : [20, 150, 58, 26, 30, 56, 62, 42, 0, 0, 79];    // IGST variant (CGST/SGST columns collapsed) = 523
+  const headers = intra
+    ? ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', 'Unit Price\n(Rs.)', 'Taxable Value\n(Rs.)', 'GST Rate\n(%)', 'CGST\n(Rs.)', 'SGST\n(Rs.)', 'Total\n(Rs.)']
+    : ['#', 'Description of\nGoods / Services', 'HSN / SAC\nCode', 'Qty', 'Unit', 'Unit Price\n(Rs.)', 'Taxable Value\n(Rs.)', 'GST Rate\n(%)', '', '', 'IGST + Total\n(Rs.)'];
+
+  const xs = [];
+  let acc = L;
+  cols.forEach((w) => { xs.push(acc); acc += w; });
+
+  const headH = 30;
+  doc.rect(L, y, W, headH).fill(GREEN);
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(6.8);
+  headers.forEach((h, i) => {
+    if (!cols[i]) return;
+    const align = i === 1 ? 'left' : (i >= 5 ? 'right' : 'center');
+    doc.text(h, xs[i] + 3, y + 6, { width: cols[i] - 6, align, lineGap: 1 });
+  });
+  y += headH;
+
+  doc.font('Helvetica').fontSize(7.4);
+  inv.rows.forEach((r, idx) => {
+    const descH = doc.heightOfString(r.description, { width: cols[1] - 6 });
+    const rowH = Math.max(26, descH + 12);
+    if (idx % 2 === 1) doc.rect(L, y, W, rowH).fill(PANEL);
+    const cells = intra
+      ? [String(idx + 1), r.description, r.hsn, String(r.qty), r.unit, num(r.unitPrice), num(r.taxable), `${r.gstRate}%`, num(r.cgst), num(r.sgst), num(r.total)]
+      : [String(idx + 1), r.description, r.hsn, String(r.qty), r.unit, num(r.unitPrice), num(r.taxable), `${r.gstRate}%`, '', '', num(r.total)];
+    cells.forEach((c, i) => {
+      if (!cols[i]) return;
+      const align = i === 1 ? 'left' : (i >= 5 ? 'right' : 'center');
+      const bold = i === cells.length - 1;
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(TEXT)
+        .text(c, xs[i] + 3, y + 6, { width: cols[i] - 6, align });
+    });
+    doc.moveTo(L, y + rowH).lineTo(R, y + rowH).strokeColor(LINE).lineWidth(0.5).stroke();
+    y += rowH;
+  });
+
   y += 14;
 
-  doc.fillColor('#1a2e1a').fontSize(10).font('Helvetica-Bold').text(inv.billTo.name, L, y, { width: 260 });
-  let by = y + 14;
-  doc.font('Helvetica').fontSize(9);
-  inv.billTo.lines.forEach((line) => {
-    const h = doc.heightOfString(line, { width: 260 });
-    doc.fillColor('#1a2e1a').text(line, L, by, { width: 260 });
-    by += Math.max(12, h);
+  // ═══ AMOUNT IN WORDS + TOTALS ═══
+  const leftW = W * 0.52;
+  const rightX = L + leftW + 12;
+  const rightW = R - rightX;
+
+  const words = amountInWords(inv.totals.grand);
+  const wordsH = doc.font('Helvetica').fontSize(8.5).heightOfString(words, { width: leftW - 60 }) + 34;
+
+  const totalRows = [
+    ['Total Taxable Value', inv.totals.taxable],
+    ...(intra
+      ? [['Total CGST', inv.totals.cgst], ['Total SGST', inv.totals.sgst]]
+      : [['Total IGST', inv.totals.igst]]),
+    ['Total GST', inv.totals.totalGst],
+  ];
+  const totalsH = totalRows.length * 17 + 40;
+  const blockH = Math.max(wordsH, totalsH);
+
+  // Amount in words panel
+  doc.roundedRect(L, y, leftW, blockH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.circle(L + 22, y + 20, 11).fill(GREEN);
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(11).text('Rs', L + 15, y + 15);
+  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('Amount in Words', L + 40, y + 12);
+  doc.fillColor(TEXT).font('Helvetica').fontSize(8.5).text(words, L + 40, y + 26, { width: leftW - 54 });
+
+  // Totals
+  let tY = y;
+  totalRows.forEach(([label, val]) => {
+    doc.fillColor(TEXT).font('Helvetica').fontSize(8.5).text(label, rightX + 10, tY + 4, { width: rightW * 0.55 });
+    doc.font('Helvetica-Bold').text(`Rs. ${num(val)}`, rightX, tY + 4, { width: rightW - 12, align: 'right' });
+    tY += 17;
+  });
+  const gtY = tY + 4;
+  doc.rect(rightX, gtY, rightW, 30).fill(GREEN);
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(11).text('GRAND TOTAL', rightX + 12, gtY + 10);
+  doc.fontSize(13).text(`Rs. ${num(inv.totals.grand)}`, rightX, gtY + 8, { width: rightW - 12, align: 'right' });
+
+  y += blockH + 16;
+
+  // ═══ BANK DETAILS ═══
+  const bankH = 74;
+  doc.roundedRect(L, y, leftW, bankH, 4).lineWidth(0.8).strokeColor(LINE).stroke();
+  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8).text('BANK DETAILS', L + 12, y + 10);
+  const bank = [
+    ['Bank Name', BANK.name], ['A/C Name', BANK.accountName],
+    ['A/C Number', BANK.accountNumber], ['IFSC Code', BANK.ifsc],
+  ];
+  let kY = y + 24;
+  bank.forEach(([k, v]) => {
+    doc.font('Helvetica').fontSize(7.4).fillColor(MUTED).text(k, L + 12, kY, { width: 60 });
+    doc.text(':', L + 74, kY);
+    doc.fillColor(TEXT).text(v, L + 82, kY, { width: leftW - 96 });
+    kY += 11;
+  });
+  doc.font('Helvetica').fontSize(6.6).fillColor(MUTED)
+    .text(`UPI ID: ${BANK.upi}`, L + 12, y + bankH - 12);
+
+  y += bankH + 14;
+
+  // ═══ TERMS + THANK YOU + SIGNATORY ═══
+  doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(8.5).text('Terms & Conditions', L, y);
+  let tcY = y + 14;
+  doc.font('Helvetica').fontSize(7).fillColor(TEXT);
+  TERMS.forEach((t) => {
+    doc.text(`•  ${t}`, L, tcY, { width: leftW - 10 });
+    tcY += 11;
   });
 
-  let my = y;
-  doc.fontSize(9).font('Helvetica');
-  for (const [k, v] of Object.entries(inv.meta)) {
-    doc.fillColor(GREY).text(`${k}: `, 320, my, { continued: true }).fillColor('#1a2e1a').text(String(v));
-    my += 13;
-  }
+  doc.fillColor(GREEN).font('Helvetica-BoldOblique').fontSize(13).text('Thank You!', L + leftW + 20, y + 4, { width: 120, align: 'center' });
+  doc.fillColor(TEXT).font('Helvetica').fontSize(7.6)
+    .text('For choosing GharKaMali.', L + leftW + 10, y + 24, { width: 140, align: 'center' })
+    .text('We grow happiness at your home.', L + leftW + 10, y + 34, { width: 140, align: 'center' });
 
-  // ── Items table ──
-  let ty = Math.max(by, my) + 20;
-  const hasQty = inv.hasQty;
-  // Column x positions
-  const cDesc = L + 8;
-  const cQty = 340;
-  const cPrice = 420;
-  const cAmt = R - 8;
+  const sigX = R - 165;
+  doc.moveTo(sigX, y + 30).lineTo(R, y + 30).strokeColor(TEXT).lineWidth(0.7).stroke();
+  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(8).text('Authorised Signatory', sigX, y + 36, { width: 165, align: 'left' });
+  doc.font('Helvetica').fontSize(7).fillColor(MUTED)
+    .text(`For ${COMPANY.legalName}`, sigX, y + 47, { width: 165 })
+    .text(`(Brand Name: ${COMPANY.brand})`, sigX, y + 57, { width: 165 });
 
-  doc.fillColor(FOREST).rect(L, ty, rightW, 22).fill();
-  doc.fillColor('#fff').fontSize(10).font('Helvetica-Bold');
-  doc.text(hasQty ? 'Product' : 'Description', cDesc, ty + 6);
-  if (hasQty) {
-    doc.text('Qty', cQty, ty + 6, { width: 40, align: 'center' });
-    doc.text('Unit Price', cPrice - 20, ty + 6, { width: 70, align: 'right' });
-  }
-  doc.text('Amount', 0, ty + 6, { align: 'right', width: rightW - 8 });
-  ty += 22;
+  y = Math.max(tcY, y + 72) + 10;
 
-  doc.font('Helvetica').fontSize(9.5);
-  inv.items.forEach((it) => {
-    const descW = hasQty ? 290 : 400;
-    const h = Math.max(18, doc.heightOfString(it.name, { width: descW }) + 8);
-    doc.fillColor('#1a2e1a').text(it.name, cDesc, ty + 5, { width: descW });
-    if (hasQty) {
-      doc.text(String(it.qty), cQty, ty + 5, { width: 40, align: 'center' });
-      doc.text(money(it.price), cPrice - 20, ty + 5, { width: 70, align: 'right' });
-    }
-    doc.text(money(it.amount), 0, ty + 5, { align: 'right', width: rightW - 8 });
-    doc.moveTo(L, ty + h).lineTo(R, ty + h).strokeColor('#e8f0e8').lineWidth(1).stroke();
-    ty += h;
+  // ═══ FOOTER BADGES ═══
+  const footH = 26;
+  const footY = Math.min(y, 800 - footH);
+  doc.rect(0, footY, 595, footH).fill(PANEL);
+  const seg = 595 / FOOTER_BADGES.length;
+  FOOTER_BADGES.forEach((b, i) => {
+    doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(6.4)
+      .text(b, i * seg, footY + 10, { width: seg, align: 'center' });
+    if (i) doc.moveTo(i * seg, footY + 6).lineTo(i * seg, footY + footH - 6).strokeColor(LINE).lineWidth(0.5).stroke();
   });
-
-  // ── Subtotal / tax / shipping (right aligned) ──
-  // Two non-overlapping columns: label ends at LABEL_END, value starts at
-  // VALUE_X. Both are right-aligned within their own box so nothing collides.
-  const LABEL_X = 300;
-  const VALUE_X = 445;             // value column starts here
-  const VALUE_W = R - VALUE_X;     // width of the value column (to right edge)
-  const LABEL_W = VALUE_X - LABEL_X - 10; // label box, with a 10pt gutter before value
-  ty += 8;
-  const putRow = (label, value, opts = {}) => {
-    doc.fillColor(opts.color || GREY).fontSize(9.5).font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
-      .text(label, LABEL_X, ty, { width: LABEL_W, align: 'right' });
-    doc.fillColor(opts.valueColor || '#1a2e1a')
-      .text(value, VALUE_X, ty, { width: VALUE_W, align: 'right' });
-    ty += 16;
-  };
-  putRow(inv.subtotalLabel, money(inv.subtotal));
-  inv.taxRows.forEach((r) => putRow(r.label, r.value));
-  if (inv.shippingFree) putRow('Shipping', 'FREE', { valueColor: '#16a34a', bold: true });
-
-  // ── Total ──
-  ty += 4;
-  doc.moveTo(LABEL_X, ty).lineTo(R, ty).strokeColor(FOREST).lineWidth(2).stroke();
-  ty += 8;
-  doc.fillColor(FOREST).fontSize(13).font('Helvetica-Bold')
-    .text('Total Amount', LABEL_X, ty, { width: LABEL_W, align: 'right' })
-    .text(money(inv.total), VALUE_X, ty, { width: VALUE_W, align: 'right' });
-  ty += 30;
-
-  // ── GST note ──
-  if (inv.gstNote) {
-    const noteH = doc.fontSize(9).heightOfString(inv.gstNote, { width: rightW - 28 }) + 20;
-    doc.fillColor('#f0f7f2').rect(L, ty, rightW, noteH).fill();
-    doc.fillColor('#3d6147').fontSize(9).font('Helvetica')
-      .text(`GST Note: ${inv.gstNote}`, L + 14, ty + 10, { width: rightW - 28 });
-    ty += noteH;
-  }
-
-  // ── Footer ──
-  doc.fillColor(SAGE).fontSize(8.5).font('Helvetica')
-    .text(`${SELLER.brand} (a unit of ${SELLER.legalName}) · ${SELLER.supportEmail} · ${SELLER.site}`, L, 790, { align: 'center', width: rightW })
-    .text('Thank you for choosing GharKaMali!', L, 802, { align: 'center', width: rightW });
 
   doc.end();
 }
 
-// ── PUBLIC: stream an invoice PDF to an Express response ──────────────────────
+// ── PUBLIC ───────────────────────────────────────────────────────────────────
 async function streamInvoice(type, id, res) {
   const builder = BUILDERS[type];
   if (!builder) { res.status(400).json({ success: false, message: 'Unknown invoice type' }); return; }
@@ -440,9 +543,15 @@ async function streamInvoice(type, id, res) {
   const inv = await builder(id);
   if (!inv) { res.status(404).json({ success: false, message: `${type} not found` }); return; }
 
+  const safe = String(inv.invoiceNumber).replace(/[^\w.-]+/g, '-');
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="invoice-${inv.reference}.pdf"`);
+  res.setHeader('Content-Disposition', `attachment; filename="invoice-${safe}.pdf"`);
   renderInvoicePDF(inv, res);
 }
 
-module.exports = { streamInvoice, buildBookingInvoice, buildSubscriptionInvoice, buildOrderInvoice, buildManualInvoice };
+module.exports = {
+  streamInvoice,
+  buildBookingInvoice, buildSubscriptionInvoice, buildOrderInvoice, buildManualInvoice,
+  // Exported for layout/unit testing.
+  renderInvoicePDF, buildLineRows, totalsFrom,
+};
