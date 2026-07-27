@@ -10,18 +10,22 @@ const COMPANY = {
   brandTagline: process.env.INVOICE_BRAND_TAGLINE || 'Plants. People. Purpose.',
   cin: process.env.INVOICE_CIN || 'U72900DL2023PTC425123',
   gstin: process.env.INVOICE_GSTIN || '09AAQCP7633P1ZD',
-  addressLines: (process.env.INVOICE_ADDRESS_LINES || 'B-112, Sector-64, Noida,|Gautam Buddha Nagar,|Uttar Pradesh - 201301, India').split('|'),
-  phone: process.env.INVOICE_PHONE || '+91 98712 34567',
+  addressLines: (process.env.INVOICE_ADDRESS_LINES || 'T3, A20, UGF, NX One, Tech Zone 4,|Noida Extension, Gautam Buddha Nagar,|Uttar Pradesh - 201306, India').split('|'),
+  phone: process.env.INVOICE_PHONE || '+91 96437 01701',
   email: process.env.INVOICE_EMAIL || 'hello@gharkamali.com',
   website: process.env.INVOICE_WEBSITE || 'www.gharkamali.com',
 };
 
 const BANK = {
-  name: process.env.INVOICE_BANK_NAME || 'HDFC Bank Limited',
+  name: process.env.INVOICE_BANK_NAME || 'Kotak Mahindra Bank',
   accountName: process.env.INVOICE_BANK_AC_NAME || 'Plantura Care Private Limited',
-  accountNumber: process.env.INVOICE_BANK_AC_NO || '50200012345678',
-  ifsc: process.env.INVOICE_BANK_IFSC || 'HDFC0001234',
-  upi: process.env.INVOICE_UPI || 'gharkamali@okhdfcbank',
+  accountNumber: process.env.INVOICE_BANK_AC_NO || '6054995972',
+  ifsc: process.env.INVOICE_BANK_IFSC || 'KKBK0000181',
+  branch: process.env.INVOICE_BANK_BRANCH || 'Noida-Sector 18',
+  // No UPI ID provided yet — leave empty so the invoice renders WITHOUT a
+  // "Scan & Pay" QR / UPI line until INVOICE_UPI is configured. Printing a
+  // wrong UPI handle would route customer payments to a stranger.
+  upi: process.env.INVOICE_UPI || '',
 };
 
 const TERMS = (process.env.INVOICE_TERMS || [

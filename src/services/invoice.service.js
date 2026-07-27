@@ -23,7 +23,7 @@ const {
   COMPANY, BANK, TERMS, FOOTER_BADGES, SERVICE_SAC, hsnForProduct,
   placeOfSupply, amountInWords,
 } = require('../config/invoice.config');
-const { getOrCreateInvoiceNumber } = require('./invoiceNumber.service');
+const { getOrCreateInvoiceIssue } = require('./invoiceNumber.service');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
@@ -141,11 +141,13 @@ async function buildBookingInvoice(id) {
   }
 
   const rows = buildLineRows(inputs, { inclusive: true, intra });
-  const invoiceNumber = await getOrCreateInvoiceNumber('booking', b.id, b.created_at || b.createdAt);
+  // Invoice number + date come from the issue record (minted on first download)
+  // so the number sequence and invoice dates always increase together (GST).
+  const issue = await getOrCreateInvoiceIssue('booking', b.id);
 
   return {
-    invoiceNumber,
-    invoiceDate: dLong(b.created_at || b.createdAt),
+    invoiceNumber: issue.number,
+    invoiceDate: dLong(issue.issuedAt),
     referenceLabel: 'Booking ID', referenceValue: b.booking_number || `BKG-${b.id}`,
     placeOfSupply: placeOfSupply(state),
     paymentMode: 'Online', paymentStatus: (b.payment_status || 'PAID').toUpperCase(),
@@ -189,11 +191,11 @@ async function buildSubscriptionInvoice(id) {
   }];
 
   const rows = buildLineRows(inputs, { inclusive: true, intra });
-  const invoiceNumber = await getOrCreateInvoiceNumber('subscription', s.id, s.created_at || s.createdAt);
+  const issue = await getOrCreateInvoiceIssue('subscription', s.id);
 
   return {
-    invoiceNumber,
-    invoiceDate: dLong(s.created_at || s.createdAt),
+    invoiceNumber: issue.number,
+    invoiceDate: dLong(issue.issuedAt),
     referenceLabel: 'Subscription ID', referenceValue: `SUB-${s.id}`,
     placeOfSupply: placeOfSupply(state),
     paymentMode: 'Online', paymentStatus: (s.status || 'ACTIVE').toUpperCase(),
@@ -242,11 +244,11 @@ async function buildOrderInvoice(id) {
   });
 
   const rows = buildLineRows(inputs, { inclusive: false, intra });
-  const invoiceNumber = await getOrCreateInvoiceNumber('order', o.id, o.created_at || o.createdAt);
+  const issue = await getOrCreateInvoiceIssue('order', o.id);
 
   return {
-    invoiceNumber,
-    invoiceDate: dLong(o.created_at || o.createdAt),
+    invoiceNumber: issue.number,
+    invoiceDate: dLong(issue.issuedAt),
     referenceLabel: 'Order ID', referenceValue: o.order_number || `ORD-${o.id}`,
     placeOfSupply: placeOfSupply(o.shipping_state),
     paymentMode: 'Online', paymentStatus: (o.payment_status || 'PAID').toUpperCase(),
@@ -288,11 +290,11 @@ async function buildManualInvoice(id) {
   }
 
   const rows = buildLineRows(inputs, { inclusive: true, intra });
-  const invoiceNumber = await getOrCreateInvoiceNumber('manual', m.id, m.created_at || m.createdAt);
+  const issue = await getOrCreateInvoiceIssue('manual', m.id);
 
   return {
-    invoiceNumber,
-    invoiceDate: dLong(m.created_at || m.createdAt),
+    invoiceNumber: issue.number,
+    invoiceDate: dLong(issue.issuedAt),
     referenceLabel: 'Reference', referenceValue: m.invoice_number,
     placeOfSupply: placeOfSupply(m.state),
     paymentMode: 'Offline', paymentStatus: 'PAID',
@@ -558,6 +560,7 @@ function renderInvoicePDF(inv, res) {
   const bank = [
     ['Bank Name', BANK.name], ['A/C Name', BANK.accountName],
     ['A/C Number', BANK.accountNumber], ['IFSC Code', BANK.ifsc],
+    ...(BANK.branch ? [['Branch', BANK.branch]] : []),
   ];
   const BANK_ROW_H = 12;
   const QR_SIZE = 62;
@@ -592,7 +595,7 @@ function renderInvoicePDF(inv, res) {
       .text(`UPI ID: ${BANK.upi}`, upiX, y + 26 + QR_SIZE, {
         width: (L + leftW - 8) - upiX, lineBreak: false, ellipsis: true,
       });
-  } else {
+  } else if (BANK.upi) {
     doc.font(F).fontSize(6.8).fillColor(MUTED)
       .text(`UPI ID: ${BANK.upi}`, L + 12, kY + 3, { width: leftW - 24 });
   }
@@ -661,6 +664,7 @@ function renderInvoicePDF(inv, res) {
 // Build a UPI deep-link QR ("Scan & Pay"). Returns a PNG Buffer, or null if the
 // qrcode package is unavailable — the invoice still renders without it.
 async function buildUpiQr(amount) {
+  if (!BANK.upi) return null; // no UPI configured — never render a bogus QR
   try {
     const QRCode = require('qrcode');
     const params = new URLSearchParams({

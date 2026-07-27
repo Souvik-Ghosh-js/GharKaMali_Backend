@@ -2,28 +2,36 @@
 // Financial-year sequential invoice numbering (GST-compliant).
 //
 // Rules this enforces:
-//   • Stable   — an entity keeps the SAME invoice number forever. Re-downloading
-//                a PDF must never mint a new number.
+//   • Stable   — an entity keeps the SAME invoice number AND issue date forever.
+//                Re-downloading a PDF must never mint a new number.
 //   • Sequential per financial year — GKM/25-26/000001, 000002, …
+//   • Date-coherent — the invoice date is the date the number was ISSUED (first
+//                download), so invoice numbers and invoice dates always increase
+//                together. Numbering by booking date while dating by issue (or
+//                vice-versa) makes the series look non-sequential to an auditor.
 //   • Concurrency-safe — the counter row is locked FOR UPDATE while incrementing,
 //                so two simultaneous downloads can't claim the same sequence.
 // ─────────────────────────────────────────────────────────────────────────────
 const { InvoiceCounter, IssuedInvoice, sequelize } = require('../models');
 const { financialYear, formatInvoiceNumber } = require('../config/invoice.config');
 
+const issuedAtOf = (row) => row.createdAt || row.created_at || new Date();
+
 /**
- * Get (or mint) the invoice number for an entity.
+ * Get (or mint) the invoice number + issue date for an entity.
+ * The financial year and issue date are decided at MINT time (first download),
+ * never re-derived later — both are frozen in the issued_invoices row.
  * @param {'booking'|'subscription'|'order'|'manual'} entityType
  * @param {number} entityId
- * @param {Date} [issuedAt] date that decides the financial year (default: now)
- * @returns {Promise<string>} e.g. "GKM/25-26/000123"
+ * @returns {Promise<{number: string, issuedAt: Date}>}
  */
-async function getOrCreateInvoiceNumber(entityType, entityId, issuedAt = new Date()) {
+async function getOrCreateInvoiceIssue(entityType, entityId) {
   // Fast path — already issued.
   const existing = await IssuedInvoice.findOne({ where: { entity_type: entityType, entity_id: entityId } });
-  if (existing) return existing.invoice_number;
+  if (existing) return { number: existing.invoice_number, issuedAt: issuedAtOf(existing) };
 
-  const fy = financialYear(issuedAt);
+  const now = new Date();
+  const fy = financialYear(now);
 
   try {
     return await sequelize.transaction(async (t) => {
@@ -31,32 +39,48 @@ async function getOrCreateInvoiceNumber(entityType, entityId, issuedAt = new Dat
       const again = await IssuedInvoice.findOne({
         where: { entity_type: entityType, entity_id: entityId }, transaction: t,
       });
-      if (again) return again.invoice_number;
+      if (again) return { number: again.invoice_number, issuedAt: issuedAtOf(again) };
 
-      // Lock (or create) this financial year's counter row.
+      // Lock (or create) this financial year's counter row. Deterministic order
+      // guards against duplicate counter rows on a live table missing the
+      // unique(financial_year) constraint.
       let counter = await InvoiceCounter.findOne({
-        where: { financial_year: fy }, transaction: t, lock: t.LOCK.UPDATE,
+        where: { financial_year: fy }, order: [['id', 'ASC']],
+        transaction: t, lock: t.LOCK.UPDATE,
       });
       if (!counter) {
         counter = await InvoiceCounter.create({ financial_year: fy, last_seq: 0 }, { transaction: t });
       }
 
-      const seq = counter.last_seq + 1;
+      // Self-heal: the issued-invoice history is the authority, not the counter.
+      // If the counter row was ever lost/reset (fresh table, restored DB, second
+      // environment), resume AFTER the highest sequence already issued this FY —
+      // sequences must never go backwards or collide.
+      const maxIssued = await IssuedInvoice.max('seq', {
+        where: { financial_year: fy }, transaction: t,
+      });
+      const seq = Math.max(Number(counter.last_seq) || 0, Number(maxIssued) || 0) + 1;
       await counter.update({ last_seq: seq }, { transaction: t });
 
-      const invoice_number = formatInvoiceNumber(seq, issuedAt);
-      await IssuedInvoice.create({
+      const invoice_number = formatInvoiceNumber(seq, now);
+      const issued = await IssuedInvoice.create({
         entity_type: entityType, entity_id: entityId, invoice_number, financial_year: fy, seq,
       }, { transaction: t });
 
-      return invoice_number;
+      return { number: invoice_number, issuedAt: issuedAtOf(issued) };
     });
   } catch (err) {
     // A unique-constraint race means someone else issued it — read theirs.
     const fallback = await IssuedInvoice.findOne({ where: { entity_type: entityType, entity_id: entityId } });
-    if (fallback) return fallback.invoice_number;
+    if (fallback) return { number: fallback.invoice_number, issuedAt: issuedAtOf(fallback) };
     throw err;
   }
 }
 
-module.exports = { getOrCreateInvoiceNumber };
+/** Back-compat wrapper — returns just the number string. */
+async function getOrCreateInvoiceNumber(entityType, entityId) {
+  const issue = await getOrCreateInvoiceIssue(entityType, entityId);
+  return issue.number;
+}
+
+module.exports = { getOrCreateInvoiceIssue, getOrCreateInvoiceNumber };
