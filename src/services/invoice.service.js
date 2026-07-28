@@ -141,18 +141,27 @@ async function buildBookingInvoice(id) {
   }
 
   const rows = buildLineRows(inputs, { inclusive: true, intra });
-  // Invoice number + date come from the issue record (minted on first download)
-  // so the number sequence and invoice dates always increase together (GST).
+  // Number is minted at booking creation (afterCreate hook); this call just
+  // reads it back — or mints as a fallback for records that pre-date the hook.
   const issue = await getOrCreateInvoiceIssue('booking', b.id);
+
+  // Prefer the real customer name; a walk-in User may carry the 'Customer'
+  // placeholder while the linked ManualInvoice holds the actual name.
+  let custName = (c?.name || '').trim();
+  if (!custName || custName.toLowerCase() === 'customer') {
+    const mi = await ManualInvoice.findOne({ where: { booking_id: b.id }, attributes: ['customer_name'] });
+    if (mi?.customer_name) custName = mi.customer_name;
+  }
 
   return {
     invoiceNumber: issue.number,
-    invoiceDate: dLong(issue.issuedAt),
+    // Invoice date = when the customer booked/paid, NOT the visit slot date.
+    invoiceDate: dLong(b.created_at || b.createdAt),
     referenceLabel: 'Booking ID', referenceValue: b.booking_number || `BKG-${b.id}`,
     placeOfSupply: placeOfSupply(state),
     paymentMode: 'Online', paymentStatus: (b.payment_status || 'PAID').toUpperCase(),
     billTo: {
-      name: c?.name || 'Customer',
+      name: custName || 'Customer',
       lines: [b.service_address, [c?.city, c?.state].filter(Boolean).join(', '), c?.pincode].filter(Boolean),
       phone: c?.phone, gstin: null,
     },
@@ -193,14 +202,20 @@ async function buildSubscriptionInvoice(id) {
   const rows = buildLineRows(inputs, { inclusive: true, intra });
   const issue = await getOrCreateInvoiceIssue('subscription', s.id);
 
+  let subCustName = (c?.name || '').trim();
+  if (!subCustName || subCustName.toLowerCase() === 'customer') {
+    const mi = await ManualInvoice.findOne({ where: { subscription_id: s.id }, attributes: ['customer_name'] });
+    if (mi?.customer_name) subCustName = mi.customer_name;
+  }
+
   return {
     invoiceNumber: issue.number,
-    invoiceDate: dLong(issue.issuedAt),
+    invoiceDate: dLong(s.created_at || s.createdAt),
     referenceLabel: 'Subscription ID', referenceValue: `SUB-${s.id}`,
     placeOfSupply: placeOfSupply(state),
     paymentMode: 'Online', paymentStatus: (s.status || 'ACTIVE').toUpperCase(),
     billTo: {
-      name: c?.name || 'Customer',
+      name: subCustName || 'Customer',
       lines: [s.service_address, [c?.city, c?.state].filter(Boolean).join(', '), c?.pincode].filter(Boolean),
       phone: c?.phone, gstin: null,
     },
@@ -248,7 +263,7 @@ async function buildOrderInvoice(id) {
 
   return {
     invoiceNumber: issue.number,
-    invoiceDate: dLong(issue.issuedAt),
+    invoiceDate: dLong(o.created_at || o.createdAt),
     referenceLabel: 'Order ID', referenceValue: o.order_number || `ORD-${o.id}`,
     placeOfSupply: placeOfSupply(o.shipping_state),
     paymentMode: 'Online', paymentStatus: (o.payment_status || 'PAID').toUpperCase(),
@@ -294,7 +309,7 @@ async function buildManualInvoice(id) {
 
   return {
     invoiceNumber: issue.number,
-    invoiceDate: dLong(issue.issuedAt),
+    invoiceDate: dLong(m.created_at || m.createdAt),
     referenceLabel: 'Reference', referenceValue: m.invoice_number,
     placeOfSupply: placeOfSupply(m.state),
     paymentMode: 'Offline', paymentStatus: 'PAID',

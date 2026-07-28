@@ -5,14 +5,17 @@
 //   • Stable   — an entity keeps the SAME invoice number AND issue date forever.
 //                Re-downloading a PDF must never mint a new number.
 //   • Sequential per financial year — GKM/25-26/000001, 000002, …
-//   • Date-coherent — the invoice date is the date the number was ISSUED (first
-//                download), so invoice numbers and invoice dates always increase
-//                together. Numbering by booking date while dating by issue (or
-//                vice-versa) makes the series look non-sequential to an auditor.
+//   • Numbered at CREATION — afterCreate hooks (registered below) mint the
+//                number as soon as a booking/order/subscription/manual invoice
+//                is created, so numbers follow booking order and match the
+//                invoice date (the date the customer booked/paid). Download-time
+//                minting remains only as a fallback for pre-existing records.
 //   • Concurrency-safe — the counter row is locked FOR UPDATE while incrementing,
-//                so two simultaneous downloads can't claim the same sequence.
+//                so two simultaneous requests can't claim the same sequence.
 // ─────────────────────────────────────────────────────────────────────────────
-const { InvoiceCounter, IssuedInvoice, sequelize } = require('../models');
+const {
+  InvoiceCounter, IssuedInvoice, Booking, Order, Subscription, ManualInvoice, sequelize,
+} = require('../models');
 const { financialYear, formatInvoiceNumber } = require('../config/invoice.config');
 
 const issuedAtOf = (row) => row.createdAt || row.created_at || new Date();
@@ -81,6 +84,24 @@ async function getOrCreateInvoiceIssue(entityType, entityId) {
 async function getOrCreateInvoiceNumber(entityType, entityId) {
   const issue = await getOrCreateInvoiceIssue(entityType, entityId);
   return issue.number;
+}
+
+// ── Mint at creation ─────────────────────────────────────────────────────────
+// Every invoice-able entity gets its number the moment it is created, so the
+// number series follows booking/payment order. Runs AFTER COMMIT (a rolled-back
+// booking must never consume a sequence number) and is best-effort: a minting
+// hiccup must never fail the booking itself — the download path re-mints.
+const mint = (entityType, id) => {
+  getOrCreateInvoiceIssue(entityType, id).catch((e) =>
+    console.error(`[invoiceNumber] mint on create failed (${entityType} ${id}):`, e.message));
+};
+for (const [Model, entityType] of [
+  [Booking, 'booking'], [Order, 'order'], [Subscription, 'subscription'], [ManualInvoice, 'manual'],
+]) {
+  Model.afterCreate((row, options) => {
+    if (options && options.transaction) options.transaction.afterCommit(() => mint(entityType, row.id));
+    else mint(entityType, row.id);
+  });
 }
 
 module.exports = { getOrCreateInvoiceIssue, getOrCreateInvoiceNumber };

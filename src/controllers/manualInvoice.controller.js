@@ -67,6 +67,10 @@ async function findOrCreateCustomer({ phone, name, email, city, state, pincode, 
       city: city || null, state: state || null, pincode: pincode || null,
       address: address || null,
     }, { transaction: t });
+  } else if (name && name.trim().toLowerCase() !== 'customer' &&
+    (!user.name || user.name.trim().toLowerCase() === 'customer')) {
+    // Upgrade a placeholder-named walk-in to the real name from the form.
+    await user.update({ name: name.trim() }, { transaction: t });
   }
   return user;
 }
