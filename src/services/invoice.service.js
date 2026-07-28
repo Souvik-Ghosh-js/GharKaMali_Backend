@@ -126,6 +126,17 @@ async function buildBookingInvoice(id) {
   const plan = b.subscription?.plan;
   const total = Number(b.total_amount) || 0;
   const base = Number(b.base_amount) || total;
+  const addonsSum = (b.addons || []).reduce(
+    (s, a) => s + (Number(a.price) || Number(a.addon?.price) || 0) * (a.quantity || 1), 0);
+
+  // Bookings created by the current flows store base_amount / add-on prices
+  // EXCLUSIVE of GST and total_amount INCLUSIVE (total = (base + addons) × 1.18).
+  // Pricing the lines from base_amount while treating them as inclusive would
+  // strip GST out a second time (the ₹349 → ₹295.76 bug). Legacy records where
+  // GST was never added have total == base + addons — for those the stored
+  // amounts ARE what the customer paid, so keep them GST-inclusive.
+  const gstAddedOnTop = total > 0 &&
+    Math.abs((base + addonsSum) * 1.18 - total) <= Math.abs((base + addonsSum) - total);
 
   const inputs = [{
     description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
@@ -140,7 +151,7 @@ async function buildBookingInvoice(id) {
     });
   }
 
-  const rows = buildLineRows(inputs, { inclusive: true, intra });
+  const rows = buildLineRows(inputs, { inclusive: !gstAddedOnTop, intra });
   // Number is minted at booking creation (afterCreate hook); this call just
   // reads it back — or mints as a fallback for records that pre-date the hook.
   const issue = await getOrCreateInvoiceIssue('booking', b.id);
