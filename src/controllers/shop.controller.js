@@ -199,8 +199,9 @@ exports.createOrder = async (req, res) => {
         const finalPrice = parseFloat(product.price) + productMarkup;
         const itemTotal = finalPrice * item.quantity;
         subtotal += itemTotal;
-        // Compute GST per item if customer opted in
-        if (apply_gst && product.gst_rate > 0) {
+        // GST is ALWAYS charged on products. apply_gst only means the customer
+        // provided a GSTIN so the tax invoice carries it (input-credit claim).
+        if (product.gst_rate > 0) {
           gstAmount += (itemTotal * product.gst_rate) / 100;
         }
         orderItemsData.push({ product_id: product.id, quantity: item.quantity, price: finalPrice });

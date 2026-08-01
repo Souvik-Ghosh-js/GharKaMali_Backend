@@ -264,8 +264,10 @@ async function buildOrderInvoice(id) {
     return {
       description: pName, hsn, unit,
       qty: it.quantity, unitPrice: Number(it.price),
-      // Shop prices are GST-exclusive; apply_gst decides whether tax is charged.
-      gstRate: o.apply_gst ? (Number(it.product?.gst_rate) || 0) : 0,
+      // Shop prices are GST-exclusive and GST is always charged on new orders.
+      // Legacy orders that predate this were paid WITHOUT tax (gst_amount = 0)
+      // — their invoices must stay at 0% so paper matches what was collected.
+      gstRate: Number(o.gst_amount) > 0 ? (Number(it.product?.gst_rate) || 0) : 0,
     };
   });
 
@@ -290,7 +292,17 @@ async function buildOrderInvoice(id) {
       ...(o.coupon_code ? { 'Coupon': o.coupon_code } : {}),
       'Shipping': 'FREE',
     },
-    rows, totals: totalsFrom(rows), intra,
+    rows, totals: (() => {
+      // A coupon reduces what the customer actually paid (order.total_amount is
+      // stored post-discount) — the invoice grand total must match that amount.
+      const totals = totalsFrom(rows);
+      const discount = round2(Number(o.discount_amount) || 0);
+      if (discount > 0) {
+        totals.discount = Math.min(discount, totals.grand);
+        totals.grand = round2(Math.max(0, totals.grand - discount));
+      }
+      return totals;
+    })(), intra,
     discount: Number(o.discount_amount) || 0,
   };
 }
@@ -550,6 +562,7 @@ function renderInvoicePDF(inv, res) {
       ? [['Total CGST', inv.totals.cgst], ['Total SGST', inv.totals.sgst]]
       : [['Total IGST', inv.totals.igst]]),
     ['Total GST', inv.totals.totalGst],
+    ...(inv.totals.discount ? [['Discount', -inv.totals.discount]] : []),
   ];
   const totalsH = totalRows.length * 17 + 40;
   const blockH = Math.max(wordsH, totalsH);
