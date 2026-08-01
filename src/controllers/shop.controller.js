@@ -204,7 +204,10 @@ exports.createOrder = async (req, res) => {
         if (product.gst_rate > 0) {
           gstAmount += (itemTotal * product.gst_rate) / 100;
         }
-        orderItemsData.push({ product_id: product.id, quantity: item.quantity, price: finalPrice });
+        orderItemsData.push({
+          product_id: product.id, quantity: item.quantity, price: finalPrice,
+          gst_rate: Number(product.gst_rate) || 0, // snapshot — rate may change later
+        });
         await product.decrement('stock_quantity', { by: item.quantity, transaction: t });
       }
     }

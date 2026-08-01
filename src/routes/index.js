@@ -595,6 +595,7 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN tracking_url VARCHAR(500)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40)"); } catch (e) { }
+    try { await sequelize.query("ALTER TABLE order_items ADD COLUMN gst_rate INT NULL"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0"); } catch (e) { }
     // Stable URL slugs for plans & categories
     try { await sequelize.query("ALTER TABLE service_plans ADD COLUMN slug VARCHAR(120)"); } catch (e) { }

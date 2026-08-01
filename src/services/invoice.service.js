@@ -267,7 +267,11 @@ async function buildOrderInvoice(id) {
       // Shop prices are GST-exclusive and GST is always charged on new orders.
       // Legacy orders that predate this were paid WITHOUT tax (gst_amount = 0)
       // — their invoices must stay at 0% so paper matches what was collected.
-      gstRate: Number(o.gst_amount) > 0 ? (Number(it.product?.gst_rate) || 0) : 0,
+      // Prefer the rate SNAPSHOTTED on the order item at purchase; the admin
+      // may change the product's gst_rate later and invoices must not drift.
+      gstRate: Number(o.gst_amount) > 0
+        ? (it.gst_rate != null ? Number(it.gst_rate) : (Number(it.product?.gst_rate) || 0))
+        : 0,
     };
   });
 
@@ -281,8 +285,18 @@ async function buildOrderInvoice(id) {
     placeOfSupply: placeOfSupply(o.shipping_state),
     paymentMode: 'Online', paymentStatus: (o.payment_status || 'PAID').toUpperCase(),
     billTo: {
-      name: c?.name || o.billing_business_name || 'Customer',
-      lines: [o.shipping_address, [o.shipping_city, o.shipping_state].filter(Boolean).join(', '), o.shipping_pincode].filter(Boolean),
+      // A GSTIN (B2B) invoice MUST be billed to the REGISTERED business name —
+      // the GST portal matches input credit against the GSTIN's legal name, not
+      // the individual who placed the order.
+      name: (o.billing_gstin && o.billing_business_name)
+        ? o.billing_business_name
+        : (c?.name || o.billing_business_name || 'Customer'),
+      lines: [
+        o.shipping_address,
+        [o.shipping_city, o.shipping_state].filter(Boolean).join(', '),
+        o.shipping_pincode,
+        ...(o.billing_gstin && o.billing_business_name && c?.name ? [`Contact: ${c.name}`] : []),
+      ].filter(Boolean),
       phone: c?.phone, gstin: o.billing_gstin || null,
     },
     serviceDetails: {
