@@ -1,5 +1,6 @@
 const { User, Booking, Payment, Subscription, ServicePlan, Order } = require('../models');
 const crypto = require('crypto');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // Get my payments
 exports.getMyPayments = async (req, res) => {
@@ -64,7 +65,7 @@ exports.checkServiceability = async (req, res) => {
 exports.getAllPayments = async (req, res) => {
   try {
     const { page = 1, limit = 20, status } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
 
     const { count, rows } = await Payment.findAndCountAll({

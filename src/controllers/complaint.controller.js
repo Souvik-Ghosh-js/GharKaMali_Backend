@@ -4,6 +4,7 @@ const {
 } = require('../models');
 const { Op } = require('sequelize');
 const { sendWhatsApp } = require('../services/otp.service');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 const BASE_URL = () => process.env.BASE_URL || 'http://localhost:3000';
 
@@ -129,7 +130,7 @@ exports.getMyComplaints = async (req, res) => {
 exports.getAllComplaints = async (req, res) => {
   try {
     const { status, priority, department_id, assigned_to, search, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (department_id) where.department_id = department_id;

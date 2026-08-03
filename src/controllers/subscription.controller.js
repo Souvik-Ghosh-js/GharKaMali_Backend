@@ -3,6 +3,7 @@ const { Subscription, ServicePlan, User, Booking, ServiceZone, Geofence } = requ
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const moment = require('moment');
 const { nowIST, todayIST } = require('../utils/time');
+const { dateRangeWhere } = require('../utils/dateRange');
 const bookingCtrl = require('./booking.controller');
 
 const genVisitOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -169,7 +170,7 @@ exports.cancelSubscription = async (req, res) => {
 exports.getAllSubscriptions = async (req, res) => {
   try {
     const { status, page = 1, limit = 20, geofence_id, plan_id, search } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     if (plan_id) where.plan_id = plan_id;
 

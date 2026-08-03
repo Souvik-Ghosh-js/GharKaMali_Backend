@@ -11,6 +11,7 @@ const adminCtrl = require('../controllers/admin.controller');
 const contentCtrl = require('../controllers/content.controller');
 const shopCtrl = require('../controllers/shop.controller');
 const taglineCtrl = require('../controllers/tagline.controller');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 router.post('/auth/send-otp',       validate(V.auth.sendOtp),       authCtrl.sendOtp);
@@ -528,6 +529,7 @@ router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res)
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     const { count, rows } = await ContactMessage.findAndCountAll({
+      where: { ...dateRangeWhere(req.query) },
       limit: parseInt(limit),
       offset,
       order: [['created_at', 'DESC']]
@@ -832,7 +834,7 @@ router.get('/admin/sla/breaches', authenticate, authorize('admin', 'supervisor')
     const { SLABreach, Booking: B, User: U } = require('../models');
     const { Op } = require('sequelize');
     const { is_resolved, breach_type, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (is_resolved !== undefined) where.is_resolved = is_resolved === 'true';
     if (breach_type) where.breach_type = breach_type;
     const { count, rows } = await SLABreach.findAndCountAll({
@@ -1415,7 +1417,7 @@ router.get('/admin/withdrawals', authenticate, authorize('admin'), async (req, r
   try {
     const { WithdrawalRequest, User } = require('../models');
     const { status, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     const { count, rows } = await WithdrawalRequest.findAndCountAll({
       where,
@@ -1498,7 +1500,7 @@ router.get('/admin/reviews', authenticate, authorize('admin'), async (req, res) 
   try {
     const { Review, User, Booking } = require('../models');
     const { status, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     const { count, rows } = await Review.findAndCountAll({
       where,
@@ -1745,6 +1747,7 @@ router.get('/admin/contacts', authenticate, authorize('admin'), async (req, res)
     const { ContactMessage } = require('../models');
     const { page = 1, limit = 20 } = req.query;
     const { count, rows } = await ContactMessage.findAndCountAll({
+      where: { ...dateRangeWhere(req.query) },
       order: [['created_at', 'DESC']],
       limit: parseInt(limit), offset: (page - 1) * limit
     });

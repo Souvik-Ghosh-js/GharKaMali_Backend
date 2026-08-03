@@ -3,6 +3,7 @@ const { Op, fn, col, literal, sequelize } = require('sequelize');
 const db = require('../config/database');
 const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq, Geofence, GardenerZone, Review, Complaint, PlantIdentification } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────────
 exports.getDashboard = async (req, res) => {
@@ -318,7 +319,7 @@ exports.getAnalytics = async (req, res) => {
 exports.getGardeners = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, city, search } = req.query;
-    const where = { role: 'gardener' };
+    const where = { role: 'gardener', ...dateRangeWhere(req.query) };
     if (status === 'pending') where.is_approved = false;
     else if (status === 'active') { where.is_approved = true; where.is_active = true; }
     else if (status === 'inactive') where.is_active = false;
@@ -647,7 +648,7 @@ exports.createRewardPenalty = async (req, res) => {
 exports.getRewardPenalties = async (req, res) => {
   try {
     const { gardener_id, type, page = 1, limit = 20 } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (gardener_id) where.gardener_id = gardener_id;
     if (type) where.type = type;
     const { count, rows } = await RewardPenalty.findAndCountAll({
@@ -667,7 +668,7 @@ exports.getRewardPenalties = async (req, res) => {
 exports.getCustomers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search, city } = req.query;
-    const where = { role: 'customer' };
+    const where = { role: 'customer', ...dateRangeWhere(req.query) };
     if (search) {
       where[Op.or] = [
         { name: { [Op.like]: `%${search}%` } },
@@ -703,7 +704,7 @@ exports.getCustomers = async (req, res) => {
 exports.getAllBookings = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, zone_id, geofence_id, date, gardener_id, customer_id, subscription_id, search } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     if (geofence_id) where.geofence_id = geofence_id;
     else if (zone_id) where.zone_id = zone_id;
@@ -1033,6 +1034,7 @@ exports.deleteCategory = async (req, res) => {
 exports.getAdminProducts = async (req, res) => {
   try {
     const products = await Product.findAll({
+      where: { ...dateRangeWhere(req.query) },
       include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }],
       order: [['created_at', 'DESC']]
     });
@@ -1076,7 +1078,7 @@ exports.deleteProduct = async (req, res) => {
 exports.getAdminOrders = async (req, res) => {
   try {
     const { status, page = 1, limit = 20, search, geofence_id } = req.query;
-    const where = {};
+    const where = { ...dateRangeWhere(req.query) };
     if (status) where.status = status;
     if (geofence_id) where.geofence_id = geofence_id;
 

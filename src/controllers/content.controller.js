@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { PlantIdentification, Blog, CityPage, User, Booking, Notification, GardenerProfile } = require('../models');
 const { Op } = require('sequelize');
+const { dateRangeWhere } = require('../utils/dateRange');
 
 // ── PLANTOPEDIA ───────────────────────────────────────────────────────────────
 exports.identifyPlant = async (req, res) => {
@@ -69,6 +70,7 @@ exports.getAllPlantIdentifications = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const { count, rows } = await PlantIdentification.findAndCountAll({
+      where: { ...dateRangeWhere(req.query) },
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }],
       order: [['created_at', 'DESC']],
       limit: parseInt(limit),
