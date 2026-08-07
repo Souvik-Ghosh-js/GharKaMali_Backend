@@ -25,6 +25,20 @@ router.post('/auth/gardener-register',
 );
 router.get('/auth/profile', authenticate, authCtrl.getProfile);
 router.put('/auth/profile', authenticate, uploadProfile.single('profile_image'), validate(V.auth.updateProfile), authCtrl.updateProfile);
+// FCM tokens rotate (app reinstall, cache clear, OS refresh) — apps call this
+// on every launch/refresh so pushes keep reaching the device after login.
+router.post('/auth/update-fcm-token', authenticate, async (req, res) => {
+  try {
+    const token = String(req.body?.fcm_token || '').trim();
+    if (!token || token.length > 500) {
+      return res.status(400).json({ success: false, message: 'fcm_token is required (max 500 chars)' });
+    }
+    await req.user.update({ fcm_token: token });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 router.use('/addresses', require('./address.routes'));
 
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
