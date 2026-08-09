@@ -103,16 +103,77 @@ exports.verifyOtp = async (req, res) => {
 };
 
 // Admin login with password
+// ── Failed admin-login tracking (in-memory, dependency-free) ─────────────────
+// Keyed by normalized account + IP. 3+ consecutive failures inside a 15-min
+// window alert the admins (once per window); 5+ failures lock the key out with
+// a 429 until the window expires. Counters reset on success or window expiry.
+const FAILED_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const FAILED_LOGIN_ALERT_AT = 3;
+const FAILED_LOGIN_BLOCK_AT = 5;
+const failedAdminLogins = new Map(); // key → { count, firstAt, alerted }
+
+const failedLoginKey = (account, ip) =>
+  `${String(account || '').trim().toLowerCase()}|${ip || 'unknown'}`;
+
+const clientIp = (req) =>
+  (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || req.connection?.remoteAddress || 'unknown';
+
+function pruneFailedLogins(now) {
+  // Keep the Map tiny — drop any expired windows on each touch.
+  for (const [k, v] of failedAdminLogins) {
+    if (now - v.firstAt > FAILED_LOGIN_WINDOW_MS) failedAdminLogins.delete(k);
+  }
+}
+
 exports.adminLogin = async (req, res) => {
   try {
     const { phone, password } = req.body;
+    const ip = clientIp(req);
+    const key = failedLoginKey(phone, ip);
+    const now = Date.now();
+    pruneFailedLogins(now);
+
+    // Already locked out for this window?
+    const entry = failedAdminLogins.get(key);
+    if (entry && entry.count >= FAILED_LOGIN_BLOCK_AT) {
+      return res.status(429).json({ success: false, message: 'Too many attempts, try again in 15 minutes' });
+    }
+
+    const recordFailure = async () => {
+      const e = failedAdminLogins.get(key) || { count: 0, firstAt: now, alerted: false };
+      e.count += 1;
+      failedAdminLogins.set(key, e);
+      if (e.count >= FAILED_LOGIN_ALERT_AT && !e.alerted) {
+        e.alerted = true; // throttle: one alert per key per window
+        try {
+          const notificationService = require('../services/notification.service');
+          await notificationService.notifyAdmins({
+            title: '⚠️ Repeated Failed Admin Logins',
+            body: `⚠️ Repeated failed login attempts for ${phone} from IP ${ip} (${e.count} failures in the last 15 minutes).`,
+            type: 'warning',
+            data: { account: phone, ip, failures: e.count }
+          });
+        } catch (notifyErr) {
+          console.error('[auth] failed-login alert error:', notifyErr.message);
+        }
+      }
+    };
+
     const user = await User.findOne({ where: { phone, role: { [Op.in]: ['admin', 'supervisor'] } } });
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!user) {
+      await recordFailure();
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!isMatch) {
+      await recordFailure();
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
 
     if (!user.is_active) return res.status(401).json({ success: false, message: 'Account is deactivated' });
+
+    failedAdminLogins.delete(key); // consecutive-failure counter resets on success
 
     await user.update({ last_login: new Date() });
     const token = generateToken(user);

@@ -149,8 +149,11 @@ exports.cancelSubscription = async (req, res) => {
     await subscription.update({ status: 'cancelled', auto_renew: false });
 
     // Cancel future pending bookings for this subscription
+    const reason = (req.body && typeof req.body.reason === 'string' && req.body.reason.trim())
+      ? req.body.reason.trim().slice(0, 500)
+      : 'Subscription cancelled by user';
     await Booking.update(
-      { status: 'cancelled', cancellation_reason: 'Subscription cancelled by user' },
+      { status: 'cancelled', cancellation_reason: reason },
       { 
         where: { 
           subscription_id: subscription.id, 
@@ -174,14 +177,27 @@ exports.getAllSubscriptions = async (req, res) => {
     if (status) where.status = status;
     if (plan_id) where.plan_id = plan_id;
 
-    // Geofence filter: match explicit geofence_id/zone_id OR city fallback for legacy records
+    // Geofence filter: match explicit geofence_id/zone_id, the customer's own
+    // geofence assignment, OR a city fallback for legacy records.
+    // NOTE: columns inside literals MUST be qualified with the `Subscription`
+    // alias — the joined users tables (customer/gardener) also have a
+    // geofence_id column, and an unqualified reference makes MySQL throw
+    // "Column 'geofence_id' in where clause is ambiguous" (query 500s and the
+    // dashboard shows an empty list).
     if (geofence_id) {
-      const gf = await Geofence.findByPk(geofence_id);
+      const gfId = parseInt(geofence_id, 10);
+      if (isNaN(gfId)) return res.status(400).json({ success: false, message: 'Invalid geofence_id' });
+      const gf = await Geofence.findByPk(gfId);
       const city = gf ? gf.city : null;
+      const db = require('../config/database');
       where[Op.or] = [
-        { geofence_id: geofence_id },
-        { zone_id: geofence_id },
-        ...(city ? [literal(`(geofence_id IS NULL AND zone_id IS NULL AND EXISTS (SELECT 1 FROM users u WHERE u.id = \`Subscription\`.\`customer_id\` AND u.city = '${city.replace(/'/g, "\\'")}'))`)] : [])
+        { geofence_id: gfId },
+        { zone_id: gfId }, // legacy rows that stored the zone/geofence id in zone_id
+        // Subs without their own geofence linkage whose CUSTOMER is assigned to
+        // this geofence (rows created before subscriptions carried geofence_id;
+        // their zone_id may hold a legacy service_zones id from a different id space).
+        literal(`(\`Subscription\`.\`geofence_id\` IS NULL AND EXISTS (SELECT 1 FROM users cu WHERE cu.id = \`Subscription\`.\`customer_id\` AND cu.geofence_id = ${gfId}))`),
+        ...(city ? [literal(`(\`Subscription\`.\`geofence_id\` IS NULL AND \`Subscription\`.\`zone_id\` IS NULL AND EXISTS (SELECT 1 FROM users u WHERE u.id = \`Subscription\`.\`customer_id\` AND u.city = ${db.escape(city)}))`)] : [])
       ];
     }
 

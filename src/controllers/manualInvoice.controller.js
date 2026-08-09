@@ -121,6 +121,32 @@ exports.createManualInvoice = async (req, res) => {
     return res.status(400).json({ success: false, message: 'customer_phone is required to create a record' });
   }
 
+  // ── Server-side validation (mirrors the dashboard form rules) ──
+  // Phone: accept "+91 98765 43210" style input but store a bare 10-digit number.
+  let normalizedPhone = null;
+  if (customer_phone != null && String(customer_phone).trim() !== '') {
+    normalizedPhone = String(customer_phone).replace(/[^0-9]/g, ''); // drop +, spaces, dashes
+    if (normalizedPhone.length === 12 && normalizedPhone.startsWith('91')) normalizedPhone = normalizedPhone.slice(2); // +91 prefix
+    else if (normalizedPhone.length === 11 && normalizedPhone.startsWith('0')) normalizedPhone = normalizedPhone.slice(1); // leading 0
+    if (!/^[0-9]{10}$/.test(normalizedPhone)) {
+      return res.status(400).json({ success: false, message: 'customer_phone must be a valid 10-digit mobile number' });
+    }
+  }
+  // Email: sane shape check when provided.
+  if (customer_email != null && String(customer_email).trim() !== '' &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(customer_email).trim())) {
+    return res.status(400).json({ success: false, message: 'customer_email is not a valid email address' });
+  }
+  // Scheduled date: an invoice cannot be dated in the future (today is allowed).
+  if (scheduled_date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(scheduled_date))) {
+      return res.status(400).json({ success: false, message: 'scheduled_date must be in YYYY-MM-DD format' });
+    }
+    if (String(scheduled_date) > todayIST()) {
+      return res.status(400).json({ success: false, message: 'scheduled_date cannot be in the future' });
+    }
+  }
+
   try {
     // Resolve the plan (for plan invoices / subscriptions).
     const plan = plan_id ? await ServicePlan.findByPk(plan_id) : null;
@@ -156,7 +182,7 @@ exports.createManualInvoice = async (req, res) => {
 
       if (outcome === 'booking' || outcome === 'subscription') {
         customer = await findOrCreateCustomer(
-          { phone: customer_phone, name: customer_name, email: customer_email, city, state, pincode, address: service_address },
+          { phone: normalizedPhone, name: customer_name, email: customer_email, city, state, pincode, address: service_address },
           t
         );
       }
@@ -286,7 +312,7 @@ exports.createManualInvoice = async (req, res) => {
         plan_id: plan?.id || null,
         customer_id: customer?.id || null,
         customer_name,
-        customer_phone: customer_phone || null,
+        customer_phone: normalizedPhone,
         customer_email: customer_email || null,
         service_address: service_address || null,
         city: city || null,

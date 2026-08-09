@@ -375,33 +375,6 @@ router.delete('/admin/gardeners/:id/zones/:geofence_id', authenticate, authorize
   }
 });
 
-// ── ADMIN GLOBAL SEARCH ───────────────────────────────────────────────────────
-router.get('/admin/search', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { q } = req.query;
-    if (!q || q.length < 2) return res.json({ success: true, data: { users: [], bookings: [] } });
-    const { User, Booking } = require('../models');
-    const { Op } = require('sequelize');
-    const users = await User.findAll({
-      where: {
-        [Op.or]: [
-          { name: { [Op.like]: `%${q}%` } },
-          { phone: { [Op.like]: `%${q}%` } },
-          { email: { [Op.like]: `%${q}%` } }
-        ]
-      },
-      limit: 10
-    });
-    const bookings = await Booking.findAll({
-      where: { booking_number: { [Op.like]: `%${q}%` } },
-      limit: 10
-    });
-    res.json({ success: true, data: { users, bookings } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
 // ─── ADMIN TAGS ───────────────────────────────────────────────────────────────
 router.get('/admin/tags', authenticate, authorize('admin'), async (req, res) => {
   try {
@@ -859,7 +832,15 @@ router.get('/admin/sla/breaches', authenticate, authorize('admin', 'supervisor')
       ],
       limit: parseInt(limit), offset: (page - 1) * limit
     });
-    res.json({ success: true, data: { breaches: rows, total: count } });
+    // The dashboard reads `occurred_at` and `resolved`; expose them as aliases
+    // of the stored `detected_at` / `is_resolved` columns.
+    const breaches = rows.map(r => {
+      const p = r.toJSON();
+      p.occurred_at = p.detected_at;
+      p.resolved = p.is_resolved;
+      return p;
+    });
+    res.json({ success: true, data: { breaches, total: count } });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
