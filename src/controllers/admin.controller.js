@@ -682,11 +682,17 @@ exports.getCustomers = async (req, res) => {
       where,
       attributes: {
         exclude: ['password', 'otp'],
-        // Per-customer booking aggregates so the list shows real numbers
-        // (matches the detail modal). Correlated subqueries on the bookings table.
+        // Per-customer aggregates so the list shows real numbers (matches the
+        // detail modal). Total spent = money actually PAID across all channels:
+        // direct bookings + subscription plans + shop orders. Subscription
+        // visit bookings are excluded so plan money isn't counted twice.
         include: [
           [User.sequelize.literal('(SELECT COUNT(*) FROM bookings WHERE bookings.customer_id = User.id)'), 'total_bookings'],
-          [User.sequelize.literal('(SELECT COALESCE(SUM(total_amount),0) FROM bookings WHERE bookings.customer_id = User.id)'), 'total_spent']
+          [User.sequelize.literal(`(
+            (SELECT COALESCE(SUM(total_amount),0) FROM bookings WHERE bookings.customer_id = User.id AND bookings.subscription_id IS NULL AND bookings.payment_status = 'paid')
+            + (SELECT COALESCE(SUM(amount_paid),0) FROM subscriptions WHERE subscriptions.customer_id = User.id)
+            + (SELECT COALESCE(SUM(total_amount),0) FROM orders WHERE orders.customer_id = User.id AND orders.payment_status = 'paid')
+          )`), 'total_spent']
         ]
       },
       order: [['created_at', 'DESC']],

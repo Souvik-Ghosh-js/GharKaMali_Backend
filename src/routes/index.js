@@ -1281,7 +1281,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
 // ── ADMIN: SINGLE CUSTOMER DETAIL ─────────────────────────────────────────────
 router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { User, Booking, Subscription, ServicePlan, Payment, Order, OrderItem, Product } = require('../models');
+    const { User, Booking, Subscription, ServicePlan, Payment, Order, OrderItem, Product, sequelize } = require('../models');
     const { Op } = require('sequelize');
 
     const customer = await User.findOne({
@@ -1315,15 +1315,19 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
         limit: 10,
         attributes: ['id', 'txn_id', 'amount', 'status', 'payment_for', 'created_at']
       }),
-      Booking.findAll({
-        where: { customer_id: req.params.id },
-        attributes: [
-          [require('sequelize').fn('COUNT', require('sequelize').col('id')), 'total_bookings'],
-          [require('sequelize').fn('SUM', require('sequelize').col('total_amount')), 'total_spent'],
-          [require('sequelize').fn('AVG', require('sequelize').col('rating')), 'avg_rating']
-        ],
-        raw: true
-      }),
+      // Stats — total_spent counts money actually PAID across every channel
+      // (direct bookings + subscription plans + shop orders); subscription
+      // visit bookings are excluded so plan money isn't double-counted.
+      // Same definition as the customers-list column in admin.controller.
+      sequelize.query(`SELECT
+          (SELECT COUNT(*) FROM bookings WHERE customer_id = :cid) AS total_bookings,
+          (SELECT AVG(rating) FROM bookings WHERE customer_id = :cid AND rating IS NOT NULL) AS avg_rating,
+          (
+            (SELECT COALESCE(SUM(total_amount),0) FROM bookings WHERE customer_id = :cid AND subscription_id IS NULL AND payment_status = 'paid')
+            + (SELECT COALESCE(SUM(amount_paid),0) FROM subscriptions WHERE customer_id = :cid)
+            + (SELECT COALESCE(SUM(total_amount),0) FROM orders WHERE customer_id = :cid AND payment_status = 'paid')
+          ) AS total_spent
+        `, { replacements: { cid: req.params.id }, type: require('sequelize').QueryTypes.SELECT }),
       // Shop (plant store) orders — shown in the admin customer profile with a
       // per-order invoice download.
       Order.findAll({
