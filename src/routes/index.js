@@ -135,6 +135,54 @@ router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
 router.get('/shop/products/:id', authenticateOptional, shopCtrl.getProductDetail);
 router.post('/shop/orders', authenticate, authorize('customer'), validate(V.order.create), shopCtrl.createOrder);
 router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
+
+// ── SHOP WISHLIST ─────────────────────────────────────────────────────────────
+// Customers save products for later; inactive products stay in the list so the
+// app can gray them out. The admin customer profile exposes the same rows.
+router.get('/shop/wishlist', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Wishlist, Product, ProductCategory } = require('../models');
+    const rows = await Wishlist.findAll({
+      where: { user_id: req.user.id },
+      order: [['created_at', 'DESC']],
+      attributes: ['id', 'product_id', 'created_at'],
+      include: [{
+        model: Product, as: 'product',
+        attributes: ['id', 'name', 'price', 'mrp', 'images', 'icon_key', 'stock_quantity', 'is_active', 'gst_rate'],
+        include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }]
+      }]
+    });
+    res.json({ success: true, data: rows });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Toggle: adds the product if absent, removes it if already wishlisted.
+router.post('/shop/wishlist', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Wishlist, Product } = require('../models');
+    const productId = parseInt(req.body.product_id);
+    if (!productId) return res.status(400).json({ success: false, message: 'product_id is required' });
+
+    const product = await Product.findByPk(productId);
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    const existing = await Wishlist.findOne({ where: { user_id: req.user.id, product_id: productId } });
+    if (existing) {
+      await existing.destroy();
+      return res.json({ success: true, added: false });
+    }
+    await Wishlist.create({ user_id: req.user.id, product_id: productId });
+    res.json({ success: true, added: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/shop/wishlist/:product_id', authenticate, authorize('customer'), async (req, res) => {
+  try {
+    const { Wishlist } = require('../models');
+    await Wishlist.destroy({ where: { user_id: req.user.id, product_id: req.params.product_id } });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
 router.post('/admin/shop/products/bulk-import', authenticate, authorize('admin'), validate(V.product.bulkImport), async (req, res) => {
   try {
     const { Product, ProductCategory } = require('../models');
@@ -1262,7 +1310,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
 // ── ADMIN: SINGLE CUSTOMER DETAIL ─────────────────────────────────────────────
 router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { User, Booking, Subscription, ServicePlan, Payment, Order, OrderItem, Product, sequelize } = require('../models');
+    const { User, Booking, Subscription, ServicePlan, Payment, Order, OrderItem, Product, Wishlist, sequelize } = require('../models');
     const { Op } = require('sequelize');
 
     const customer = await User.findOne({
@@ -1271,7 +1319,7 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
     });
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
 
-    const [bookings, subscriptions, payments, stats, orders] = await Promise.all([
+    const [bookings, subscriptions, payments, stats, orders, wishlist] = await Promise.all([
       Booking.findAll({
         where: { customer_id: req.params.id },
         order: [['created_at', 'DESC']],
@@ -1319,6 +1367,13 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
           model: OrderItem, as: 'items', attributes: ['id', 'quantity', 'price'],
           include: [{ model: Product, as: 'product', attributes: ['name'] }]
         }]
+      }),
+      // Wishlist — what this customer has saved in the shop (demand signal).
+      Wishlist.findAll({
+        where: { user_id: req.params.id },
+        order: [['created_at', 'DESC']],
+        attributes: ['id', 'product_id', 'created_at'],
+        include: [{ model: Product, as: 'product', attributes: ['id', 'name', 'price', 'is_active'] }]
       })
     ]);
 
@@ -1330,6 +1385,7 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
         subscriptions,
         orders,
         recentPayments: payments,
+        wishlist,
         stats: stats[0] || { total_bookings: 0, total_spent: 0, avg_rating: null }
       }
     });

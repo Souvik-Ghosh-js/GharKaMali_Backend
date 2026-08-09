@@ -912,6 +912,40 @@ exports.cancelBooking = async (req, res) => {
       await GardenerProfile.increment({ cancelled_jobs: 1 }, { where: { user_id: booking.gardener_id } });
     }
 
+    // Notifications (best-effort; never fail the cancellation)
+    (async () => {
+      try {
+        const notificationService = require('../services/notification.service');
+        const reasonText = reason || 'No reason provided';
+
+        // Assigned gardener loses the job
+        if (booking.gardener_id) {
+          const gardener = await User.findByPk(booking.gardener_id, { attributes: ['id', 'fcm_token'] });
+          if (gardener?.fcm_token) {
+            await notify.jobCancelled(gardener.fcm_token, booking.booking_number, reasonText);
+          }
+          await notificationService.notifyUser(booking.gardener_id, {
+            title: '❌ Job Cancelled',
+            body: `Booking ${booking.booking_number} has been cancelled. Reason: ${reasonText}`,
+            type: 'warning',
+            data: { booking_id: booking.id, booking_number: booking.booking_number, reason: reasonText }
+          });
+        }
+
+        // Customer gets a cancellation confirmation
+        const customer = await User.findByPk(booking.customer_id, { attributes: ['id', 'fcm_token'] });
+        if (customer?.fcm_token) {
+          await notify.bookingCancelled(customer.fcm_token, booking.booking_number);
+        }
+        await notificationService.notifyUser(booking.customer_id, {
+          title: 'Booking Cancelled',
+          body: `Your booking ${booking.booking_number} has been cancelled. Reason: ${reasonText}`,
+          type: 'info',
+          data: { booking_id: booking.id, booking_number: booking.booking_number, reason: reasonText }
+        });
+      } catch (e) { console.error('[cancelBooking] notify failed:', e.message); }
+    })();
+
     res.json({ success: true, message: 'Booking cancelled' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

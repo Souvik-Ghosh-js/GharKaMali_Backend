@@ -153,7 +153,8 @@ async function notifyFinanceOfEntity(type, id) {
 async function cancelEntity(type, id) {
   if (type === 'booking') {
     // Only cancel while still unpaid; a paid booking is untouched.
-    await Booking.update({ status: 'cancelled' }, { where: { id, payment_status: 'pending' } });
+    const [affected] = await Booking.update({ status: 'cancelled' }, { where: { id, payment_status: 'pending' } });
+    if (affected) notifyBookingVoided(id); // fire-and-forget
   } else if (type === 'subscription') {
     // Online subs start 'pending'; only those get cancelled.
     await Subscription.update({ status: 'cancelled' }, { where: { id, status: 'pending' } });
@@ -175,6 +176,42 @@ async function cancelEntity(type, id) {
     }
     await order.update({ status: 'cancelled', payment_status: 'failed' });
   }
+}
+
+// Cancellation notifications for a booking voided by a failed/abandoned payment.
+// Best-effort and fire-and-forget — never blocks or fails the void path.
+async function notifyBookingVoided(bookingId) {
+  try {
+    const booking = await Booking.findByPk(bookingId);
+    if (!booking || booking.status !== 'cancelled') return;
+    const { notify } = require('../services/push.service');
+    const notificationService = require('../services/notification.service');
+    const reasonText = 'Payment was not completed';
+
+    if (booking.gardener_id) {
+      const gardener = await User.findByPk(booking.gardener_id, { attributes: ['id', 'fcm_token'] });
+      if (gardener?.fcm_token) {
+        await notify.jobCancelled(gardener.fcm_token, booking.booking_number, reasonText);
+      }
+      await notificationService.notifyUser(booking.gardener_id, {
+        title: '❌ Job Cancelled',
+        body: `Booking ${booking.booking_number} has been cancelled. Reason: ${reasonText}.`,
+        type: 'warning',
+        data: { booking_id: booking.id, booking_number: booking.booking_number, reason: reasonText }
+      });
+    }
+
+    const customer = await User.findByPk(booking.customer_id, { attributes: ['id', 'fcm_token'] });
+    if (customer?.fcm_token) {
+      await notify.bookingCancelled(customer.fcm_token, booking.booking_number);
+    }
+    await notificationService.notifyUser(booking.customer_id, {
+      title: 'Booking Cancelled',
+      body: `Your booking ${booking.booking_number} was cancelled because the payment was not completed.`,
+      type: 'info',
+      data: { booking_id: booking.id, booking_number: booking.booking_number, reason: reasonText }
+    });
+  } catch (e) { console.error('[payment] cancel notify failed:', e.message); }
 }
 
 // Mark a pending payment paid and fulfill everything it covers. A combined-cart

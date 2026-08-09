@@ -152,16 +152,73 @@ exports.cancelSubscription = async (req, res) => {
     const reason = (req.body && typeof req.body.reason === 'string' && req.body.reason.trim())
       ? req.body.reason.trim().slice(0, 500)
       : 'Subscription cancelled by user';
+    // Snapshot the visits being cancelled BEFORE the bulk update so we can
+    // notify the customer and any assigned gardeners afterwards.
+    const cancelledVisits = await Booking.findAll({
+      where: {
+        subscription_id: subscription.id,
+        status: 'pending',
+        scheduled_date: { [Op.gt]: todayIST() }
+      },
+      attributes: ['id', 'booking_number', 'customer_id', 'gardener_id']
+    });
     await Booking.update(
       { status: 'cancelled', cancellation_reason: reason },
-      { 
-        where: { 
-          subscription_id: subscription.id, 
+      {
+        where: {
+          subscription_id: subscription.id,
           status: 'pending',
           scheduled_date: { [Op.gt]: todayIST() }
-        } 
+        }
       }
     );
+
+    // Notifications (best-effort; never fail the cancellation)
+    (async () => {
+      try {
+        const { notify } = require('../services/push.service');
+        const notificationService = require('../services/notification.service');
+
+        // Gardeners assigned to any of the auto-cancelled visits
+        for (const visit of cancelledVisits) {
+          if (!visit.gardener_id) continue;
+          try {
+            const gardener = await User.findByPk(visit.gardener_id, { attributes: ['id', 'fcm_token'] });
+            if (gardener?.fcm_token) {
+              await notify.jobCancelled(gardener.fcm_token, visit.booking_number, reason);
+            }
+            await notificationService.notifyUser(visit.gardener_id, {
+              title: '❌ Job Cancelled',
+              body: `Booking ${visit.booking_number} has been cancelled. Reason: ${reason}`,
+              type: 'warning',
+              data: { booking_id: visit.id, booking_number: visit.booking_number, reason }
+            });
+          } catch (_) {}
+        }
+
+        // Customer gets a single confirmation covering the subscription + visits
+        const customer = await User.findByPk(subscription.customer_id, { attributes: ['id', 'fcm_token'] });
+        if (customer?.fcm_token) {
+          if (cancelledVisits.length === 1) {
+            await notify.bookingCancelled(customer.fcm_token, cancelledVisits[0].booking_number);
+          } else {
+            await notify.custom(customer.fcm_token, 'Subscription Cancelled',
+              cancelledVisits.length > 0
+                ? `Your subscription has been cancelled along with ${cancelledVisits.length} upcoming visits.`
+                : 'Your subscription has been cancelled.',
+              { type: 'booking_cancelled', subscription_id: subscription.id });
+          }
+        }
+        await notificationService.notifyUser(subscription.customer_id, {
+          title: 'Subscription Cancelled',
+          body: cancelledVisits.length > 0
+            ? `Your subscription has been cancelled. ${cancelledVisits.length} upcoming visit(s) were also cancelled. Reason: ${reason}`
+            : `Your subscription has been cancelled. Reason: ${reason}`,
+          type: 'info',
+          data: { subscription_id: subscription.id, cancelled_bookings: cancelledVisits.map(v => v.booking_number), reason }
+        });
+      } catch (e) { console.error('[cancelSubscription] notify failed:', e.message); }
+    })();
 
     res.json({ success: true, message: 'Subscription cancelled successfully' });
   } catch (err) {

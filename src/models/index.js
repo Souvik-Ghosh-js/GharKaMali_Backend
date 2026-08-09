@@ -585,6 +585,19 @@ const OrderItem = sequelize.define('OrderItem', {
   gst_rate: { type: DataTypes.INTEGER, allowNull: true }
 }, { tableName: 'order_items', underscored: true });
 
+// ─── WISHLIST ─────────────────────────────────────────────────────────────────
+// A customer's saved shop products. One row per (user, product) — toggled from
+// the app; the admin customer profile surfaces it so the business can track demand.
+const Wishlist = sequelize.define('Wishlist', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  product_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'products', key: 'id' } }
+}, {
+  tableName: 'wishlists',
+  underscored: true,
+  indexes: [{ unique: true, fields: ['user_id', 'product_id'], name: 'uniq_user_product_wishlist' }]
+});
+
 // ─── TAGLINE ──────────────────────────────────────────────────────────────────
 const Tagline = sequelize.define('Tagline', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -776,6 +789,10 @@ Order.hasMany(OrderItem, { foreignKey: 'order_id', as: 'items' });
 OrderItem.belongsTo(Order, { foreignKey: 'order_id', as: 'order' });
 OrderItem.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
 
+Wishlist.belongsTo(Product, { foreignKey: 'product_id', as: 'product' });
+Wishlist.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+User.hasMany(Wishlist, { foreignKey: 'user_id', as: 'wishlists' });
+
 GardenerProfile.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 GardenerProfile.belongsTo(User, { foreignKey: 'supervisor_id', as: 'supervisor' });
 User.hasOne(GardenerProfile, { foreignKey: 'user_id', as: 'gardenerProfile' });
@@ -955,6 +972,7 @@ module.exports = {
   UserAddress,
   GardenerDocument,
   Coupon,
-  VisitorIp
+  VisitorIp,
+  Wishlist
 };
 

@@ -121,6 +121,21 @@ const notify = {
     sendPush(fcmToken, '⚠️ SLA Breach Detected',
       `Booking ${bookingNumber} is ${delayMins} minutes late. Please investigate.`,
       { type: 'sla_breach', booking_number: bookingNumber }),
+
+  // Gardener-facing: their assigned job was cancelled (or reassigned away).
+  jobCancelled: (fcmToken, bookingNumber, reasonText) =>
+    sendPush(fcmToken, '❌ Job Cancelled',
+      `Booking ${bookingNumber} has been cancelled.${reasonText ? ` ${reasonText}` : ''}`,
+      { type: 'job_cancelled', booking_number: bookingNumber }),
+
+  // Customer-facing: confirmation that their booking was cancelled.
+  bookingCancelled: (fcmToken, bookingNumber) =>
+    sendPush(fcmToken, 'Booking Cancelled',
+      `Your booking ${bookingNumber} has been cancelled.`,
+      { type: 'booking_cancelled', booking_number: bookingNumber }),
+
+  // Free-form push — thin wrapper for one-off messages.
+  custom: (fcmToken, title, body, data = {}) => sendPush(fcmToken, title, body, data),
 };
 
 module.exports = { sendPush, sendMulticast, notify };
