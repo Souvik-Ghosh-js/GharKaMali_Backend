@@ -1281,7 +1281,7 @@ router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 's
 // ── ADMIN: SINGLE CUSTOMER DETAIL ─────────────────────────────────────────────
 router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
-    const { User, Booking, Subscription, ServicePlan, Payment } = require('../models');
+    const { User, Booking, Subscription, ServicePlan, Payment, Order, OrderItem, Product } = require('../models');
     const { Op } = require('sequelize');
 
     const customer = await User.findOne({
@@ -1290,7 +1290,7 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
     });
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
 
-    const [bookings, subscriptions, payments, stats] = await Promise.all([
+    const [bookings, subscriptions, payments, stats, orders] = await Promise.all([
       Booking.findAll({
         where: { customer_id: req.params.id },
         order: [['created_at', 'DESC']],
@@ -1323,6 +1323,17 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
           [require('sequelize').fn('AVG', require('sequelize').col('rating')), 'avg_rating']
         ],
         raw: true
+      }),
+      // Shop (plant store) orders — shown in the admin customer profile with a
+      // per-order invoice download.
+      Order.findAll({
+        where: { customer_id: req.params.id },
+        order: [['created_at', 'DESC']],
+        attributes: ['id', 'order_number', 'status', 'payment_status', 'total_amount', 'discount_amount', 'coupon_code', 'created_at'],
+        include: [{
+          model: OrderItem, as: 'items', attributes: ['id', 'quantity', 'price'],
+          include: [{ model: Product, as: 'product', attributes: ['name'] }]
+        }]
       })
     ]);
 
@@ -1332,6 +1343,7 @@ router.get('/admin/customers/:id', authenticate, authorize('admin', 'supervisor'
         customer,
         recentBookings: bookings,
         subscriptions,
+        orders,
         recentPayments: payments,
         stats: stats[0] || { total_bookings: 0, total_spent: 0, avg_rating: null }
       }
