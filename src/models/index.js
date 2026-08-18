@@ -748,8 +748,8 @@ const IssuedInvoice = sequelize.define('IssuedInvoice', {
 const ManualInvoice = sequelize.define('ManualInvoice', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   invoice_number: { type: DataTypes.STRING(30), unique: true, allowNull: false },
-  // 'ondemand' | 'plan' — what was billed.
-  invoice_type: { type: DataTypes.ENUM('ondemand', 'plan'), defaultValue: 'ondemand' },
+  // 'ondemand' | 'plan' | 'products' — what was billed.
+  invoice_type: { type: DataTypes.ENUM('ondemand', 'plan', 'products'), defaultValue: 'ondemand' },
   // What the admin did with it: invoice_only | booking | subscription.
   outcome: { type: DataTypes.ENUM('invoice_only', 'booking', 'subscription'), defaultValue: 'invoice_only' },
   plan_id: { type: DataTypes.INTEGER, references: { model: 'service_plans', key: 'id' } },
@@ -766,10 +766,13 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   scheduled_time: { type: DataTypes.TIME },
   plant_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   notes: { type: DataTypes.TEXT },
-  // Line items snapshot: [{ name, amount }]
+  // Line items snapshot: [{ name, amount }] for services;
+  // [{ product_id, name, amount, qty, gst_rate, hsn, unit }] for 'products'
+  // (amount = GST-EXCLUSIVE unit price, shop convention).
   line_items: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
-  // GST-INCLUSIVE total (matches booking/subscription convention); the split is
+  // Services: GST-INCLUSIVE total (booking/subscription convention); the split is
   // derived from it (total / 1.18) exactly like the invoice service.
+  // Products: GST-EXCLUSIVE subtotal + per-line GST added on top (shop convention).
   subtotal: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   gst_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   total_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },

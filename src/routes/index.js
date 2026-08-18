@@ -641,6 +641,9 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     // appending an enum value is metadata-only, so it skips the table copy that
     // would otherwise fail on a table near MySQL's 64-key limit.
     try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL, ALGORITHM=INPLACE, LOCK=NONE"); } catch (e) { }
+    // Allow 'products' manual invoices (admin shop-product sales). Appending an
+    // enum value is metadata-only, so INPLACE avoids the table-copy pitfalls.
+    try { await sequelize.query("ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products') DEFAULT 'ondemand', ALGORITHM=INPLACE, LOCK=NONE"); } catch (e) { }
     // Allow 'pending' subscription status (online subscriptions awaiting payment).
     // An enum reorder isn't INPLACE-able, and a needless COPY would fail on an
     // index-bloated table — so only ALTER when 'pending' is genuinely missing.

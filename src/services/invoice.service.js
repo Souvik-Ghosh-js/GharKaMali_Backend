@@ -328,7 +328,14 @@ async function buildManualInvoice(id) {
   if (!m) return null;
 
   const intra = m.is_up;
-  const inputs = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => ({
+  // Product invoices carry GST-EXCLUSIVE unit prices with per-line rates (shop
+  // convention — tax added on top); service invoices stay GST-inclusive @ 18%.
+  const isProducts = m.invoice_type === 'products';
+  const inputs = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => (isProducts ? {
+    description: l.name, hsn: l.hsn || hsnForProduct(l.name || '').hsn,
+    qty: l.qty || 1, unit: l.unit || 'Nos',
+    unitPrice: Number(l.amount) || 0, gstRate: l.gst_rate != null ? Number(l.gst_rate) : 0,
+  } : {
     description: l.name, hsn: l.hsn || SERVICE_SAC,
     qty: l.qty || 1, unit: l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit'),
     taxableOverride: Number(l.amount) || 0, gstRate: 18,
@@ -341,7 +348,7 @@ async function buildManualInvoice(id) {
     });
   }
 
-  const rows = buildLineRows(inputs, { inclusive: true, intra });
+  const rows = buildLineRows(inputs, { inclusive: !isProducts, intra });
   const issue = await getOrCreateInvoiceIssue('manual', m.id);
 
   return {
@@ -355,7 +362,10 @@ async function buildManualInvoice(id) {
       lines: [m.service_address, [m.city, m.state].filter(Boolean).join(', '), m.pincode].filter(Boolean),
       phone: m.customer_phone, gstin: null,
     },
-    serviceDetails: {
+    serviceDetails: isProducts ? {
+      'Invoice Type': 'Product Sale',
+      'Items': String((Array.isArray(m.line_items) ? m.line_items : []).length),
+    } : {
       ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
       'Service Type': m.invoice_type === 'plan' ? 'Plan' : 'On-Demand Visit',
       'No. of Plants': m.plant_count ? `${m.plant_count} Plants` : '—',

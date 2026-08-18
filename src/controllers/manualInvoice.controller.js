@@ -8,14 +8,18 @@
 //   • subscription  : create a real Subscription (+ optionally schedule visits),
 //                     link a ManualInvoice to it.
 //
-// GST is computed the SAME way as the invoice service (GST-inclusive total; the
-// split is total/1.18), so the generated invoice matches every other channel.
+// GST for service invoices is computed the SAME way as the invoice service
+// (GST-inclusive total; the split is total/1.18), so the generated invoice
+// matches every other channel. Product invoices ('products') follow the SHOP
+// convention instead: unit prices are GST-EXCLUSIVE and each line's own
+// gst_rate (0/5/12/18/28) is added on top.
 // ─────────────────────────────────────────────────────────────────────────────
 const { Op } = require('sequelize');
 const {
   ManualInvoice, Booking, Subscription, ServicePlan, Geofence, GardenerZone,
-  GardenerProfile, User, BookingLog, sequelize,
+  GardenerProfile, User, BookingLog, Product, ProductCategory, sequelize,
 } = require('../models');
+const { hsnForProduct } = require('../config/invoice.config');
 const { nowIST, todayIST } = require('../utils/time');
 const notificationService = require('../services/notification.service');
 const { notify: pushNotify } = require('../services/push.service');
@@ -91,11 +95,68 @@ function priceInvoice({ items, override_total }) {
   return { total, subtotal, gst_amount };
 }
 
+// ── Product invoices ─────────────────────────────────────────────────────────
+const PRODUCT_GST_RATES = [0, 5, 12, 18, 28]; // valid shop GST slabs
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const badRequest = (message) => Object.assign(new Error(message), { httpStatus: 400 });
+
+// Validate + price a 'products' invoice. Lines arrive as
+// [{ product_id?, name, amount (GST-EXCLUSIVE unit price), qty, gst_rate }].
+// When a line references a real Product, the SERVER's price/gst_rate/name win
+// over the client's (tamper-proofing, same spirit as the payment flow); ad-hoc
+// lines without a product_id are allowed. HSN + unit are resolved and FROZEN
+// onto the line at save time so later config changes never alter an issued
+// invoice. GST is added ON TOP and rounded per line exactly like the PDF's
+// buildLineRows, so the stored totals match the rendered invoice to the paisa.
+async function priceProductInvoice(line_items) {
+  if (!Array.isArray(line_items) || !line_items.length) {
+    throw badRequest('At least one line item is required for a product invoice');
+  }
+  const items = [];
+  for (const l of line_items) {
+    const qty = Number(l.qty);
+    if (!Number.isInteger(qty) || qty < 1) {
+      throw badRequest('Each line item needs an integer qty of at least 1');
+    }
+    let name = String(l.name || '').trim();
+    let unitPrice = Number(l.amount);
+    let gstRate = Number(l.gst_rate);
+    let categoryName = '';
+    let productId = null;
+    if (l.product_id) {
+      const product = await Product.findByPk(l.product_id, {
+        include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }],
+      });
+      if (!product) {
+        throw Object.assign(new Error(`Product ${l.product_id} not found`), { httpStatus: 404 });
+      }
+      productId = product.id;
+      name = product.name;
+      unitPrice = Number(product.price) || 0;
+      gstRate = Number(product.gst_rate) || 0;
+      categoryName = product.category?.name || '';
+    }
+    if (!name) throw badRequest('Each line item needs a name');
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      throw badRequest(`Line "${name}": amount must be a non-negative GST-exclusive unit price`);
+    }
+    if (!PRODUCT_GST_RATES.includes(gstRate)) {
+      throw badRequest(`Line "${name}": gst_rate must be one of ${PRODUCT_GST_RATES.join(', ')}`);
+    }
+    const { hsn, unit } = hsnForProduct(name, categoryName);
+    items.push({ product_id: productId, name, amount: round2(unitPrice), qty, gst_rate: gstRate, hsn, unit });
+  }
+  const subtotal = round2(items.reduce((s, it) => s + round2(it.amount * it.qty), 0));
+  const gst_amount = round2(items.reduce((s, it) => s + round2(it.amount * it.qty * (it.gst_rate / 100)), 0));
+  const total = round2(subtotal + gst_amount);
+  return { items, subtotal, gst_amount, total };
+}
+
 // ── CREATE ───────────────────────────────────────────────────────────────────
 exports.createManualInvoice = async (req, res) => {
   const {
     outcome = 'invoice_only',           // invoice_only | booking | subscription
-    invoice_type = 'ondemand',          // ondemand | plan
+    invoice_type = 'ondemand',          // ondemand | plan | products
     plan_id,
     // customer
     customer_name, customer_phone, customer_email,
@@ -146,32 +207,49 @@ exports.createManualInvoice = async (req, res) => {
       return res.status(400).json({ success: false, message: 'scheduled_date cannot be in the future' });
     }
   }
+  // Product invoices are a pure sale — no booking/subscription can hang off
+  // them, and an inclusive override_total is ambiguous with per-line rates.
+  if (invoice_type === 'products') {
+    if (outcome !== 'invoice_only') {
+      return res.status(400).json({ success: false, message: 'Product invoices only support the invoice_only outcome' });
+    }
+    if (override_total != null && String(override_total).trim() !== '') {
+      return res.status(400).json({ success: false, message: 'override_total is not supported for product invoices' });
+    }
+  }
 
   try {
-    // Resolve the plan (for plan invoices / subscriptions).
-    const plan = plan_id ? await ServicePlan.findByPk(plan_id) : null;
+    // Resolve the plan (for plan invoices / subscriptions). Irrelevant for
+    // product invoices — a stray plan_id from the form is ignored.
+    const plan = (invoice_type !== 'products' && plan_id) ? await ServicePlan.findByPk(plan_id) : null;
     if ((invoice_type === 'plan' || outcome === 'subscription') && !plan) {
       return res.status(404).json({ success: false, message: 'Plan not found' });
     }
 
-    // Build line items. Prefer explicit custom lines; else derive from plan/zone.
-    let items = Array.isArray(line_items) && line_items.length
-      ? line_items.map((l) => ({ name: String(l.name || 'Item'), amount: Number(l.amount) || 0 }))
-      : [];
+    let items, total, subtotal, gst_amount;
+    if (invoice_type === 'products') {
+      // Shop convention: GST-exclusive unit prices, per-line rates added on top.
+      ({ items, total, subtotal, gst_amount } = await priceProductInvoice(line_items));
+    } else {
+      // Build line items. Prefer explicit custom lines; else derive from plan/zone.
+      items = Array.isArray(line_items) && line_items.length
+        ? line_items.map((l) => ({ name: String(l.name || 'Item'), amount: Number(l.amount) || 0 }))
+        : [];
 
-    if (!items.length) {
-      if (plan) {
-        items = [{ name: `${plan.name} Plan${plan.visits_per_month ? ` — ${plan.visits_per_month} visits/month` : ''}`, amount: Number(plan.price) || 0 }];
-      } else {
-        // On-demand: zone base + ₹25 per extra plant (matches createBooking).
-        const zone = (geofence_id || zone_id) ? await Geofence.findByPk(geofence_id || zone_id) : null;
-        const base = zone ? (parseFloat(zone.base_price) || 0) : 0;
-        const extra = (parseInt(plant_count) || 0) * ADDITIONAL_PLANT_RATE;
-        items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + extra }];
+      if (!items.length) {
+        if (plan) {
+          items = [{ name: `${plan.name} Plan${plan.visits_per_month ? ` — ${plan.visits_per_month} visits/month` : ''}`, amount: Number(plan.price) || 0 }];
+        } else {
+          // On-demand: zone base + ₹25 per extra plant (matches createBooking).
+          const zone = (geofence_id || zone_id) ? await Geofence.findByPk(geofence_id || zone_id) : null;
+          const base = zone ? (parseFloat(zone.base_price) || 0) : 0;
+          const extra = (parseInt(plant_count) || 0) * ADDITIONAL_PLANT_RATE;
+          items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + extra }];
+        }
       }
-    }
 
-    const { total, subtotal, gst_amount } = priceInvoice({ items, override_total });
+      ({ total, subtotal, gst_amount } = priceInvoice({ items, override_total }));
+    }
     const isUP = isUPAddress(service_address, city, state);
 
     // Everything (customer creation + record + invoice) in one transaction.
