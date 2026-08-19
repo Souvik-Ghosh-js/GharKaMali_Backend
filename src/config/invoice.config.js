@@ -12,7 +12,7 @@ const COMPANY = {
   gstin: process.env.INVOICE_GSTIN || '09AAQCP7633P1ZD',
   addressLines: (process.env.INVOICE_ADDRESS_LINES || 'T3, A20, UGF, NX One, Tech Zone 4,|Noida Extension, Gautam Buddha Nagar,|Uttar Pradesh - 201306, India').split('|'),
   phone: process.env.INVOICE_PHONE || '+91 96437 01701',
-  email: process.env.INVOICE_EMAIL || 'hello@gharkamali.com',
+  email: process.env.INVOICE_EMAIL || 'info@gharkamali.com',
   website: process.env.INVOICE_WEBSITE || 'www.gharkamali.com',
 };
 
