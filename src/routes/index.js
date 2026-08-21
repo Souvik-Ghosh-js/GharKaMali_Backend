@@ -468,7 +468,10 @@ router.delete('/admin/tags/:id', authenticate, authorize('admin'), async (req, r
 // ─── COUPONS ──────────────────────────────────────────────────────────────────
 // Public: customer applies a code at checkout. Returns the rupee discount.
 // `scope` = 'products' | 'subscription' | 'booking' (default 'products').
-router.post('/coupons/validate', authenticate, authorize('customer'), validate(V.coupon.validate), async (req, res) => {
+// Coupon lookup/preview is public (authenticateOptional): customers browse offers
+// before they log in to pay. The coupon is validated again, with auth, when the
+// booking/order is actually created — that's where it's enforced.
+router.post('/coupons/validate', authenticateOptional, validate(V.coupon.validate), async (req, res) => {
   try {
     const { validateCoupon } = require('../utils/coupon');
     const result = await validateCoupon(req.body.code, req.body.subtotal, req.body.scope || 'products');
@@ -490,7 +493,7 @@ router.post('/coupons/validate', authenticate, authorize('customer'), validate(V
 // Public: list coupons a customer can currently apply (active, in-date, not exhausted).
 // `?scope=products|subscription|booking` narrows to coupons usable for that
 // purchase (applies_to IN ('all', scope)); no scope = every active coupon.
-router.get('/coupons', authenticate, authorize('customer'), async (req, res) => {
+router.get('/coupons', authenticateOptional, async (req, res) => {
   try {
     const { Coupon } = require('../models');
     const { SCOPES } = require('../utils/coupon');
