@@ -1,6 +1,7 @@
 // Shared coupon validation + discount computation.
-// Used by both the public /coupons/validate route and the order controller so
-// the price the customer is quoted always matches what the server charges.
+// Used by the public /coupons/validate route and the order / booking /
+// subscription controllers so the price the customer is quoted always matches
+// what the server charges.
 
 const { Coupon } = require('../models');
 
@@ -8,10 +9,17 @@ const { Coupon } = require('../models');
  * Validate a coupon code against a cart subtotal and compute the discount.
  *
  * @param {string} code        Coupon code (case-insensitive).
- * @param {number} subtotal    Cart merchandise subtotal (before GST), in rupees.
+ * @param {number} subtotal    Pre-GST amount the coupon applies to, in rupees
+ *                             (cart subtotal, or the service's base + add-ons).
+ * @param {string} scope       What is being purchased: 'products' (shop cart),
+ *                             'subscription' (monthly plan) or 'booking'
+ *                             (one-time visit). Defaults to 'products'.
  * @returns {Promise<{ ok: boolean, reason?: string, discount: number, coupon: object|null }>}
  */
-async function validateCoupon(code, subtotal) {
+const SCOPES = ['products', 'subscription', 'booking'];
+const SCOPE_LABEL = { products: 'shop products', subscription: 'monthly plans', booking: 'one-time visits' };
+
+async function validateCoupon(code, subtotal, scope = 'products') {
   const fail = (reason) => ({ ok: false, reason, discount: 0, coupon: null });
 
   if (!code || typeof code !== 'string') return fail('Enter a coupon code');
@@ -25,6 +33,14 @@ async function validateCoupon(code, subtotal) {
   const now = new Date();
   if (coupon.valid_from && now < new Date(coupon.valid_from)) return fail('This coupon is not active yet');
   if (coupon.valid_to && now > new Date(coupon.valid_to)) return fail('This coupon has expired');
+
+  // Scope check: a coupon applies to everything ('all') or to exactly one of
+  // products / subscription / booking.
+  const wanted = SCOPES.includes(scope) ? scope : 'products';
+  const appliesTo = coupon.applies_to || 'all';
+  if (appliesTo !== 'all' && appliesTo !== wanted) {
+    return fail(`This coupon is valid only for ${SCOPE_LABEL[appliesTo] || appliesTo}`);
+  }
 
   if (coupon.usage_limit != null && coupon.usage_count >= coupon.usage_limit) {
     return fail('This coupon has reached its usage limit');
@@ -61,4 +77,4 @@ function computeDiscount(coupon, subtotal) {
   return Math.round(discount * 100) / 100;
 }
 
-module.exports = { validateCoupon, computeDiscount };
+module.exports = { validateCoupon, computeDiscount, SCOPES };

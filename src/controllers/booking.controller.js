@@ -196,7 +196,7 @@ exports.createBooking = async (req, res) => {
       service_address, service_latitude, service_longitude,
       flat_no, building, area, landmark, city, state, pincode,
       plant_count, plan_id, customer_notes, preferred_gardener_id, payment_method,
-      is_instant
+      is_instant, coupon_code
     } = req.body;
 
     // Instant booking — server-side computes the slot. The client cannot pick
@@ -267,7 +267,25 @@ exports.createBooking = async (req, res) => {
     // 18% GST is added on top of every booking (base + add-ons). total_amount is
     // GST-inclusive; the tax invoice derives the tax split from it (total / 1.18).
     const GST_RATE = 0.18;
-    const grandTotal = Math.round((baseAmount + addonTotal) * (1 + GST_RATE) * 100) / 100;
+    const preGstBase = baseAmount + addonTotal;
+    let grandTotal = Math.round(preGstBase * (1 + GST_RATE) * 100) / 100;
+
+    // ── Discount coupon (scope 'booking') ───────────────────────────────────
+    // Validated against the pre-GST base (min-order + percentage math), then
+    // subtracted from the GST-inclusive total — same as shop orders. The usage
+    // slot is claimed atomically inside the transaction below.
+    let discountAmount = 0;
+    let appliedCoupon = null;
+    if (coupon_code && String(coupon_code).trim()) {
+      const { validateCoupon } = require('../utils/coupon');
+      const result = await validateCoupon(coupon_code, preGstBase, 'booking');
+      if (!result.ok) {
+        return res.status(400).json({ success: false, message: result.reason || 'Coupon could not be applied' });
+      }
+      discountAmount = result.discount;
+      appliedCoupon = result.coupon;
+      grandTotal = Math.max(0, Math.round((grandTotal - discountAmount) * 100) / 100);
+    }
 
     // ── Gardener assignment + booking creation are done inside a single DB
     // transaction so two simultaneous bookings can't grab the same gardener for
@@ -354,6 +372,20 @@ exports.createBooking = async (req, res) => {
           }
         }
 
+        // Atomically claim one coupon redemption. The conditional WHERE closes
+        // the race where two concurrent bookings both pass the limit check.
+        if (appliedCoupon) {
+          const [updateRes] = await sequelize.query(
+            'UPDATE coupons SET usage_count = usage_count + 1 WHERE id = :id AND (usage_limit IS NULL OR usage_count < usage_limit)',
+            { replacements: { id: appliedCoupon.id }, transaction: t }
+          );
+          if ((updateRes?.affectedRows ?? 0) === 0) {
+            const e = new Error('This coupon has just reached its usage limit. Please remove it and try again.');
+            e.httpStatus = 400;
+            throw e;
+          }
+        }
+
         const otp = genVisitOTP();
         const created = await Booking.create({
           booking_number: genBookingNumber(),
@@ -375,6 +407,8 @@ exports.createBooking = async (req, res) => {
           extra_plants: extraCount,   // additional plants the customer added (₹25 each)
           base_amount: baseAmount,
           total_amount: grandTotal,
+          coupon_code: appliedCoupon ? appliedCoupon.code : null,
+          discount_amount: discountAmount,
           customer_notes,
           payment_status: payment_method === 'wallet' ? 'paid' : 'pending'
         }, { transaction: t });
@@ -403,7 +437,7 @@ exports.createBooking = async (req, res) => {
     }
 
     // Log booking creation
-    await logBookingEvent(booking.id, 'created', req.user.id, 'customer', { zone_id: activeZoneId, payment_method: payment_method || 'online', surge_multiplier: surge }, `Booking ${booking.booking_number} created`);
+    await logBookingEvent(booking.id, 'created', req.user.id, 'customer', { zone_id: activeZoneId, payment_method: payment_method || 'online', surge_multiplier: surge, ...(appliedCoupon ? { coupon_code: appliedCoupon.code, discount_amount: discountAmount } : {}) }, `Booking ${booking.booking_number} created`);
     if (gardener_id) {
       await logBookingEvent(booking.id, 'assigned', null, 'system', { gardener_id }, 'Auto-assigned to gardener');
     }

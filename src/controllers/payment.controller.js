@@ -151,15 +151,30 @@ async function notifyFinanceOfEntity(type, id) {
 // creation time (product stock, coupon redemption). Guarded so it NEVER voids an
 // entity that has already been paid/activated (race with a late webhook).
 async function cancelEntity(type, id) {
+  // Hand back the coupon redemption claimed at creation (bookings/subs/orders).
+  const releaseCoupon = async (code) => {
+    if (!code) return;
+    const { sequelize } = require('../models');
+    await sequelize.query(
+      'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE code = :code',
+      { replacements: { code } }
+    );
+  };
   if (type === 'booking') {
     // Only cancel while still unpaid; a paid booking is untouched.
+    const b = await Booking.findByPk(id, { attributes: ['id', 'coupon_code'] });
     const [affected] = await Booking.update({ status: 'cancelled' }, { where: { id, payment_status: 'pending' } });
-    if (affected) notifyBookingVoided(id); // fire-and-forget
+    if (affected) {
+      await releaseCoupon(b?.coupon_code);
+      notifyBookingVoided(id); // fire-and-forget
+    }
   } else if (type === 'subscription') {
     // Online subs start 'pending'; only those get cancelled.
-    await Subscription.update({ status: 'cancelled' }, { where: { id, status: 'pending' } });
+    const s = await Subscription.findByPk(id, { attributes: ['id', 'coupon_code'] });
+    const [affected] = await Subscription.update({ status: 'cancelled' }, { where: { id, status: 'pending' } });
+    if (affected) await releaseCoupon(s?.coupon_code);
   } else if (type === 'order') {
-    const { Order: O, OrderItem, Product, sequelize } = require('../models');
+    const { Order: O, OrderItem, Product } = require('../models');
     const order = await O.findByPk(id);
     if (!order || order.payment_status === 'paid') return; // don't void a paid order
     // Restock everything this order had reserved.
@@ -167,13 +182,7 @@ async function cancelEntity(type, id) {
     for (const it of items) {
       await Product.increment('stock_quantity', { by: it.quantity, where: { id: it.product_id } });
     }
-    // Hand back the coupon redemption claimed at order creation.
-    if (order.coupon_code) {
-      await sequelize.query(
-        'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE code = :code',
-        { replacements: { code: order.coupon_code } }
-      );
-    }
+    await releaseCoupon(order.coupon_code);
     await order.update({ status: 'cancelled', payment_status: 'failed' });
   }
 }

@@ -1,5 +1,5 @@
 const { Op, literal } = require('sequelize');
-const { Subscription, ServicePlan, User, Booking, ServiceZone, Geofence } = require('../models');
+const { Subscription, ServicePlan, User, Booking, ServiceZone, Geofence, sequelize } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const moment = require('moment');
 const { nowIST, todayIST } = require('../utils/time');
@@ -26,7 +26,7 @@ exports.subscribe = async (req, res) => {
       plan_id, zone_id, geofence_id: geofence_id_body, 
       service_address, service_latitude, service_longitude, 
       flat_no, building, area, landmark, city, state, pincode,
-      plant_count, preferred_gardener_id, auto_renew, payment_id, payment_method
+      plant_count, preferred_gardener_id, auto_renew, payment_id, payment_method, coupon_code
     } = req.body;
     // Online (Razorpay) subscriptions start as 'pending' and are activated by
     // the payment verification/webhook. Other paths activate immediately.
@@ -47,26 +47,68 @@ exports.subscribe = async (req, res) => {
     const startDate = todayIST();
     const endDate = nowIST().add(plan.duration_days, 'days').format('YYYY-MM-DD');
 
-    const subscription = await Subscription.create({
-      customer_id: req.user.id,
-      plan_id,
-      zone_id: activeZoneId,
-      geofence_id: activeZoneId,
-      preferred_gardener_id,
-      status: pendingPayment ? 'pending' : 'active',
-      start_date: startDate,
-      end_date: endDate,
-      auto_renew: auto_renew !== false,
-      visits_total: plan.visits_per_month,
-      visits_used: 0,
-      // Monthly price = (plan price + ₹25 per additional plant) + 18% GST.
-      amount_paid: Math.round((parseFloat(plan.price) + ((parseInt(plant_count) || 0) * 25)) * 1.18 * 100) / 100,
-      service_address,
-      service_latitude,
-      service_longitude,
-      plant_count: parseInt(plant_count) || 0, // additional plants beyond the plan's free coverage (optional)
-      payment_id
-    });
+    // Monthly price = (plan price + ₹25 per additional plant) + 18% GST.
+    const preGstBase = parseFloat(plan.price) + ((parseInt(plant_count) || 0) * 25);
+    let amountPaid = Math.round(preGstBase * 1.18 * 100) / 100;
+
+    // ── Discount coupon (scope 'subscription') ──────────────────────────────
+    // Validated against the pre-GST base, subtracted from the GST-inclusive
+    // total (same as shop orders / bookings). The usage slot is claimed
+    // atomically in the same transaction that creates the subscription.
+    let discountAmount = 0;
+    let appliedCoupon = null;
+    if (coupon_code && String(coupon_code).trim()) {
+      const { validateCoupon } = require('../utils/coupon');
+      const result = await validateCoupon(coupon_code, preGstBase, 'subscription');
+      if (!result.ok) {
+        return res.status(400).json({ success: false, message: result.reason || 'Coupon could not be applied' });
+      }
+      discountAmount = result.discount;
+      appliedCoupon = result.coupon;
+      amountPaid = Math.max(0, Math.round((amountPaid - discountAmount) * 100) / 100);
+    }
+
+    let subscription;
+    try {
+      subscription = await sequelize.transaction(async (t) => {
+        if (appliedCoupon) {
+          const [updateRes] = await sequelize.query(
+            'UPDATE coupons SET usage_count = usage_count + 1 WHERE id = :id AND (usage_limit IS NULL OR usage_count < usage_limit)',
+            { replacements: { id: appliedCoupon.id }, transaction: t }
+          );
+          if ((updateRes?.affectedRows ?? 0) === 0) {
+            const e = new Error('This coupon has just reached its usage limit. Please remove it and try again.');
+            e.httpStatus = 400;
+            throw e;
+          }
+        }
+
+        return Subscription.create({
+          customer_id: req.user.id,
+          plan_id,
+          zone_id: activeZoneId,
+          geofence_id: activeZoneId,
+          preferred_gardener_id,
+          status: pendingPayment ? 'pending' : 'active',
+          start_date: startDate,
+          end_date: endDate,
+          auto_renew: auto_renew !== false,
+          visits_total: plan.visits_per_month,
+          visits_used: 0,
+          amount_paid: amountPaid,
+          coupon_code: appliedCoupon ? appliedCoupon.code : null,
+          discount_amount: discountAmount,
+          service_address,
+          service_latitude,
+          service_longitude,
+          plant_count: parseInt(plant_count) || 0, // additional plants beyond the plan's free coverage (optional)
+          payment_id
+        }, { transaction: t });
+      });
+    } catch (txErr) {
+      if (txErr.httpStatus) return res.status(txErr.httpStatus).json({ success: false, message: txErr.message });
+      throw txErr; // unexpected → outer catch (500)
+    }
 
     // Auto-scheduling removed - user will select dates manually via selectDates API
 

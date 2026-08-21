@@ -467,10 +467,11 @@ router.delete('/admin/tags/:id', authenticate, authorize('admin'), async (req, r
 
 // ─── COUPONS ──────────────────────────────────────────────────────────────────
 // Public: customer applies a code at checkout. Returns the rupee discount.
+// `scope` = 'products' | 'subscription' | 'booking' (default 'products').
 router.post('/coupons/validate', authenticate, authorize('customer'), validate(V.coupon.validate), async (req, res) => {
   try {
     const { validateCoupon } = require('../utils/coupon');
-    const result = await validateCoupon(req.body.code, req.body.subtotal);
+    const result = await validateCoupon(req.body.code, req.body.subtotal, req.body.scope || 'products');
     if (!result.ok) return res.status(200).json({ success: false, message: result.reason });
     return res.json({
       success: true,
@@ -487,11 +488,22 @@ router.post('/coupons/validate', authenticate, authorize('customer'), validate(V
 });
 
 // Public: list coupons a customer can currently apply (active, in-date, not exhausted).
+// `?scope=products|subscription|booking` narrows to coupons usable for that
+// purchase (applies_to IN ('all', scope)); no scope = every active coupon.
 router.get('/coupons', authenticate, authorize('customer'), async (req, res) => {
   try {
     const { Coupon } = require('../models');
+    const { SCOPES } = require('../utils/coupon');
     const now = new Date();
-    const all = await Coupon.findAll({ where: { is_active: true }, order: [['min_order_amount', 'ASC']] });
+    const where = { is_active: true };
+    const scope = typeof req.query.scope === 'string' ? req.query.scope.trim().toLowerCase() : '';
+    if (scope) {
+      if (!SCOPES.includes(scope)) {
+        return res.status(400).json({ success: false, message: `scope must be one of: ${SCOPES.join(', ')}` });
+      }
+      where.applies_to = ['all', scope];
+    }
+    const all = await Coupon.findAll({ where, order: [['min_order_amount', 'ASC']] });
     const available = all
       .filter(c => {
         if (c.valid_from && now < new Date(c.valid_from)) return false;
@@ -506,6 +518,7 @@ router.get('/coupons', authenticate, authorize('customer'), async (req, res) => 
         discount_value: c.discount_value,
         min_order_amount: c.min_order_amount,
         max_discount: c.max_discount,
+        applies_to: c.applies_to || 'all',
       }));
     res.json({ success: true, data: available });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -634,6 +647,24 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE order_items ADD COLUMN gst_rate INT NULL"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0"); } catch (e) { }
+    // Coupons for services: scope column on coupons + discount columns on
+    // bookings/subscriptions. "Duplicate column" on re-run is expected and
+    // silent; anything else is LOGGED — a missing column here makes every
+    // coupon-bearing booking/subscription insert fail.
+    const couponAlters = [
+      "ALTER TABLE coupons ADD COLUMN applies_to ENUM('all','products','subscription','booking') NOT NULL DEFAULT 'all'",
+      "ALTER TABLE bookings ADD COLUMN coupon_code VARCHAR(40) NULL",
+      "ALTER TABLE bookings ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+      "ALTER TABLE subscriptions ADD COLUMN coupon_code VARCHAR(40) NULL",
+      "ALTER TABLE subscriptions ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+    ];
+    for (const sql of couponAlters) {
+      try { await sequelize.query(sql); }
+      catch (e) {
+        const dup = /Duplicate column|ER_DUP_FIELDNAME/i.test(e.message) || e.original?.code === 'ER_DUP_FIELDNAME';
+        if (!dup) console.error('sync-db: coupon column ALTER FAILED:', sql, '->', e.message);
+      }
+    }
     // Stable URL slugs for plans & categories
     try { await sequelize.query("ALTER TABLE service_plans ADD COLUMN slug VARCHAR(120)"); } catch (e) { }
     try { await sequelize.query("ALTER TABLE product_categories ADD COLUMN slug VARCHAR(100)"); } catch (e) { }

@@ -124,7 +124,10 @@ const Subscription = sequelize.define('Subscription', {
   service_longitude: { type: DataTypes.DECIMAL(11, 8) },
   plant_count: { type: DataTypes.INTEGER, defaultValue: 1 },
   notes: { type: DataTypes.TEXT },
-  payment_id: { type: DataTypes.STRING(100) }
+  payment_id: { type: DataTypes.STRING(100) },
+  // Coupon applied at purchase. amount_paid is stored POST-discount.
+  coupon_code: { type: DataTypes.STRING(40) },
+  discount_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 }
 }, { tableName: 'subscriptions' });
 
 // ─── BOOKING / JOB ────────────────────────────────────────────────────────────
@@ -163,6 +166,9 @@ const Booking = sequelize.define('Booking', {
   base_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   extra_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   total_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  // Coupon applied at booking. total_amount is stored POST-discount.
+  coupon_code: { type: DataTypes.STRING(40) },
+  discount_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
   payment_status: { type: DataTypes.ENUM('pending', 'paid', 'refunded'), defaultValue: 'pending' },
   before_image: { type: DataTypes.STRING(500) },
   after_image: { type: DataTypes.STRING(500) },
@@ -556,6 +562,9 @@ const Coupon = sequelize.define('Coupon', {
   valid_from: { type: DataTypes.DATE },
   valid_to: { type: DataTypes.DATE },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  // What the coupon can be redeemed against: everything, shop products only,
+  // monthly plans ('subscription') only, or one-time visits ('booking') only.
+  applies_to: { type: DataTypes.ENUM('all', 'products', 'subscription', 'booking'), allowNull: false, defaultValue: 'all' },
   updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'coupons', underscored: true });
 

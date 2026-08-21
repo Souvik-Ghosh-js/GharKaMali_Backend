@@ -133,6 +133,7 @@ const booking = {
     intInRange('plant_count', { min: 1, max: 1000, optional: true }),
     intInRange('preferred_gardener_id', { min: 1, optional: true }),
     text('customer_notes', { max: 1000, optional: true }),
+    text('coupon_code', { max: 40, optional: true }),
   ],
   cancel: [
     intInRange('booking_id', { min: 1 }),
@@ -187,6 +188,8 @@ const coupon = {
   validate: [
     text('code', { min: 1, max: 40 }),
     amount('subtotal', { min: 0, max: 10000000 }),
+    // What the coupon is being applied to. Omitted = 'products' (legacy clients).
+    enumIn('scope', ['products', 'subscription', 'booking'], { optional: true }),
   ],
   // Admin: create / update a coupon.
   save: [
@@ -200,6 +203,7 @@ const coupon = {
     isoDate('valid_from', true),
     isoDate('valid_to', true),
     body('is_active').optional({ values: 'falsy' }).isBoolean().toBoolean(),
+    enumIn('applies_to', ['all', 'products', 'subscription', 'booking'], { optional: true }),
   ],
 };
 
@@ -288,6 +292,7 @@ const subscription = {
     intInRange('preferred_gardener_id', { min: 1, optional: true }),
     body('auto_renew').optional({ values: 'falsy' }).isBoolean().toBoolean(),
     amount('total_amount', { min: 1, optional: true }),
+    text('coupon_code', { max: 40, optional: true }),
   ],
 };
 

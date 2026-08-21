@@ -125,7 +125,11 @@ async function buildBookingInvoice(id) {
   const intra = isIntraState(b.service_address, state, b.geofenceRef?.city);
   const plan = b.subscription?.plan;
   const total = Number(b.total_amount) || 0;
-  const base = Number(b.base_amount) || total;
+  // total_amount is stored POST-discount; add the coupon back to recover the
+  // undiscounted amount for the GST-detection below (and for pricing the lines).
+  const discount = round2(Number(b.discount_amount) || 0);
+  const paid = round2(total + discount);
+  const base = Number(b.base_amount) || paid;
   const addonsSum = (b.addons || []).reduce(
     (s, a) => s + (Number(a.price) || Number(a.addon?.price) || 0) * (a.quantity || 1), 0);
 
@@ -135,8 +139,8 @@ async function buildBookingInvoice(id) {
   // strip GST out a second time (the ₹349 → ₹295.76 bug). Legacy records where
   // GST was never added have total == base + addons — for those the stored
   // amounts ARE what the customer paid, so keep them GST-inclusive.
-  const gstAddedOnTop = total > 0 &&
-    Math.abs((base + addonsSum) * 1.18 - total) <= Math.abs((base + addonsSum) - total);
+  const gstAddedOnTop = paid > 0 &&
+    Math.abs((base + addonsSum) * 1.18 - paid) <= Math.abs((base + addonsSum) - paid);
 
   const inputs = [{
     description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
@@ -182,9 +186,20 @@ async function buildBookingInvoice(id) {
       'No. of Plants': b.plant_count ? `${b.plant_count} Plants` : '—',
       ...(plan?.visits_per_month ? { 'Visit Count': `${plan.visits_per_month} Visits` } : {}),
       ...(plan ? { 'Membership Plan': plan.name } : {}),
+      ...(b.coupon_code ? { 'Coupon': b.coupon_code } : {}),
       'Technician': b.gardener?.name || 'To be assigned',
     },
-    rows, totals: totalsFrom(rows), intra,
+    rows, totals: (() => {
+      // A coupon reduces what the customer actually paid (total_amount is
+      // stored post-discount) — the invoice grand total must match that amount.
+      const totals = totalsFrom(rows);
+      if (discount > 0) {
+        totals.discount = Math.min(discount, totals.grand);
+        totals.grand = round2(Math.max(0, totals.grand - discount));
+      }
+      return totals;
+    })(), intra,
+    discount,
   };
 }
 
@@ -202,12 +217,16 @@ async function buildSubscriptionInvoice(id) {
   const state = c?.state || '';
   const intra = isIntraState(s.service_address, state);
   const total = Number(s.amount_paid) || 0;
+  // amount_paid is stored POST-discount; back GST out of the undiscounted
+  // amount so taxable/GST reflect the plan price, then deduct the coupon.
+  const discount = round2(Number(s.discount_amount) || 0);
+  const gross = round2(total + discount);
   const plan = s.plan;
 
   const inputs = [{
     description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
     hsn: SERVICE_SAC, qty: 1, unit: 'Plan',
-    taxableOverride: total, gstRate: 18,
+    taxableOverride: gross, gstRate: 18,
   }];
 
   const rows = buildLineRows(inputs, { inclusive: true, intra });
@@ -237,8 +256,17 @@ async function buildSubscriptionInvoice(id) {
       'No. of Plants': plan?.max_plants ? `Up to ${plan.max_plants} Plants` : '—',
       'Visit Count': plan?.visits_per_month ? `${plan.visits_per_month} Visits / month` : '—',
       'Membership Plan': plan?.name || '—',
+      ...(s.coupon_code ? { 'Coupon': s.coupon_code } : {}),
     },
-    rows, totals: totalsFrom(rows), intra,
+    rows, totals: (() => {
+      const totals = totalsFrom(rows);
+      if (discount > 0) {
+        totals.discount = Math.min(discount, totals.grand);
+        totals.grand = round2(Math.max(0, totals.grand - discount));
+      }
+      return totals;
+    })(), intra,
+    discount,
   };
 }
 
