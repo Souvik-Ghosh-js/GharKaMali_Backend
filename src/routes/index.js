@@ -503,6 +503,13 @@ router.get('/coupons', authenticate, authorize('customer'), async (req, res) => 
       }
       where.applies_to = ['all', scope];
     }
+    // Optional ?subtotal= (pre-GST cart/service base) lets us compute real
+    // eligibility + the exact saving per coupon, so clients can show
+    // "eligible" offers first with "You save ₹x" and explain the rest.
+    const { computeDiscount } = require('../utils/coupon');
+    const subtotal = req.query.subtotal != null && req.query.subtotal !== '' ? Number(req.query.subtotal) : null;
+    const hasSubtotal = subtotal != null && Number.isFinite(subtotal) && subtotal >= 0;
+
     const all = await Coupon.findAll({ where, order: [['min_order_amount', 'ASC']] });
     const available = all
       .filter(c => {
@@ -511,15 +518,37 @@ router.get('/coupons', authenticate, authorize('customer'), async (req, res) => 
         if (c.usage_limit != null && c.usage_count >= c.usage_limit) return false;
         return true;
       })
-      .map(c => ({
-        code: c.code,
-        description: c.description || null,
-        discount_type: c.discount_type,
-        discount_value: c.discount_value,
-        min_order_amount: c.min_order_amount,
-        max_discount: c.max_discount,
-        applies_to: c.applies_to || 'all',
-      }));
+      .map(c => {
+        const minOrder = Number(c.min_order_amount) || 0;
+        let eligible = true;
+        let reason = null;
+        let discount_amount = null;
+        if (hasSubtotal) {
+          if (minOrder > 0 && subtotal < minOrder) {
+            eligible = false;
+            reason = `Add ₹${(minOrder - subtotal).toFixed(0)} more to use this coupon (min order ₹${minOrder.toFixed(0)})`;
+          } else {
+            discount_amount = computeDiscount(c, subtotal);
+            if (discount_amount <= 0) { eligible = false; reason = 'This coupon does not apply to your cart'; }
+          }
+        }
+        return {
+          code: c.code,
+          description: c.description || null,
+          discount_type: c.discount_type,
+          discount_value: c.discount_value,
+          min_order_amount: c.min_order_amount,
+          max_discount: c.max_discount,
+          applies_to: c.applies_to || 'all',
+          eligible,           // always true when no subtotal was supplied
+          reason,             // why it's not eligible right now (null when eligible)
+          discount_amount,    // exact saving for the given subtotal (null when no subtotal)
+        };
+      })
+      // Eligible first, biggest saving first; then the rest by lowest min order.
+      .sort((a, b) => (Number(b.eligible) - Number(a.eligible))
+        || ((b.discount_amount || 0) - (a.discount_amount || 0))
+        || ((Number(a.min_order_amount) || 0) - (Number(b.min_order_amount) || 0)));
     res.json({ success: true, data: available });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

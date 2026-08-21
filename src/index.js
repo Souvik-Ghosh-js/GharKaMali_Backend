@@ -144,6 +144,14 @@ sequelize.authenticate()
       .catch(err => console.error('⚠️  Schema sync failed (continuing anyway):', err.message));
   })
   .then(() => {
+    // Add columns/enum values that new model attributes depend on. sync() never
+    // alters existing tables, so without this a deploy that adds an attribute
+    // breaks every query on that model until the schema is reconciled by hand.
+    const { ensureSchema } = require('./config/ensureSchema');
+    return ensureSchema(sequelize)
+      .catch(err => console.error('⚠️  ensureSchema failed (continuing anyway):', err.message));
+  })
+  .then(() => {
     require('./services/cron.service');
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 GharKaMali API running on port ${PORT}`);
