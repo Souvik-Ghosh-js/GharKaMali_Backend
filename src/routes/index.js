@@ -42,7 +42,56 @@ router.post('/auth/update-fcm-token', authenticate, async (req, res) => {
 router.use('/addresses', require('./address.routes'));
 
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
-router.post('/bookings', authenticate, authorize('customer'), validate(V.booking.create), bookingCtrl.createBooking);
+
+// ── OPERATIONS KILL-SWITCH ────────────────────────────────────────────────────
+// Admin can pause operations ("not serviceable right now"). While paused, new
+// bookings/subscriptions/shop orders are refused with a friendly 503 (enforced
+// server-side, so even old app builds are covered) and the public status
+// endpoint lets the website/apps show a banner. 15s in-memory cache keeps the
+// hot creation paths off the DB; the admin toggle busts it instantly.
+const OPS_DEFAULT_MESSAGE = "We're not serviceable right now — we'll be back very soon!";
+let _opsCache = { at: 0, paused: false, message: OPS_DEFAULT_MESSAGE };
+async function getOperationsStatus() {
+  if (Date.now() - _opsCache.at < 15000) return _opsCache;
+  try {
+    const { SystemSetting } = require('../models');
+    const [p, m] = await Promise.all([
+      SystemSetting.findOne({ where: { key: 'operations_paused' } }),
+      SystemSetting.findOne({ where: { key: 'operations_pause_message' } }),
+    ]);
+    _opsCache = { at: Date.now(), paused: p?.value === '1', message: (m?.value || '').trim() || OPS_DEFAULT_MESSAGE };
+  } catch (e) { _opsCache.at = Date.now(); /* fail open: never block on a read error */ }
+  return _opsCache;
+}
+const requireOperational = async (req, res, next) => {
+  const s = await getOperationsStatus();
+  if (s.paused) return res.status(503).json({ success: false, paused: true, message: s.message });
+  next();
+};
+// Public — website + apps poll this to show/hide the "we'll be back soon" banner.
+router.get('/operations-status', async (req, res) => {
+  const s = await getOperationsStatus();
+  res.json({ success: true, data: { paused: s.paused, message: s.message } });
+});
+// Admin toggle.
+router.put('/admin/operations-status', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { SystemSetting } = require('../models');
+    const paused = !!req.body?.paused;
+    const message = String(req.body?.message || '').trim().slice(0, 300);
+    const upsert = async (key, value) => {
+      const [row] = await SystemSetting.findOrCreate({ where: { key }, defaults: { value } });
+      if (row.value !== value) await row.update({ value });
+    };
+    await upsert('operations_paused', paused ? '1' : '0');
+    await upsert('operations_pause_message', message);
+    _opsCache.at = 0; // take effect immediately
+    const st = await getOperationsStatus();
+    res.json({ success: true, data: { paused: st.paused, message: st.message } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/bookings', authenticate, authorize('customer'), requireOperational, validate(V.booking.create), bookingCtrl.createBooking);
 router.get('/bookings/my', authenticate, authorize('customer'), bookingCtrl.getMyBookings);
 router.get('/bookings/previous-gardeners', authenticate, authorize('customer'), bookingCtrl.getPreviousGardeners);
 router.get('/bookings/check-availability', bookingCtrl.checkAvailability);
@@ -67,7 +116,7 @@ router.get('/bookings/track/:booking_id', authenticate, authorize('customer'), b
 
 // ── SUBSCRIPTIONS ─────────────────────────────────────────────────────────────
 router.get('/plans', subscriptionCtrl.getPlans);
-router.post('/subscriptions', authenticate, authorize('customer'), validate(V.subscription.create), subscriptionCtrl.subscribe);
+router.post('/subscriptions', authenticate, authorize('customer'), requireOperational, validate(V.subscription.create), subscriptionCtrl.subscribe);
 router.get('/subscriptions/my', authenticate, authorize('customer'), subscriptionCtrl.getMySubscriptions);
 router.put('/subscriptions/:id/cancel', authenticate, authorize('customer'), subscriptionCtrl.cancelSubscription);
 router.post('/subscriptions/:id/select-dates', authenticate, authorize('customer'), subscriptionCtrl.selectDates);
@@ -133,7 +182,7 @@ router.get('/geofences', async (req, res) => {
 router.get('/shop/categories', authenticateOptional, shopCtrl.getCategories);
 router.get('/shop/products', authenticateOptional, shopCtrl.getProducts);
 router.get('/shop/products/:id', authenticateOptional, shopCtrl.getProductDetail);
-router.post('/shop/orders', authenticate, authorize('customer'), validate(V.order.create), shopCtrl.createOrder);
+router.post('/shop/orders', authenticate, authorize('customer'), requireOperational, validate(V.order.create), shopCtrl.createOrder);
 router.get('/shop/orders/my', authenticate, authorize('customer'), shopCtrl.getMyOrders);
 
 // ── SHOP WISHLIST ─────────────────────────────────────────────────────────────
