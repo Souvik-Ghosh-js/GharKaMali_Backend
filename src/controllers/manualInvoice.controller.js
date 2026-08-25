@@ -156,6 +156,7 @@ async function priceProductInvoice(line_items) {
 exports.createManualInvoice = async (req, res) => {
   const {
     outcome = 'invoice_only',           // invoice_only | booking | subscription
+    payment_status = 'paid',            // paid | pending (what prints on the PDF)
     invoice_type = 'ondemand',          // ondemand | plan | products
     plan_id,
     // customer
@@ -175,6 +176,9 @@ exports.createManualInvoice = async (req, res) => {
     schedule_dates,                      // optional string[] of YYYY-MM-DD
   } = req.body;
 
+  if (!['paid', 'pending'].includes(payment_status)) {
+    return res.status(400).json({ success: false, message: "payment_status must be 'paid' or 'pending'" });
+  }
   if (!customer_name) {
     return res.status(400).json({ success: false, message: 'customer_name is required' });
   }
@@ -312,7 +316,7 @@ exports.createManualInvoice = async (req, res) => {
           plant_count: parseInt(plant_count) || 0,
           base_amount: subtotal,
           total_amount: total,
-          payment_status: 'paid',
+          payment_status,
           customer_notes: notes || null,
         }, { transaction: t });
 
@@ -386,6 +390,7 @@ exports.createManualInvoice = async (req, res) => {
       const invoice = await ManualInvoice.create({
         invoice_number: genInvoiceNumber(),
         invoice_type,
+        payment_status,
         outcome,
         plan_id: plan?.id || null,
         customer_id: customer?.id || null,

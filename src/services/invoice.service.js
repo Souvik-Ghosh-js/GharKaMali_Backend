@@ -384,7 +384,7 @@ async function buildManualInvoice(id) {
     invoiceDate: dLong(m.created_at || m.createdAt),
     referenceLabel: 'Reference', referenceValue: m.invoice_number,
     placeOfSupply: placeOfSupply(m.state),
-    paymentMode: 'Offline', paymentStatus: 'PAID',
+    paymentMode: 'Offline', paymentStatus: (m.payment_status || 'paid').toUpperCase(),
     billTo: {
       name: m.customer_name,
       lines: [m.service_address, [m.city, m.state].filter(Boolean).join(', '), m.pincode].filter(Boolean),

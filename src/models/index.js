@@ -757,6 +757,9 @@ const IssuedInvoice = sequelize.define('IssuedInvoice', {
 const ManualInvoice = sequelize.define('ManualInvoice', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   invoice_number: { type: DataTypes.STRING(30), unique: true, allowNull: false },
+  // Whether the customer has actually paid — admin chooses on the form and it
+  // prints on the PDF ('PAID' / 'PENDING'). Default 'paid' preserves the old behavior.
+  payment_status: { type: DataTypes.ENUM('paid', 'pending'), defaultValue: 'paid' },
   // 'ondemand' | 'plan' | 'products' — what was billed.
   invoice_type: { type: DataTypes.ENUM('ondemand', 'plan', 'products'), defaultValue: 'ondemand' },
   // What the admin did with it: invoice_only | booking | subscription.

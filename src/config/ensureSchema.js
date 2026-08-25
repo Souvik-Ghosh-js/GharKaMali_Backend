@@ -19,6 +19,8 @@ const STATEMENTS = [
   "ALTER TABLE bookings ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
   "ALTER TABLE subscriptions ADD COLUMN coupon_code VARCHAR(40) NULL",
   "ALTER TABLE subscriptions ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+  // Manual invoices: admin chooses Paid / Unpaid on the Create Invoice form.
+  "ALTER TABLE manual_invoices ADD COLUMN payment_status ENUM('paid','pending') NOT NULL DEFAULT 'paid'",
 ];
 
 const IGNORABLE = new Set(['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY']);
