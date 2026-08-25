@@ -68,6 +68,20 @@ const requireOperational = async (req, res, next) => {
   if (s.paused) return res.status(503).json({ success: false, paused: true, message: s.message });
   next();
 };
+// Standard service details + FAQs (single source for website + customer app).
+// GET /service-details            -> all services
+// GET /service-details?slug=x     -> one service (404 when unknown)
+router.get('/service-details', (req, res) => {
+  const { SERVICE_DETAILS } = require('../config/serviceDetails');
+  const slug = typeof req.query.slug === 'string' ? req.query.slug.trim().toLowerCase() : '';
+  if (slug) {
+    const svc = SERVICE_DETAILS.find((x) => x.slug === slug);
+    if (!svc) return res.status(404).json({ success: false, message: 'Unknown service' });
+    return res.json({ success: true, data: svc });
+  }
+  res.json({ success: true, data: SERVICE_DETAILS });
+});
+
 // Public — website + apps poll this to show/hide the "we'll be back soon" banner.
 router.get('/operations-status', async (req, res) => {
   const s = await getOperationsStatus();
