@@ -21,6 +21,12 @@ const STATEMENTS = [
   "ALTER TABLE subscriptions ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
   // Manual invoices: admin chooses Paid / Unpaid on the Create Invoice form.
   "ALTER TABLE manual_invoices ADD COLUMN payment_status ENUM('paid','pending') NOT NULL DEFAULT 'paid'",
+  // Field-service MVP: geo-verified gardener check-in/out on a visit.
+  "ALTER TABLE bookings ADD COLUMN checkin_latitude DECIMAL(10,8) NULL",
+  "ALTER TABLE bookings ADD COLUMN checkin_longitude DECIMAL(11,8) NULL",
+  "ALTER TABLE bookings ADD COLUMN checkout_latitude DECIMAL(10,8) NULL",
+  "ALTER TABLE bookings ADD COLUMN checkout_longitude DECIMAL(11,8) NULL",
+  "ALTER TABLE bookings ADD COLUMN checkin_distance_m INT NULL",
 ];
 
 const IGNORABLE = new Set(['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY']);

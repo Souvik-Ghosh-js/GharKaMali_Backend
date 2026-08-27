@@ -34,6 +34,7 @@ const uploadBlog = multer({ storage: createStorage('blogs'), fileFilter: imageFi
 const uploadIdProof = multer({ storage: createStorage('id-proofs'), fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 const uploadShop = multer({ storage: createStorage('shop'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 const uploadDocument = multer({ storage: createStorage('documents'), fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadVisit = multer({ storage: createStorage('visits'), fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const complaintFilter = (req, file, cb) => {
   const allowedExts = /jpeg|jpg|png|webp|heic|heif|jfif|bmp|pdf|doc|docx|xls|xlsx|csv|txt/;
@@ -53,4 +54,4 @@ const uploadComplaint = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
 });
 
-module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadIdProof, uploadBlog, uploadShop, uploadDocument, uploadComplaint };
+module.exports = { uploadProfile, uploadWorkProof, uploadPlant, uploadIdProof, uploadBlog, uploadShop, uploadDocument, uploadComplaint, uploadVisit };

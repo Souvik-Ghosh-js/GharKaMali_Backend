@@ -1,6 +1,6 @@
 const { notify } = require('../services/push.service');
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService, BookingTimeAddon, sequelize } = require('../models');
+const { Booking, User, GardenerProfile, Subscription, ServiceZone, ServicePlan, Notification, BookingTracking, Geofence, GardenerZone, BookingLog, BookingAddOn, AddOnService, BookingTimeAddon, VisitPhoto, SystemSetting, sequelize } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
@@ -708,7 +708,7 @@ exports.verifyVisitOtp = async (req, res) => {
 // Gardener: Update job status
 exports.updateBookingStatus = async (req, res) => {
   try {
-    const { booking_id, status, gardener_notes, extra_plants } = req.body;
+    const { booking_id, status, gardener_notes, extra_plants, latitude, longitude } = req.body;
     const booking = await Booking.findByPk(booking_id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     if (booking.gardener_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your booking' });
@@ -727,6 +727,7 @@ exports.updateBookingStatus = async (req, res) => {
     const notificationService = require('../services/notification.service');
 
     if (status === 'en_route') {
+      updates.en_route_at = new Date();
       await logBookingEvent(booking.id, 'en_route', req.user.id, 'gardener', null, 'Gardener is on the way');
       const customer = await User.findByPk(booking.customer_id);
       const gardener = await User.findByPk(req.user.id);
@@ -742,7 +743,21 @@ exports.updateBookingStatus = async (req, res) => {
       });
     }
     if (status === 'arrived') {
-      await logBookingEvent(booking.id, 'arrived', req.user.id, 'gardener', null, 'Gardener arrived at location');
+      updates.gardener_arrived_at = new Date();
+      // Geo-verified check-in: persist the gardener's arrival position and how
+      // far it is from the booking's service coordinates (skipped when either
+      // side has no usable coordinates — admin/offline bookings store 0/null).
+      const lat = parseFloat(latitude), lng = parseFloat(longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        updates.checkin_latitude = lat;
+        updates.checkin_longitude = lng;
+        const sLat = parseFloat(booking.service_latitude), sLng = parseFloat(booking.service_longitude);
+        if (lat && lng && sLat && sLng) {
+          const { haversineMeters } = require('../utils/geo');
+          updates.checkin_distance_m = haversineMeters(lat, lng, sLat, sLng);
+        }
+      }
+      await logBookingEvent(booking.id, 'arrived', req.user.id, 'gardener', updates.checkin_distance_m != null ? { checkin_distance_m: updates.checkin_distance_m } : null, 'Gardener arrived at location');
       await logBookingEvent(booking.id, 'otp_sent', null, 'system', { otp: booking.otp }, 'OTP sent to customer');
       const customer = await User.findByPk(booking.customer_id);
       await sendWhatsApp(customer.phone, templates.gardenerArrived(customer.name, booking.otp));
@@ -758,7 +773,33 @@ exports.updateBookingStatus = async (req, res) => {
     }
 
     if (status === 'completed') {
+      // Prevent double completion — a second 'completed' would re-notify the
+      // customer, double-increment gardener stats and re-consume a subscription visit.
+      if (booking.status === 'completed') {
+        return res.status(409).json({ success: false, message: 'Booking is already completed' });
+      }
+
+      // Server-side proof-of-work: an after photo is mandatory to complete the
+      // visit (VisitPhoto type=after, or the legacy after_image upload/column),
+      // unless the admin disabled it via SystemSetting 'visit_photos_required' = '0'.
+      const photoSetting = await SystemSetting.findOne({ where: { key: 'visit_photos_required' } });
+      if (photoSetting?.value !== '0') {
+        const hasAfterPhoto = (await VisitPhoto.count({ where: { booking_id: booking.id, type: 'after' } })) > 0
+          || !!booking.after_image
+          || !!(req.files && req.files.after_image);
+        if (!hasAfterPhoto) {
+          return res.status(400).json({ success: false, message: 'After photo is required to complete the visit' });
+        }
+      }
+
       updates.completed_at = new Date();
+
+      // Geo-verified check-out position.
+      const outLat = parseFloat(latitude), outLng = parseFloat(longitude);
+      if (!isNaN(outLat) && !isNaN(outLng)) {
+        updates.checkout_latitude = outLat;
+        updates.checkout_longitude = outLng;
+      }
 
       if (extra_plants > 0) {
         const zone = await Geofence.findByPk(booking.zone_id);

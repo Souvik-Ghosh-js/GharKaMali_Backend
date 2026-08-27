@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authenticateOptional, authorize } = require('../middleware/auth');
-const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof, uploadShop } = require('../middleware/upload');
+const { uploadProfile, uploadWorkProof, uploadPlant, uploadBlog, uploadIdProof, uploadShop, uploadVisit } = require('../middleware/upload');
 const { validate } = require('../middleware/validate');
 const V = require('../middleware/validators');
 const authCtrl = require('../controllers/auth.controller');
@@ -11,6 +11,7 @@ const adminCtrl = require('../controllers/admin.controller');
 const contentCtrl = require('../controllers/content.controller');
 const shopCtrl = require('../controllers/shop.controller');
 const taglineCtrl = require('../controllers/tagline.controller');
+const fieldCtrl = require('../controllers/field.controller');
 const { dateRangeWhere } = require('../utils/dateRange');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -2065,3 +2066,33 @@ router.delete('/admin/supervisors/:id/gardeners/:gardener_id', authenticate, aut
     res.json({ success: true, message: 'Gardener removed from supervisor' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
+
+// ── FIELD-SERVICE MVP (gardener app: visit docs, leads, escalations, attendance) ──
+// Gardener
+router.get('/gardener/checklist', authenticate, authorize('gardener'), fieldCtrl.getChecklist);
+router.post('/gardener/visits/:bookingId/photos', authenticate, authorize('gardener'), uploadVisit.single('photo'), fieldCtrl.uploadVisitPhoto);
+router.get('/gardener/visits/:bookingId/report', authenticate, authorize('gardener'), fieldCtrl.getVisitReport);
+router.post('/gardener/visits/:bookingId/health', authenticate, authorize('gardener'), fieldCtrl.createHealthReport);
+router.post('/gardener/visits/:bookingId/materials', authenticate, authorize('gardener'), fieldCtrl.addMaterials);
+router.post('/gardener/leads', authenticate, authorize('gardener'), fieldCtrl.createLead);
+router.get('/gardener/leads', authenticate, authorize('gardener'), fieldCtrl.getMyLeads);
+router.post('/gardener/escalations', authenticate, authorize('gardener'), uploadVisit.single('photo'), fieldCtrl.createEscalation);
+router.post('/gardener/attendance/checkin', authenticate, authorize('gardener'), fieldCtrl.checkin);
+router.post('/gardener/attendance/checkout', authenticate, authorize('gardener'), fieldCtrl.checkout);
+router.get('/gardener/attendance/today', authenticate, authorize('gardener'), fieldCtrl.getTodayAttendance);
+router.get('/gardener/attendance', authenticate, authorize('gardener'), fieldCtrl.getMyAttendance);
+router.post('/gardener/leaves', authenticate, authorize('gardener'), fieldCtrl.createLeave);
+router.get('/gardener/leaves', authenticate, authorize('gardener'), fieldCtrl.getMyLeaves);
+router.get('/gardener/supervisor', authenticate, authorize('gardener'), fieldCtrl.getMySupervisor);
+
+// Admin / supervisor review
+router.get('/admin/leads', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetLeads);
+router.put('/admin/leads/:id', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminReviewLead);
+router.get('/admin/escalations', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetEscalations);
+router.put('/admin/escalations/:id/resolve', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminResolveEscalation);
+router.get('/admin/attendance', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetAttendance);
+router.get('/admin/leaves', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetLeaves);
+router.put('/admin/leaves/:id', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminReviewLeave);
+router.get('/admin/checklist-templates', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetChecklistTemplates);
+router.put('/admin/checklist-templates/:service_type', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminUpdateChecklistTemplate);
+router.get('/admin/visits/:bookingId/report', authenticate, authorize('admin', 'supervisor'), fieldCtrl.adminGetVisitReport);

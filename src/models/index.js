@@ -181,6 +181,14 @@ const Booking = sequelize.define('Booking', {
   // Total customer-requested time-extension on this visit (sum across all addons)
   extra_time_minutes: { type: DataTypes.INTEGER, defaultValue: 0 },
   extra_time_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  // Geo-verified check-in/out captured by the gardener app on 'arrived'/'completed'.
+  // checkin_distance_m = metres between the arrival position and the booking's
+  // service coordinates (null when either side has no usable coordinates).
+  checkin_latitude: { type: DataTypes.DECIMAL(10, 8) },
+  checkin_longitude: { type: DataTypes.DECIMAL(11, 8) },
+  checkout_latitude: { type: DataTypes.DECIMAL(10, 8) },
+  checkout_longitude: { type: DataTypes.DECIMAL(11, 8) },
+  checkin_distance_m: { type: DataTypes.INTEGER },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'bookings' });
 
@@ -795,6 +803,117 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   created_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
 }, { tableName: 'manual_invoices' });
 
+// ─── VISIT PHOTO ──────────────────────────────────────────────────────────────
+// Geo/time-stamped photos taken by the gardener during a visit (field-service
+// proof of work). 'before'/'after' also mirror into Booking.before_image /
+// after_image so existing admin/customer displays keep working.
+const VisitPhoto = sequelize.define('VisitPhoto', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  type: { type: DataTypes.ENUM('before', 'after', 'problem', 'health'), allowNull: false },
+  url: { type: DataTypes.STRING(500), allowNull: false },
+  latitude: { type: DataTypes.DECIMAL(10, 8) },
+  longitude: { type: DataTypes.DECIMAL(11, 8) },
+  taken_at: { type: DataTypes.DATE }
+}, { tableName: 'visit_photos', underscored: true });
+
+// ─── PLANT HEALTH REPORT ──────────────────────────────────────────────────────
+// Gardener's per-visit plant condition report. `conditions` is a JSON array of
+// strings from: healthy, needs_attention, pest_attack, overwatering,
+// underwatering, yellow_leaves, root_problem, fungus, plant_dying, repotting_required.
+const PlantHealthReport = sequelize.define('PlantHealthReport', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  conditions: { type: DataTypes.JSON },
+  remarks: { type: DataTypes.TEXT },
+  photo_url: { type: DataTypes.STRING(500) }
+}, { tableName: 'plant_health_reports', underscored: true });
+
+// ─── SERVICE LEAD ─────────────────────────────────────────────────────────────
+// Upsell opportunity spotted by the gardener in the field (repotting, new_plants,
+// pots, vermicompost, pest_control, lawn_service, balcony_makeover,
+// terrace_garden, plant_replacement, other). Admin/supervisor approves or rejects.
+const ServiceLead = sequelize.define('ServiceLead', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
+  customer_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  type: { type: DataTypes.STRING(50), allowNull: false },
+  note: { type: DataTypes.TEXT },
+  status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
+  reviewed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  reviewed_at: { type: DataTypes.DATE }
+}, { tableName: 'service_leads', underscored: true });
+
+// ─── VISIT MATERIAL ───────────────────────────────────────────────────────────
+// Materials the gardener used/needs on a visit (e.g. "Vermicompost", "2", "kg").
+const VisitMaterial = sequelize.define('VisitMaterial', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  item: { type: DataTypes.STRING(100), allowNull: false },
+  quantity: { type: DataTypes.STRING(50) },
+  unit: { type: DataTypes.STRING(20) }
+}, { tableName: 'visit_materials', underscored: true });
+
+// ─── ATTENDANCE ───────────────────────────────────────────────────────────────
+// One row per gardener per day — check-in/out with GPS and computed hours.
+const Attendance = sequelize.define('Attendance', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  checkin_at: { type: DataTypes.DATE },
+  checkin_lat: { type: DataTypes.DECIMAL(10, 8) },
+  checkin_lng: { type: DataTypes.DECIMAL(11, 8) },
+  checkout_at: { type: DataTypes.DATE },
+  checkout_lat: { type: DataTypes.DECIMAL(10, 8) },
+  checkout_lng: { type: DataTypes.DECIMAL(11, 8) },
+  hours: { type: DataTypes.DECIMAL(5, 2) }
+}, {
+  tableName: 'attendance',
+  underscored: true,
+  indexes: [{ unique: true, fields: ['gardener_id', 'date'], name: 'uniq_gardener_date_attendance' }]
+});
+
+// ─── LEAVE REQUEST ────────────────────────────────────────────────────────────
+const LeaveRequest = sequelize.define('LeaveRequest', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  from_date: { type: DataTypes.DATEONLY, allowNull: false },
+  to_date: { type: DataTypes.DATEONLY, allowNull: false },
+  reason: { type: DataTypes.STRING(300) },
+  status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' },
+  reviewed_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  reviewed_at: { type: DataTypes.DATE }
+}, { tableName: 'leave_requests', underscored: true });
+
+// ─── ESCALATION ───────────────────────────────────────────────────────────────
+// Field problem raised by the gardener (customer_unavailable, access_problem,
+// plant_emergency, accident_damage, material_required, customer_complaint,
+// need_assistance) — routed to their supervisor + admins.
+const Escalation = sequelize.define('Escalation', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  booking_id: { type: DataTypes.INTEGER, references: { model: 'bookings', key: 'id' } },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  type: { type: DataTypes.STRING(50), allowNull: false },
+  note: { type: DataTypes.TEXT },
+  photo_url: { type: DataTypes.STRING(500) },
+  status: { type: DataTypes.ENUM('open', 'resolved'), defaultValue: 'open' },
+  resolved_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  resolved_at: { type: DataTypes.DATE }
+}, { tableName: 'escalations', underscored: true });
+
+// ─── CHECKLIST TEMPLATE ───────────────────────────────────────────────────────
+// One row per service type — the task checklist shown in the gardener app.
+// `items` is a JSON array of { key, label, required: boolean }.
+const ChecklistTemplate = sequelize.define('ChecklistTemplate', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  service_type: { type: DataTypes.ENUM('ondemand', 'subscription'), allowNull: false, unique: true },
+  items: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }
+}, { tableName: 'checklist_templates', underscored: true });
+
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
 ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
@@ -932,6 +1051,33 @@ ProductZonePrice.belongsTo(Geofence, { foreignKey: 'geofence_id', as: 'zone' });
 Product.hasMany(ProductZonePrice, { foreignKey: 'product_id', as: 'zonePrices' });
 Geofence.hasMany(ProductZonePrice, { foreignKey: 'geofence_id', as: 'productPrices' });
 
+// Field-service associations
+VisitPhoto.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+VisitPhoto.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Booking.hasMany(VisitPhoto, { foreignKey: 'booking_id', as: 'visitPhotos' });
+
+PlantHealthReport.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+PlantHealthReport.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Booking.hasMany(PlantHealthReport, { foreignKey: 'booking_id', as: 'healthReports' });
+
+ServiceLead.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+ServiceLead.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
+ServiceLead.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+ServiceLead.belongsTo(User, { foreignKey: 'reviewed_by', as: 'reviewer' });
+
+VisitMaterial.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+VisitMaterial.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Booking.hasMany(VisitMaterial, { foreignKey: 'booking_id', as: 'materials' });
+
+Attendance.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+
+LeaveRequest.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+LeaveRequest.belongsTo(User, { foreignKey: 'reviewed_by', as: 'reviewer' });
+
+Escalation.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+Escalation.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+Escalation.belongsTo(User, { foreignKey: 'resolved_by', as: 'resolver' });
+
 ManualInvoice.belongsTo(User, { foreignKey: 'customer_id', as: 'customer' });
 ManualInvoice.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 ManualInvoice.belongsTo(ServicePlan, { foreignKey: 'plan_id', as: 'plan' });
@@ -988,6 +1134,14 @@ module.exports = {
   GardenerDocument,
   Coupon,
   VisitorIp,
-  Wishlist
+  Wishlist,
+  VisitPhoto,
+  PlantHealthReport,
+  ServiceLead,
+  VisitMaterial,
+  Attendance,
+  LeaveRequest,
+  Escalation,
+  ChecklistTemplate
 };
 
