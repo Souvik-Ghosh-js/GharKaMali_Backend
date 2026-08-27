@@ -725,6 +725,13 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
   try {
     const { sequelize } = require('../models');
 
+    // Run the same idempotent column/enum guard that startup runs, so hitting
+    // this URL is always a complete schema reconciliation on its own.
+    try {
+      const { ensureSchema } = require('../config/ensureSchema');
+      await ensureSchema(sequelize);
+    } catch (e) { console.error('sync-db: ensureSchema failed:', e.message); }
+
     // Fix zero dates in key tables that might block sync
     const tables = ['users', 'products', 'orders', 'payments', 'bookings', 'geofences'];
     for (const table of tables) {
