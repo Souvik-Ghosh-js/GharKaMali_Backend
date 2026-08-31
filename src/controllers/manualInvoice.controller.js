@@ -450,12 +450,22 @@ exports.createManualInvoice = async (req, res) => {
       })();
     }
 
+    // Mint (or read back) the official sequential number NOW so the admin sees
+    // the real GKM number immediately, not the internal INV reference. The
+    // afterCreate hook mints it post-commit anyway; getOrCreate is idempotent.
+    let gkmNumber = null;
+    try {
+      const { getOrCreateInvoiceIssue } = require('../services/invoiceNumber.service');
+      gkmNumber = (await getOrCreateInvoiceIssue('manual', result.invoice.id)).number;
+    } catch (e) { console.error('[manualInvoice] GKM number mint failed:', e.message); }
+
     res.status(201).json({
       success: true,
-      message: `Invoice ${result.invoice.invoice_number} created${result.booking ? ` (booking ${result.booking.booking_number})` : ''}${result.subscription ? ` (subscription SUB-${result.subscription.id})` : ''}`,
+      message: `Invoice ${gkmNumber || result.invoice.invoice_number} created${result.booking ? ` (booking ${result.booking.booking_number})` : ''}${result.subscription ? ` (subscription SUB-${result.subscription.id})` : ''}`,
       data: {
         invoice_id: result.invoice.id,
         invoice_number: result.invoice.invoice_number,
+        gkm_invoice_number: gkmNumber,
         booking_id: result.booking?.id || null,
         subscription_id: result.subscription?.id || null,
       },
@@ -488,7 +498,17 @@ exports.listManualInvoices = async (req, res) => {
       limit: parseInt(limit),
       offset: (parseInt(page) - 1) * parseInt(limit),
     });
-    res.json({ success: true, data: { items: rows, total: count, page: parseInt(page), pages: Math.ceil(count / parseInt(limit)) } });
+    // Attach the OFFICIAL sequential GST number (GKM/26-27/000xxx) — the same
+    // series the automatic invoices use — so the books reconcile 1:1. The INV…
+    // value is only an internal reference.
+    const { IssuedInvoice } = require('../models');
+    const issued = await IssuedInvoice.findAll({
+      where: { entity_type: 'manual', entity_id: rows.map((r) => r.id) },
+      attributes: ['entity_id', 'invoice_number'],
+    });
+    const gkmById = Object.fromEntries(issued.map((i) => [i.entity_id, i.invoice_number]));
+    const items = rows.map((r) => ({ ...r.toJSON(), gkm_invoice_number: gkmById[r.id] || null }));
+    res.json({ success: true, data: { items, total: count, page: parseInt(page), pages: Math.ceil(count / parseInt(limit)) } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
