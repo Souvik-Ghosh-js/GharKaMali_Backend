@@ -142,9 +142,11 @@ function financialYear(date = new Date()) {
   return `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
 }
 
-// GKM/25-26/000123
-function formatInvoiceNumber(seq, date = new Date(), prefix = process.env.INVOICE_PREFIX || 'GKM') {
-  return `${prefix}/${financialYear(date)}/${String(seq).padStart(6, '0')}`;
+// Two independent GST series (both legal — each must simply be consecutive):
+//   GKM/ONL/25-26/000123  — online (automatic) invoices: bookings, subscriptions, shop orders
+//   GKM/OFF/25-26/000123  — offline (manual) invoices created from the admin panel
+function formatInvoiceNumber(seq, date = new Date(), channel = 'ONL', prefix = process.env.INVOICE_PREFIX || 'GKM') {
+  return `${prefix}/${channel}/${financialYear(date)}/${String(seq).padStart(6, '0')}`;
 }
 
 module.exports = {

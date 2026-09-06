@@ -21,6 +21,11 @@ const STATEMENTS = [
   "ALTER TABLE subscriptions ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
   // Manual invoices: admin chooses Paid / Unpaid on the Create Invoice form.
   "ALTER TABLE manual_invoices ADD COLUMN payment_status ENUM('paid','pending') NOT NULL DEFAULT 'paid'",
+  // Split invoice number series: ONL (automatic) vs OFF (manual/offline).
+  "ALTER TABLE invoice_counters ADD COLUMN channel ENUM('ONL','OFF') NOT NULL DEFAULT 'ONL'",
+  "ALTER TABLE invoice_counters DROP INDEX financial_year",
+  "ALTER TABLE invoice_counters ADD UNIQUE INDEX uniq_fy_channel (financial_year, channel)",
+  "ALTER TABLE issued_invoices ADD COLUMN channel ENUM('ONL','OFF') NOT NULL DEFAULT 'ONL'",
   // Field-service MVP: geo-verified gardener check-in/out on a visit.
   "ALTER TABLE bookings ADD COLUMN checkin_latitude DECIMAL(10,8) NULL",
   "ALTER TABLE bookings ADD COLUMN checkin_longitude DECIMAL(11,8) NULL",

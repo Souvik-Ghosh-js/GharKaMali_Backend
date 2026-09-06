@@ -739,9 +739,15 @@ const SystemSetting = sequelize.define('SystemSetting', {
 // mint GST-compliant sequential invoice numbers like GKM/25-26/000123.
 const InvoiceCounter = sequelize.define('InvoiceCounter', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  financial_year: { type: DataTypes.STRING(10), allowNull: false, unique: true },
+  financial_year: { type: DataTypes.STRING(10), allowNull: false },
+  // ONL = automatic invoices (bookings/subscriptions/orders), OFF = manual/offline.
+  channel: { type: DataTypes.ENUM('ONL', 'OFF'), allowNull: false, defaultValue: 'ONL' },
   last_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
-}, { tableName: 'invoice_counters', underscored: true });
+}, {
+  tableName: 'invoice_counters',
+  underscored: true,
+  indexes: [{ unique: true, fields: ['financial_year', 'channel'], name: 'uniq_fy_channel' }],
+});
 
 // ─── ISSUED INVOICE NUMBERS ──────────────────────────────────────────────────
 // Persists the invoice number assigned to a given entity so re-downloading an
@@ -752,6 +758,7 @@ const IssuedInvoice = sequelize.define('IssuedInvoice', {
   entity_id: { type: DataTypes.INTEGER, allowNull: false },
   invoice_number: { type: DataTypes.STRING(40), allowNull: false, unique: true },
   financial_year: { type: DataTypes.STRING(10), allowNull: false },
+  channel: { type: DataTypes.ENUM('ONL', 'OFF'), allowNull: false, defaultValue: 'ONL' },
   seq: { type: DataTypes.INTEGER, allowNull: false },
 }, {
   tableName: 'issued_invoices',

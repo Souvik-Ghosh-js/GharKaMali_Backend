@@ -20,6 +20,11 @@ const { financialYear, formatInvoiceNumber } = require('../config/invoice.config
 
 const issuedAtOf = (row) => row.createdAt || row.created_at || new Date();
 
+// Which GST series an entity belongs to: manual/offline invoices get their own
+// OFF series; everything created online (bookings, subscriptions, shop orders)
+// shares the ONL series. Each series is independently sequential per FY.
+const channelFor = (entityType) => (entityType === 'manual' ? 'OFF' : 'ONL');
+
 /**
  * Get (or mint) the invoice number + issue date for an entity.
  * The financial year and issue date are decided at MINT time (first download),
@@ -35,6 +40,7 @@ async function getOrCreateInvoiceIssue(entityType, entityId) {
 
   const now = new Date();
   const fy = financialYear(now);
+  const channel = channelFor(entityType);
 
   try {
     return await sequelize.transaction(async (t) => {
@@ -48,11 +54,11 @@ async function getOrCreateInvoiceIssue(entityType, entityId) {
       // guards against duplicate counter rows on a live table missing the
       // unique(financial_year) constraint.
       let counter = await InvoiceCounter.findOne({
-        where: { financial_year: fy }, order: [['id', 'ASC']],
+        where: { financial_year: fy, channel }, order: [['id', 'ASC']],
         transaction: t, lock: t.LOCK.UPDATE,
       });
       if (!counter) {
-        counter = await InvoiceCounter.create({ financial_year: fy, last_seq: 0 }, { transaction: t });
+        counter = await InvoiceCounter.create({ financial_year: fy, channel, last_seq: 0 }, { transaction: t });
       }
 
       // Self-heal: the issued-invoice history is the authority, not the counter.
@@ -60,14 +66,14 @@ async function getOrCreateInvoiceIssue(entityType, entityId) {
       // environment), resume AFTER the highest sequence already issued this FY —
       // sequences must never go backwards or collide.
       const maxIssued = await IssuedInvoice.max('seq', {
-        where: { financial_year: fy }, transaction: t,
+        where: { financial_year: fy, channel }, transaction: t,
       });
       const seq = Math.max(Number(counter.last_seq) || 0, Number(maxIssued) || 0) + 1;
       await counter.update({ last_seq: seq }, { transaction: t });
 
-      const invoice_number = formatInvoiceNumber(seq, now);
+      const invoice_number = formatInvoiceNumber(seq, now, channel);
       const issued = await IssuedInvoice.create({
-        entity_type: entityType, entity_id: entityId, invoice_number, financial_year: fy, seq,
+        entity_type: entityType, entity_id: entityId, invoice_number, financial_year: fy, channel, seq,
       }, { transaction: t });
 
       return { number: invoice_number, issuedAt: issuedAtOf(issued) };

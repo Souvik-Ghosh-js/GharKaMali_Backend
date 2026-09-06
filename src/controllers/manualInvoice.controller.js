@@ -498,9 +498,9 @@ exports.listManualInvoices = async (req, res) => {
       limit: parseInt(limit),
       offset: (parseInt(page) - 1) * parseInt(limit),
     });
-    // Attach the OFFICIAL sequential GST number (GKM/26-27/000xxx) — the same
-    // series the automatic invoices use — so the books reconcile 1:1. The INV…
-    // value is only an internal reference.
+    // Attach the OFFICIAL sequential GST number. Manual invoices carry their
+    // own OFF series (GKM/OFF/26-27/000xxx); automatic invoices use ONL — two
+    // independent, each-consecutive series. The INV… value is only internal.
     const { IssuedInvoice } = require('../models');
     const issued = await IssuedInvoice.findAll({
       where: { entity_type: 'manual', entity_id: rows.map((r) => r.id) },
