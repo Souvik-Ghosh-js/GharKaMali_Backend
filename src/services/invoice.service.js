@@ -453,8 +453,11 @@ function renderInvoicePDF(inv, res) {
   doc.fillColor(TEXT).font(F).fontSize(7.2).text(`(Brand Name: ${COMPANY.brand})`, coX, hY, { width: coW, lineBreak: false, ellipsis: true });
   hY += 11;
   doc.fillColor(TEXT).font(FB).fontSize(7.2).text(`CIN: ${COMPANY.cin}`, coX, hY, { width: coW, lineBreak: false, ellipsis: true });
+  hY += 11;
+  // Supplier GSTIN — mandatory on every tax invoice (Rule 46).
+  doc.fillColor(DARK).font(FB).fontSize(7.2).text(`GSTIN: ${COMPANY.gstin}`, coX, hY, { width: coW, lineBreak: false, ellipsis: true });
   hY += 13;
-  doc.font(FB).fontSize(7.2).text('Registered Office:', coX, hY, { width: coW });
+  doc.fillColor(TEXT).font(FB).fontSize(7.2).text('Registered Office:', coX, hY, { width: coW });
   let addrY = hY + 11;
   doc.font(F).fontSize(7).fillColor(TEXT);
   COMPANY.addressLines.forEach((ln) => { doc.text(ln, coX, addrY, { width: coW, lineBreak: false, ellipsis: true }); addrY += 9.5; });
