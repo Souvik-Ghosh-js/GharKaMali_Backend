@@ -720,6 +720,26 @@ router.put('/admin/taglines/:id', authenticate, authorize('admin'), uploadShop.s
 router.delete('/admin/taglines/:id', authenticate, authorize('admin'), taglineCtrl.deleteTagline);
 
 
+// Browser-runnable invoice renumbering (for when there's no shell access).
+//   ...?key=gharkamali           -> DRY RUN: returns the full old->new plan, writes NOTHING
+//   ...?key=gharkamali&apply=1   -> applies the renumbering in one transaction
+router.get('/admin/maintenance/renumber-invoices', async (req, res) => {
+  if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
+  try {
+    const { renumberInvoices } = require('../utils/renumberInvoices');
+    const result = await renumberInvoices({ apply: req.query.apply === '1' });
+    res.json({
+      success: true,
+      mode: result.applied ? 'APPLIED' : 'DRY RUN — add &apply=1 to write',
+      total: result.total,
+      series: result.series,
+      dropped: result.dropped,
+      // Compact mapping for eyeballing in the browser.
+      mapping: result.plan.map((p) => `${p.created_at.toISOString().slice(0, 10)} ${p.channel} ${p.entity_type} ${p.ref}: ${p.old_number || '(none)'} -> ${p.invoice_number}`),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/maintenance/sync-db', async (req, res) => {
   if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
   try {
