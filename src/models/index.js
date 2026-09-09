@@ -775,8 +775,11 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   // Whether the customer has actually paid — admin chooses on the form and it
   // prints on the PDF ('PAID' / 'PENDING'). Default 'paid' preserves the old behavior.
   payment_status: { type: DataTypes.ENUM('paid', 'pending'), defaultValue: 'paid' },
-  // 'ondemand' | 'plan' | 'products' — what was billed.
-  invoice_type: { type: DataTypes.ENUM('ondemand', 'plan', 'products'), defaultValue: 'ondemand' },
+  // 'ondemand' | 'plan' | 'products' | 'makeover' — what was billed.
+  // 'makeover' = Green Makeover: quoted custom-priced services (balcony/terrace
+  // garden setup, lawn installation, landscape design…), priced like the other
+  // service invoices (pre-GST lines, total × 1.18, inclusive override_total).
+  invoice_type: { type: DataTypes.ENUM('ondemand', 'plan', 'products', 'makeover'), defaultValue: 'ondemand' },
   // What the admin did with it: invoice_only | booking | subscription.
   outcome: { type: DataTypes.ENUM('invoice_only', 'booking', 'subscription'), defaultValue: 'invoice_only' },
   plan_id: { type: DataTypes.INTEGER, references: { model: 'service_plans', key: 'id' } },

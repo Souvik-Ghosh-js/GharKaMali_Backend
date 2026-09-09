@@ -366,6 +366,7 @@ router.get('/supervisor/complaints', authenticate, authorize('supervisor'), supe
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
 router.get('/admin/dashboard', authenticate, authorize('admin'), adminCtrl.getDashboard);
 router.get('/admin/analytics', authenticate, authorize('admin'), adminCtrl.getAnalytics);
+router.get('/admin/analytics/zone-orders', authenticate, authorize('admin', 'supervisor'), adminCtrl.getZoneOrders);
 
 router.get('/admin/gardeners', authenticate, authorize('admin', 'supervisor'), adminCtrl.getGardeners);
 router.put('/admin/gardeners/:id', authenticate, authorize('admin'), adminCtrl.updateGardener);
@@ -795,14 +796,16 @@ router.get('/admin/maintenance/sync-db', async (req, res) => {
     // appending an enum value is metadata-only, so it skips the table copy that
     // would otherwise fail on a table near MySQL's 64-key limit.
     try { await sequelize.query("ALTER TABLE payments MODIFY COLUMN type ENUM('booking','subscription','refund','wallet_topup','order') NOT NULL, ALGORITHM=INPLACE, LOCK=NONE"); } catch (e) { }
-    // Allow 'products' manual invoices (admin shop-product sales). Appending an
-    // enum value is metadata-only, so INPLACE avoids the table-copy pitfalls.
-    try { await sequelize.query("ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products') DEFAULT 'ondemand', ALGORITHM=INPLACE, LOCK=NONE"); }
+    // Allow 'products' (admin shop-product sales) and 'makeover' (Green
+    // Makeover quoted services) manual invoices. Appending enum values is
+    // metadata-only, so INPLACE avoids the table-copy pitfalls. MUST list the
+    // same values as ensureSchema.js so the two never fight.
+    try { await sequelize.query("ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products','makeover') DEFAULT 'ondemand', ALGORITHM=INPLACE, LOCK=NONE"); }
     catch (e) {
       // INPLACE can be refused (older MySQL / column-definition drift). Retry as
       // a plain ALTER, and LOG a failure — a silent miss here breaks product
       // invoices with "Data truncated for column 'invoice_type'".
-      try { await sequelize.query("ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products') DEFAULT 'ondemand'"); }
+      try { await sequelize.query("ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products','makeover') DEFAULT 'ondemand'"); }
       catch (e2) { console.error('sync-db: manual_invoices.invoice_type enum extension FAILED:', e2.message); }
     }
     // Allow 'pending' subscription status (online subscriptions awaiting payment).
@@ -885,6 +888,27 @@ router.get('/payments/my', authenticate, paymentCtrl.getMyPayments);
 router.post('/payments/wallet-topup', authenticate, validate(V.payment.walletTopup), paymentCtrl.walletTopup);
 router.post('/payments/reschedule', authenticate, validate(V.booking.reschedule), paymentCtrl.rescheduleBooking);
 router.get('/payments/check-serviceability', paymentCtrl.checkServiceability);
+// Transaction Audit downloads: a payment RECEIPT (acknowledgment of money
+// received) and the tax INVOICE of whatever entity the payment paid for.
+router.get('/admin/payments/:id/receipt', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { streamPaymentReceipt } = require('../services/receipt.service');
+    await streamPaymentReceipt(req.params.id, res);
+  } catch (err) { if (!res.headersSent) res.status(500).json({ success: false, message: err.message }); }
+});
+router.get('/admin/payments/:id/invoice', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { Payment } = require('../models');
+    const { resolvePaymentInvoiceTarget } = require('../services/receipt.service');
+    const p = await Payment.findByPk(req.params.id);
+    if (!p) return res.status(404).json({ success: false, message: 'Payment not found' });
+    const target = await resolvePaymentInvoiceTarget(p);
+    if (!target) return res.status(404).json({ success: false, message: 'No invoice is linked to this payment (e.g. a wallet top-up or refund)' });
+    const { streamInvoice } = require('../services/invoice.service');
+    await streamInvoice(target.type, target.id, res);
+  } catch (err) { if (!res.headersSent) res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/payments', authenticate, authorize('admin'), paymentCtrl.getAllPayments);
 
 // ── GARDENER EARNINGS BREAKDOWN ───────────────────────────────────────────────

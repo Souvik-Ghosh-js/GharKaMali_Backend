@@ -216,6 +216,8 @@ exports.getAnalytics = async (req, res) => {
 
     const shopOrdersByZone = await db.query(`
       SELECT
+        g.id AS geofence_id,
+        sz.id AS zone_id,
         COALESCE(g.name, sz.name, o.shipping_city, 'Unknown') as zone,
         COALESCE(o.shipping_city, 'Unknown') as city,
         COUNT(o.id) as total,
@@ -311,8 +313,66 @@ exports.getAnalytics = async (req, res) => {
   }
 };
 
+// Drill-down for the "Shop Orders by Zone/City" analytics aggregates.
+// Matches exactly one aggregate row: the aggregate groups orders by
+// (geofence_id, zone_id, COALESCE(shipping_city, 'Unknown')), so we filter with
+// all three keys, using NULL-safe equality (<=>) for the ids so absent params
+// mean "IS NULL" — drill-down orders therefore always sum back to the aggregate.
+exports.getZoneOrders = async (req, res) => {
+  try {
+    const { period = '30', geofence_id, zone_id, city } = req.query;
 
+    // Mirror getAnalytics' `since` computation exactly.
+    let days = parseInt(period);
+    if (isNaN(days) || days <= 0) days = 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+    const gf = geofence_id != null && geofence_id !== '' && !isNaN(parseInt(geofence_id)) ? parseInt(geofence_id) : null;
+    const sz = zone_id != null && zone_id !== '' && !isNaN(parseInt(zone_id)) ? parseInt(zone_id) : null;
+    const cityKey = (typeof city === 'string' && city.trim() !== '') ? city.trim() : 'Unknown';
+
+    const rp = { since, gf, sz, city: cityKey };
+    const matchCond = `
+      (o.geofence_id <=> :gf) AND (o.zone_id <=> :sz)
+      AND (COALESCE(o.shipping_city, 'Unknown') = :city)
+      AND o.created_at >= :since
+    `;
+
+    const [countRow] = await db.query(
+      `SELECT COUNT(o.id) as total FROM orders o WHERE ${matchCond}`,
+      { replacements: rp, type: db.QueryTypes.SELECT }
+    );
+    const total = Number(countRow?.total || 0);
+
+    const idRows = await db.query(
+      `SELECT o.id FROM orders o WHERE ${matchCond} ORDER BY o.created_at DESC, o.id DESC LIMIT 200`,
+      { replacements: rp, type: db.QueryTypes.SELECT }
+    );
+    const ids = idRows.map(r => r.id);
+
+    let orders = [];
+    if (ids.length > 0) {
+      orders = await Order.findAll({
+        where: { id: { [Op.in]: ids } },
+        attributes: ['id', 'order_number', 'total_amount', 'discount_amount', 'coupon_code', 'payment_status', 'status', 'created_at'],
+        include: [
+          { model: User, as: 'customer', attributes: ['id', 'name', 'phone'] },
+          {
+            model: OrderItem,
+            as: 'items',
+            attributes: ['id', 'quantity', 'price'],
+            include: [{ model: Product, as: 'product', attributes: ['name'] }]
+          }
+        ],
+        order: [['created_at', 'DESC'], ['id', 'DESC']]
+      });
+    }
+
+    res.json({ success: true, data: { orders, total } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 
 // ── GARDENER MANAGEMENT ───────────────────────────────────────────────────────

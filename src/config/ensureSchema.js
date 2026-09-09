@@ -11,8 +11,8 @@
 const STATEMENTS = [
   // Shop order line items remember the GST rate they were charged at.
   "ALTER TABLE order_items ADD COLUMN gst_rate INT NULL",
-  // Admin manual invoices for shop-product sales.
-  "ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products') DEFAULT 'ondemand'",
+  // Admin manual invoices for shop-product sales + Green Makeover services.
+  "ALTER TABLE manual_invoices MODIFY COLUMN invoice_type ENUM('ondemand','plan','products','makeover') DEFAULT 'ondemand'",
   // Coupon scoping + coupons on service bookings / subscriptions.
   "ALTER TABLE coupons ADD COLUMN applies_to ENUM('all','products','subscription','booking') NOT NULL DEFAULT 'all'",
   "ALTER TABLE bookings ADD COLUMN coupon_code VARCHAR(40) NULL",

@@ -359,10 +359,27 @@ async function buildManualInvoice(id) {
   // Product invoices carry GST-EXCLUSIVE unit prices with per-line rates (shop
   // convention — tax added on top); service invoices stay GST-inclusive @ 18%.
   const isProducts = m.invoice_type === 'products';
-  const inputs = (Array.isArray(m.line_items) ? m.line_items : []).map((l) => (isProducts ? {
+  const isMakeover = m.invoice_type === 'makeover';
+  const lines = Array.isArray(m.line_items) ? m.line_items : [];
+  // Green Makeover: stored line amounts are the admin's PRE-GST quotes, but the
+  // service renderer treats taxableOverride as a GST-INCLUSIVE line total
+  // (inclusive:true backs the tax out again). Scale each line to its inclusive
+  // share of the STORED total_amount so the printed rows reconstruct exactly
+  // the subtotal/gst_amount/total_amount priceInvoice saved — including
+  // override_total quotes, where the raw line amounts don't sum to the quote
+  // (without an override the share is simply amount × 1.18).
+  const makeoverBaseSum = isMakeover ? lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : 0;
+  const inputs = lines.map((l) => (isProducts ? {
     description: l.name, hsn: l.hsn || hsnForProduct(l.name || '').hsn,
     qty: l.qty || 1, unit: l.unit || 'Nos',
     unitPrice: Number(l.amount) || 0, gstRate: l.gst_rate != null ? Number(l.gst_rate) : 0,
+  } : isMakeover ? {
+    description: l.name, hsn: l.hsn || SERVICE_SAC,
+    qty: l.qty || 1, unit: 'Service',
+    taxableOverride: makeoverBaseSum > 0
+      ? round2((Number(l.amount) || 0) * (Number(m.total_amount) || 0) / makeoverBaseSum)
+      : round2((Number(m.total_amount) || 0) / (lines.length || 1)),
+    gstRate: 18,
   } : {
     description: l.name, hsn: l.hsn || SERVICE_SAC,
     qty: l.qty || 1, unit: l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit'),
@@ -377,6 +394,23 @@ async function buildManualInvoice(id) {
   }
 
   const rows = buildLineRows(inputs, { inclusive: !isProducts, intra });
+  // Makeover only: per-line paisa rounding can drift a paisa from the aggregate
+  // split stored by priceInvoice (Σ round2(xᵢ/1.18) ≠ round2(Σxᵢ/1.18)).
+  // Reconcile the drift on the last row so the printed totals equal the stored
+  // subtotal / gst_amount / total_amount to the paisa.
+  if (isMakeover && rows.length) {
+    const t = totalsFrom(rows);
+    const dTax = round2((Number(m.subtotal) || 0) - t.taxable);
+    const dGst = round2((Number(m.gst_amount) || 0) - t.totalGst);
+    if ((dTax || dGst) && Math.abs(dTax) <= 0.05 && Math.abs(dGst) <= 0.05) {
+      const last = rows[rows.length - 1];
+      last.taxable = round2(last.taxable + dTax);
+      if (intra) last.cgst = round2(last.cgst + dGst);
+      else last.igst = round2(last.igst + dGst);
+      last.unitPrice = round2(last.taxable / (last.qty || 1));
+      last.total = round2(last.taxable + last.cgst + last.sgst + last.igst);
+    }
+  }
   const issue = await getOrCreateInvoiceIssue('manual', m.id);
 
   return {
@@ -392,7 +426,11 @@ async function buildManualInvoice(id) {
     },
     serviceDetails: isProducts ? {
       'Invoice Type': 'Product Sale',
-      'Items': String((Array.isArray(m.line_items) ? m.line_items : []).length),
+      'Items': String(lines.length),
+    } : isMakeover ? {
+      ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
+      'Service Type': 'Green Makeover',
+      'Items': String(lines.length),
     } : {
       ...(m.scheduled_date ? { 'Service Date': dShort(m.scheduled_date) } : {}),
       'Service Type': m.invoice_type === 'plan' ? 'Plan' : 'On-Demand Visit',

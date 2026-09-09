@@ -8,11 +8,14 @@
 //   • subscription  : create a real Subscription (+ optionally schedule visits),
 //                     link a ManualInvoice to it.
 //
-// GST for service invoices is computed the SAME way as the invoice service
-// (GST-inclusive total; the split is total/1.18), so the generated invoice
-// matches every other channel. Product invoices ('products') follow the SHOP
-// convention instead: unit prices are GST-EXCLUSIVE and each line's own
-// gst_rate (0/5/12/18/28) is added on top.
+// GST for service invoices (ondemand / plan / makeover) is computed the SAME
+// way as the invoice service (GST-inclusive total; the split is total/1.18),
+// so the generated invoice matches every other channel. Product invoices
+// ('products') follow the SHOP convention instead: unit prices are
+// GST-EXCLUSIVE and each line's own gst_rate (0/5/12/18/28) is added on top.
+// 'makeover' (Green Makeover) = quoted custom-priced services (balcony/terrace
+// garden setup, lawn installation, landscape design…): admin-entered PRE-GST
+// lines, with override_total as the "final quoted price incl. GST" mechanism.
 // ─────────────────────────────────────────────────────────────────────────────
 const { Op } = require('sequelize');
 const {
@@ -157,7 +160,7 @@ exports.createManualInvoice = async (req, res) => {
   const {
     outcome = 'invoice_only',           // invoice_only | booking | subscription
     payment_status = 'paid',            // paid | pending (what prints on the PDF)
-    invoice_type = 'ondemand',          // ondemand | plan | products
+    invoice_type = 'ondemand',          // ondemand | plan | products | makeover
     plan_id,
     // customer
     customer_name, customer_phone, customer_email,
@@ -221,11 +224,33 @@ exports.createManualInvoice = async (req, res) => {
       return res.status(400).json({ success: false, message: 'override_total is not supported for product invoices' });
     }
   }
+  // Green Makeover invoices are quoted, custom-priced services: explicit lines
+  // are mandatory (there is no plan/zone price to derive from), and there is no
+  // plan to subscribe to — only invoice_only and booking make sense.
+  if (invoice_type === 'makeover') {
+    if (outcome === 'subscription') {
+      return res.status(400).json({ success: false, message: 'Green Makeover invoices do not support the subscription outcome' });
+    }
+    if (!Array.isArray(line_items) || !line_items.length) {
+      return res.status(400).json({ success: false, message: 'At least one line item is required for a Green Makeover invoice' });
+    }
+    for (const l of line_items) {
+      const name = String(l?.name || '').trim();
+      if (!name) {
+        return res.status(400).json({ success: false, message: 'Each line item needs a name' });
+      }
+      const amt = Number(l.amount);
+      if (!Number.isFinite(amt) || amt < 0) {
+        return res.status(400).json({ success: false, message: `Line "${name}": amount must be a non-negative pre-GST number` });
+      }
+    }
+  }
 
   try {
     // Resolve the plan (for plan invoices / subscriptions). Irrelevant for
-    // product invoices — a stray plan_id from the form is ignored.
-    const plan = (invoice_type !== 'products' && plan_id) ? await ServicePlan.findByPk(plan_id) : null;
+    // product and makeover invoices — a stray plan_id from the form is ignored.
+    const plan = (invoice_type !== 'products' && invoice_type !== 'makeover' && plan_id)
+      ? await ServicePlan.findByPk(plan_id) : null;
     if ((invoice_type === 'plan' || outcome === 'subscription') && !plan) {
       return res.status(404).json({ success: false, message: 'Plan not found' });
     }
