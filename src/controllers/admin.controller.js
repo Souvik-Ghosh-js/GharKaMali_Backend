@@ -388,8 +388,38 @@ exports.deleteGardener = async (req, res) => {
       });
     }
 
-    // Cascade delete profile and zone assignments first
+    // A gardener with ANY history (completed bookings, payouts, rewards, tips)
+    // is referenced by financial/legal records — invoices carry their name and
+    // the DB (correctly) blocks a hard delete. For those we DEACTIVATE +
+    // ANONYMIZE instead: they vanish from availability/assignment and their
+    // phone is freed for re-registration, while history stays intact.
+    const { WithdrawalRequest, RewardPenalty, Tip } = require('../models');
+    const [historyBookings, withdrawals, rewards, tips] = await Promise.all([
+      Booking.count({ where: { gardener_id: req.params.id } }),
+      WithdrawalRequest.count({ where: { gardener_id: req.params.id } }),
+      RewardPenalty.count({ where: { gardener_id: req.params.id } }),
+      Tip.count({ where: { gardener_id: req.params.id } }),
+    ]);
+    const hasHistory = historyBookings + withdrawals + rewards + tips > 0;
+
+    // Always detach from zones so they stop appearing in availability.
     await GardenerZone.destroy({ where: { gardener_id: req.params.id } });
+
+    if (hasHistory) {
+      const anonPhone = `X${user.id}_${user.phone || ''}`.slice(0, 15); // frees the real number, stays unique & auditable
+      await user.update({
+        is_active: false, is_approved: false, fcm_token: null,
+        phone: anonPhone, email: null,
+      });
+      await GardenerProfile.update({ is_available: false }, { where: { user_id: req.params.id } });
+      return res.json({
+        success: true,
+        deactivated: true,
+        message: `"${user.name}" had ${historyBookings} booking(s) and payout history, so the profile was deactivated and removed from service instead of deleted — their name stays on past invoices and records. The phone number is now free for re-registration.`,
+      });
+    }
+
+    // No history at all — safe to remove completely.
     await GardenerProfile.destroy({ where: { user_id: req.params.id } });
     await user.destroy();
 
