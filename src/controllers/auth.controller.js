@@ -6,6 +6,17 @@ const { generateOTP, sendOTP, sendWhatsApp, templates, OTP_EXPIRY_MINUTES } = re
 const { resolveGeofence } = require('../utils/geo');
 
 // Send OTP
+
+// Env-gated TEST accounts (demo gardener for QA, Play Store review logins):
+// specific phone numbers listed in TEST_LOGIN_PHONES (comma-separated) accept
+// TEST_LOGIN_OTP (default 123456) even in production, without opening static
+// OTP for everyone. Unset in .env = feature fully off.
+const isTestLogin = (phone, otp) => {
+  const phones = (process.env.TEST_LOGIN_PHONES || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (!phones.includes(String(phone))) return false;
+  return String(otp) === (process.env.TEST_LOGIN_OTP || '123456');
+};
+
 exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
@@ -53,7 +64,10 @@ exports.verifyOtp = async (req, res) => {
     const staticMode = process.env.USE_STATIC_OTP === 'true';
     const staticOtp = process.env.STATIC_OTP || '123456';
 
-    if (staticMode) {
+    if (isTestLogin(phone, otp)) {
+      // designated test account (QA / app-store review) — skip real OTP checks
+      if (!user) return res.status(404).json({ success: false, message: 'Test account not found — create the user first' });
+    } else if (staticMode) {
       if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
     } else {
       // Real OTP: must match the code stored at sendOtp and not be expired.
@@ -283,7 +297,9 @@ exports.gardenerLogin = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
     if (!user.is_approved) return res.status(403).json({ success: false, message: 'Account not yet approved' });
 
-    if (process.env.USE_STATIC_OTP === 'true') {
+    if (isTestLogin(phone, otp)) {
+      // designated test account — skip real OTP verification
+    } else if (process.env.USE_STATIC_OTP === 'true') {
       if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
     } else {
       if (!user.otp || user.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
