@@ -7,15 +7,21 @@ const { resolveGeofence } = require('../utils/geo');
 
 // Send OTP
 
-// Env-gated TEST accounts (demo gardener for QA, Play Store review logins):
-// specific phone numbers listed in TEST_LOGIN_PHONES (comma-separated) accept
-// TEST_LOGIN_OTP (default 123456) even in production, without opening static
-// OTP for everyone. Unset in .env = feature fully off.
-const isTestLogin = (phone, otp) => {
-  const phones = (process.env.TEST_LOGIN_PHONES || '').split(',').map((x) => x.trim()).filter(Boolean);
-  if (!phones.includes(String(phone))) return false;
-  return String(otp) === (process.env.TEST_LOGIN_OTP || '123456');
+// TEST accounts (QA + app-store review logins). For these phone numbers no OTP
+// is ever sent — the fixed OTP below is simply accepted, and the account
+// self-provisions on first login:
+//   9999999999 -> customer app     9333333333 -> gardener app (seeded demo gardener)
+// (one number can hold only ONE role, hence two numbers). Override the list
+// with TEST_LOGIN_PHONES / OTP with TEST_LOGIN_OTP; set TEST_LOGIN_DISABLED=true
+// to switch the whole mechanism off.
+const TEST_OTP = () => process.env.TEST_LOGIN_OTP || '123456';
+const isTestPhone = (phone) => {
+  if (process.env.TEST_LOGIN_DISABLED === 'true') return false;
+  const phones = (process.env.TEST_LOGIN_PHONES || '9999999999,9333333333')
+    .split(',').map((x) => x.trim()).filter(Boolean);
+  return phones.includes(String(phone));
 };
+const isTestLogin = (phone, otp) => isTestPhone(phone) && String(otp) === TEST_OTP();
 
 exports.sendOtp = async (req, res) => {
   try {
@@ -23,6 +29,12 @@ exports.sendOtp = async (req, res) => {
     if (!phone || !/^\d{10}$/.test(phone)) {
       return res.status(400).json({ success: false, message: 'Invalid phone number' });
     }
+    // Test numbers: send nothing, create nothing — verify/gardener-login accept
+    // the fixed test OTP and self-provision the account there.
+    if (isTestPhone(phone)) {
+      return res.json({ success: true, message: 'OTP sent successfully' });
+    }
+
     const otp = process.env.USE_STATIC_OTP === 'true' ? (process.env.STATIC_OTP || '123456') : generateOTP();
     const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
@@ -65,8 +77,8 @@ exports.verifyOtp = async (req, res) => {
     const staticOtp = process.env.STATIC_OTP || '123456';
 
     if (isTestLogin(phone, otp)) {
-      // designated test account (QA / app-store review) — skip real OTP checks
-      if (!user) return res.status(404).json({ success: false, message: 'Test account not found — create the user first' });
+      // Test account — skip real OTP checks; a missing user falls through to
+      // the new-customer creation below, so the account self-provisions.
     } else if (staticMode) {
       if (otp !== staticOtp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
     } else {
@@ -293,9 +305,25 @@ exports.gardenerLogin = async (req, res) => {
     const { phone, otp, fcm_token } = req.body;
     const staticOtp = process.env.STATIC_OTP || '123456';
 
-    const user = await User.findOne({ where: { phone, role: 'gardener' } });
+    let user = await User.findOne({ where: { phone, role: 'gardener' } });
+    // Test account (9333333333 by default): self-provision an approved gardener
+    // on first login so the demo works with zero setup. If some earlier flow
+    // claimed the number as a customer, convert that row instead (phone is unique).
+    if (!user && isTestLogin(phone, otp)) {
+      const existingAny = await User.findOne({ where: { phone } });
+      if (existingAny) {
+        await existingAny.update({ role: 'gardener', is_active: true, is_approved: true });
+        user = existingAny;
+      } else {
+        user = await User.create({
+          name: 'Test Gardener', phone, role: 'gardener',
+          is_active: true, is_approved: true, referral_code: `GKM${phone.slice(-6)}`,
+        });
+      }
+      await GardenerProfile.findOrCreate({ where: { user_id: user.id }, defaults: { experience_years: 1, bio: 'Demo account for testing & app review.' } });
+    }
     if (!user) return res.status(404).json({ success: false, message: 'Gardener not found' });
-    if (!user.is_approved) return res.status(403).json({ success: false, message: 'Account not yet approved' });
+    if (!user.is_approved && !isTestLogin(phone, otp)) return res.status(403).json({ success: false, message: 'Account not yet approved' });
 
     if (isTestLogin(phone, otp)) {
       // designated test account — skip real OTP verification
