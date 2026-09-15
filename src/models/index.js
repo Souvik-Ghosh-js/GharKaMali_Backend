@@ -800,8 +800,11 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   // [{ product_id, name, amount, qty, gst_rate, hsn, unit }] for 'products'
   // (amount = GST-EXCLUSIVE unit price, shop convention).
   line_items: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+  // GST slab the admin chose for SERVICE invoices (0/5/12/18/28; 0 = No GST).
+  // Ignored for 'products' — those carry per-line gst_rate in line_items.
+  gst_rate: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 18 },
   // Services: GST-INCLUSIVE total (booking/subscription convention); the split is
-  // derived from it (total / 1.18) exactly like the invoice service.
+  // derived from it (total / (1 + gst_rate/100)) exactly like the invoice service.
   // Products: GST-EXCLUSIVE subtotal + per-line GST added on top (shop convention).
   subtotal: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   gst_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },

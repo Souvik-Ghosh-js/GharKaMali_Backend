@@ -357,9 +357,11 @@ async function buildManualInvoice(id) {
 
   const intra = m.is_up;
   // Product invoices carry GST-EXCLUSIVE unit prices with per-line rates (shop
-  // convention — tax added on top); service invoices stay GST-inclusive @ 18%.
+  // convention — tax added on top); service invoices stay GST-inclusive at the
+  // slab the admin chose on the form (m.gst_rate; 18 for legacy rows, 0 = No GST).
   const isProducts = m.invoice_type === 'products';
   const isMakeover = m.invoice_type === 'makeover';
+  const svcRate = m.gst_rate != null ? Number(m.gst_rate) : 18;
   const lines = Array.isArray(m.line_items) ? m.line_items : [];
   // Green Makeover: stored line amounts are the admin's PRE-GST quotes, but the
   // service renderer treats taxableOverride as a GST-INCLUSIVE line total
@@ -379,17 +381,17 @@ async function buildManualInvoice(id) {
     taxableOverride: makeoverBaseSum > 0
       ? round2((Number(l.amount) || 0) * (Number(m.total_amount) || 0) / makeoverBaseSum)
       : round2((Number(m.total_amount) || 0) / (lines.length || 1)),
-    gstRate: 18,
+    gstRate: svcRate,
   } : {
     description: l.name, hsn: l.hsn || SERVICE_SAC,
     qty: l.qty || 1, unit: l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit'),
-    taxableOverride: Number(l.amount) || 0, gstRate: 18,
+    taxableOverride: Number(l.amount) || 0, gstRate: svcRate,
   }));
   // Fall back to a single line from the stored total if no items were captured.
   if (!inputs.length) {
     inputs.push({
       description: 'Gardening & Plant Maintenance Service', hsn: SERVICE_SAC,
-      qty: 1, unit: 'Visit', taxableOverride: Number(m.total_amount) || 0, gstRate: 18,
+      qty: 1, unit: 'Visit', taxableOverride: Number(m.total_amount) || 0, gstRate: svcRate,
     });
   }
 

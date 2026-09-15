@@ -27,7 +27,8 @@ const { nowIST, todayIST } = require('../utils/time');
 const notificationService = require('../services/notification.service');
 const { notify: pushNotify } = require('../services/push.service');
 
-const GST_RATE = 0.18;
+const GST_RATE = 0.18; // default service slab (18%) when the admin doesn't choose
+const SERVICE_GST_RATES = [0, 5, 12, 18, 28]; // admin-choosable slabs (0 = No GST)
 const ADDITIONAL_PLANT_RATE = 25;
 
 const genInvoiceNumber = () => `INV${Date.now().toString().slice(-8)}`;
@@ -85,15 +86,17 @@ async function findOrCreateCustomer({ phone, name, email, city, state, pincode, 
 // Build the priced line items + GST-inclusive total for the form.
 // If `override_total` is provided (> 0), it becomes the GST-INCLUSIVE total and
 // the base is back-computed; otherwise the total is derived from the items.
-function priceInvoice({ items, override_total }) {
+// `gst_rate` is the admin-chosen slab in percent (default 18; 0 = No GST).
+function priceInvoice({ items, override_total, gst_rate }) {
+  const rate = (gst_rate != null ? Number(gst_rate) : GST_RATE * 100) / 100;
   const baseSum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
   let total;
   if (override_total != null && Number(override_total) > 0) {
     total = Math.round(Number(override_total) * 100) / 100;
   } else {
-    total = Math.round(baseSum * (1 + GST_RATE) * 100) / 100;
+    total = Math.round(baseSum * (1 + rate) * 100) / 100;
   }
-  const subtotal = Math.round((total / (1 + GST_RATE)) * 100) / 100;
+  const subtotal = Math.round((total / (1 + rate)) * 100) / 100;
   const gst_amount = Math.round((total - subtotal) * 100) / 100;
   return { total, subtotal, gst_amount };
 }
@@ -172,6 +175,7 @@ exports.createManualInvoice = async (req, res) => {
     // pricing
     line_items,                          // optional [{name, amount}] custom lines
     override_total,                      // optional GST-inclusive override
+    gst_rate,                            // optional service GST slab (0/5/12/18/28; default 18)
     // gardener (booking outcome)
     assign_mode = 'none',                // none | pick | auto
     gardener_id: pickedGardenerId,
@@ -181,6 +185,14 @@ exports.createManualInvoice = async (req, res) => {
 
   if (!['paid', 'pending'].includes(payment_status)) {
     return res.status(400).json({ success: false, message: "payment_status must be 'paid' or 'pending'" });
+  }
+  // Service GST slab: admin-chosen on the form. Products ignore it (per-line rates).
+  let serviceGstRate = 18;
+  if (gst_rate != null && String(gst_rate).trim() !== '') {
+    serviceGstRate = Number(gst_rate);
+    if (!SERVICE_GST_RATES.includes(serviceGstRate)) {
+      return res.status(400).json({ success: false, message: `gst_rate must be one of ${SERVICE_GST_RATES.join(', ')}` });
+    }
   }
   if (!customer_name) {
     return res.status(400).json({ success: false, message: 'customer_name is required' });
@@ -277,7 +289,7 @@ exports.createManualInvoice = async (req, res) => {
         }
       }
 
-      ({ total, subtotal, gst_amount } = priceInvoice({ items, override_total }));
+      ({ total, subtotal, gst_amount } = priceInvoice({ items, override_total, gst_rate: serviceGstRate }));
     }
     const isUP = isUPAddress(service_address, city, state);
 
@@ -431,6 +443,7 @@ exports.createManualInvoice = async (req, res) => {
         plant_count: parseInt(plant_count) || 0,
         notes: notes || null,
         line_items: items,
+        gst_rate: invoice_type === 'products' ? 18 : serviceGstRate,
         subtotal,
         gst_amount,
         total_amount: total,

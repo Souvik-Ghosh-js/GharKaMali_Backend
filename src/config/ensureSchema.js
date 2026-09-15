@@ -21,6 +21,8 @@ const STATEMENTS = [
   "ALTER TABLE subscriptions ADD COLUMN discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
   // Manual invoices: admin chooses Paid / Unpaid on the Create Invoice form.
   "ALTER TABLE manual_invoices ADD COLUMN payment_status ENUM('paid','pending') NOT NULL DEFAULT 'paid'",
+  // Manual SERVICE invoices: admin-chosen GST slab (0 = No GST). Products keep per-line rates.
+  "ALTER TABLE manual_invoices ADD COLUMN gst_rate INT NOT NULL DEFAULT 18",
   // Split invoice number series: ONL (automatic) vs OFF (manual/offline).
   "ALTER TABLE invoice_counters ADD COLUMN channel ENUM('ONL','OFF') NOT NULL DEFAULT 'ONL'",
   "ALTER TABLE invoice_counters DROP INDEX financial_year",
