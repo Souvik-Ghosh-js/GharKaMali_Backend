@@ -421,6 +421,7 @@ const manualInvoiceCtrl = require('../controllers/manualInvoice.controller');
 router.post('/admin/manual-invoice', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.createManualInvoice);
 router.get('/admin/manual-invoices', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.listManualInvoices);
 router.get('/admin/manual-invoices/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('manual'));
+router.delete('/admin/manual-invoices/:id', authenticate, authorize('admin'), manualInvoiceCtrl.deleteManualInvoice);
 
 // ── CUSTOMER-FACING INVOICES ────────────────────────────────────────────────────
 // The website and mobile app download the SAME PDF the admin does, so every
@@ -737,6 +738,43 @@ router.get('/admin/maintenance/renumber-invoices', async (req, res) => {
       dropped: result.dropped,
       // Compact mapping for eyeballing in the browser.
       mapping: result.plan.map((p) => `${p.created_at.toISOString().slice(0, 10)} ${p.channel} ${p.entity_type} ${p.ref}: ${p.old_number || '(none)'} -> ${p.invoice_number}`),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Browser-runnable ONE-TIME wipe of ALL manual invoices (no shell access).
+// Deletes every manual_invoices row + its issued OFF number and resets the OFF
+// counters to 0, so the next manual invoice starts again at GKM/OFF/<fy>/000001.
+// Bookings/subscriptions created alongside them are kept. The ONL (automatic)
+// series is untouched.
+//   ...?key=gharkamali           -> DRY RUN: shows what would be deleted
+//   ...?key=gharkamali&apply=1   -> actually wipes, in one transaction
+router.get('/admin/maintenance/purge-manual-invoices', async (req, res) => {
+  if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
+  try {
+    const { ManualInvoice, IssuedInvoice, InvoiceCounter, sequelize } = require('../models');
+    const invoices = await ManualInvoice.findAll({
+      attributes: ['id', 'invoice_number', 'customer_name', 'total_amount', 'created_at'],
+      order: [['id', 'ASC']],
+    });
+    const issued = await IssuedInvoice.findAll({ where: { entity_type: 'manual' }, order: [['seq', 'ASC']] });
+    const counters = await InvoiceCounter.findAll({ where: { channel: 'OFF' } });
+
+    if (req.query.apply === '1') {
+      await sequelize.transaction(async (t) => {
+        await IssuedInvoice.destroy({ where: { entity_type: 'manual' }, transaction: t });
+        await ManualInvoice.destroy({ where: {}, transaction: t });
+        await InvoiceCounter.update({ last_seq: 0 }, { where: { channel: 'OFF' }, transaction: t });
+      });
+    }
+
+    res.json({
+      success: true,
+      mode: req.query.apply === '1' ? 'APPLIED — manual invoice history wiped, OFF series restarts at 000001' : 'DRY RUN — add &apply=1 to wipe',
+      manual_invoices: invoices.length,
+      off_numbers: issued.map((i) => i.invoice_number),
+      off_counters_reset: counters.map((c) => `${c.financial_year}: ${c.last_seq} -> 0`),
+      deleted: invoices.map((m) => `#${m.id} ${m.invoice_number} ${m.customer_name} ₹${m.total_amount}`),
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

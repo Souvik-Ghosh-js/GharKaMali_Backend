@@ -551,3 +551,51 @@ exports.listManualInvoices = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// ── DELETE ───────────────────────────────────────────────────────────────────
+// Removes a manual invoice AND its issued GKM number. The OFF counter is rolled
+// back to the highest sequence still issued, so deleting the LATEST invoice
+// frees its number for reuse (delete-and-redo stays gapless); deleting an older
+// one leaves a gap (issued numbers are never re-shuffled). A booking or
+// subscription created alongside the invoice is NOT touched.
+exports.deleteManualInvoice = async (req, res) => {
+  try {
+    const { IssuedInvoice, InvoiceCounter } = require('../models');
+    const m = await ManualInvoice.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    await sequelize.transaction(async (t) => {
+      const issued = await IssuedInvoice.findOne({
+        where: { entity_type: 'manual', entity_id: m.id }, transaction: t,
+      });
+      if (issued) {
+        const { financial_year: fy, channel } = issued;
+        await issued.destroy({ transaction: t });
+        // Roll the counter back to the remaining max so the freed tail number
+        // gets reused. Locked FOR UPDATE — same discipline as minting.
+        const counter = await InvoiceCounter.findOne({
+          where: { financial_year: fy, channel }, order: [['id', 'ASC']],
+          transaction: t, lock: t.LOCK.UPDATE,
+        });
+        if (counter) {
+          const maxLeft = await IssuedInvoice.max('seq', {
+            where: { financial_year: fy, channel }, transaction: t,
+          });
+          await counter.update({ last_seq: Number(maxLeft) || 0 }, { transaction: t });
+        }
+      }
+      await m.destroy({ transaction: t });
+    });
+
+    const kept = [
+      m.booking_id ? `booking #${m.booking_id}` : null,
+      m.subscription_id ? `subscription #${m.subscription_id}` : null,
+    ].filter(Boolean);
+    res.json({
+      success: true,
+      message: `Invoice deleted${kept.length ? ` (linked ${kept.join(' and ')} kept)` : ''}`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
