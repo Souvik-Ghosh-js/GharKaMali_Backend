@@ -30,7 +30,15 @@ const LINE = '#d1d5db';
 const PANEL = '#f0f7f2';
 
 const num = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const dLong = (d) => (d ? new Date(d) : new Date()).toLocaleString('en-IN', {
+// DB DATETIMEs are IST wall-clock strings (sequelize timezone '+05:30' +
+// dateStrings). Tag them as IST before formatting — plain new Date() reads
+// them in the server's timezone (UTC) and the render would shift +5:30 again.
+const parseDbDate = (d) => {
+  if (d instanceof Date) return d;
+  const m = String(d || '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?$/);
+  return m ? new Date(`${m[1]}T${m[2]}+05:30`) : new Date(d);
+};
+const dLong = (d) => (d ? parseDbDate(d) : new Date()).toLocaleString('en-IN', {
   timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
 });
 

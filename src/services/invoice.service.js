@@ -49,8 +49,20 @@ const RS = HAS_UNICODE_FONT ? '₹' : 'Rs.';
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
 const num = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const dLong = (d) => (d ? new Date(d) : new Date()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' });
-const dShort = (d) => d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
+// DB DATETIMEs are stored as IST wall-clock (sequelize timezone '+05:30') and,
+// with dateStrings:true, come back as bare "YYYY-MM-DD HH:MM:SS" strings. Tag
+// them as IST explicitly — plain new Date() would read them in the SERVER's
+// timezone (UTC on the box), and the Asia/Kolkata render below would then add
+// +5:30 a SECOND time, dating evening invoices on the next day (a 16 Sept 8 PM
+// invoice printed "17 September"). Strings with an explicit zone (ISO "Z") and
+// bare DATEONLYs fall through to new Date() unchanged.
+const parseDbDate = (d) => {
+  if (d instanceof Date) return d;
+  const m = String(d || '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?$/);
+  return m ? new Date(`${m[1]}T${m[2]}+05:30`) : new Date(d);
+};
+const dLong = (d) => (d ? parseDbDate(d) : new Date()).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' });
+const dShort = (d) => d ? parseDbDate(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—';
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // Intra-state (home state) → CGST+SGST; otherwise IGST.
