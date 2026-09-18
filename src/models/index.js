@@ -794,6 +794,9 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   pincode: { type: DataTypes.STRING(10) },
   scheduled_date: { type: DataTypes.DATEONLY },
   scheduled_time: { type: DataTypes.TIME },
+  // Admin-chosen invoice date — what prints as "Invoice Date" on the PDF and
+  // shows in Invoice History. NULL = use created_at (the old behavior).
+  invoice_date: { type: DataTypes.DATEONLY },
   plant_count: { type: DataTypes.INTEGER, defaultValue: 0 },
   notes: { type: DataTypes.TEXT },
   // Line items snapshot: [{ name, amount }] for services;

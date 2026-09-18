@@ -170,6 +170,8 @@ exports.createManualInvoice = async (req, res) => {
     service_address, city, state, pincode,
     // service details
     scheduled_date, scheduled_time, plant_count, notes,
+    invoice_date,                        // optional YYYY-MM-DD printed as the invoice date
+
     zone_id, geofence_id,
     service_latitude, service_longitude, // optional coords (else geocode/fallback)
     // pricing
@@ -224,6 +226,16 @@ exports.createManualInvoice = async (req, res) => {
     }
     if (String(scheduled_date) > todayIST()) {
       return res.status(400).json({ success: false, message: 'scheduled_date cannot be in the future' });
+    }
+  }
+  // Invoice date: what prints on the PDF. Backdating is allowed (offline bills
+  // entered late); future-dating a GST invoice is not.
+  if (invoice_date != null && String(invoice_date).trim() !== '') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(invoice_date))) {
+      return res.status(400).json({ success: false, message: 'invoice_date must be in YYYY-MM-DD format' });
+    }
+    if (String(invoice_date) > todayIST()) {
+      return res.status(400).json({ success: false, message: 'invoice_date cannot be in the future' });
     }
   }
   // Product invoices are a pure sale — no booking/subscription can hang off
@@ -440,6 +452,7 @@ exports.createManualInvoice = async (req, res) => {
         pincode: pincode || null,
         scheduled_date: scheduled_date || null,
         scheduled_time: scheduled_time || null,
+        invoice_date: invoice_date || null,
         plant_count: parseInt(plant_count) || 0,
         notes: notes || null,
         line_items: items,

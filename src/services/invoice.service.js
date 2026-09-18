@@ -428,7 +428,7 @@ async function buildManualInvoice(id) {
 
   return {
     invoiceNumber: issue.number,
-    invoiceDate: dLong(m.created_at || m.createdAt),
+    invoiceDate: dLong(m.invoice_date || m.created_at || m.createdAt),
     referenceLabel: 'Reference', referenceValue: m.invoice_number,
     placeOfSupply: placeOfSupply(m.state),
     paymentMode: 'Offline', paymentStatus: (m.payment_status || 'paid').toUpperCase(),
