@@ -259,6 +259,8 @@ const product = {
     text('name', { min: 2, max: 100 }),
     text('slug', { max: 100, optional: true }),
     text('description', { max: 500, optional: true }),
+    // Category-level GST: overrides every product's own rate when set.
+    enumIn('gst_rate', [0, 5, 12, 18, 28], { optional: true }),
   ],
 };
 

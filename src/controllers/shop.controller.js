@@ -1,6 +1,14 @@
 const { Product, ProductCategory, Order, OrderItem, Payment, Geofence, User, sequelize } = require('../models');
 const { Op } = require('sequelize');
 
+// Effective GST for a product: the CATEGORY's rate wins when set (Plants 0%,
+// Pots 18% — configured once per category in admin), else the product's own.
+// Works on model instances and toJSON() objects alike.
+const effectiveGst = (p) => (p.category && p.category.gst_rate != null)
+  ? Number(p.category.gst_rate)
+  : (Number(p.gst_rate) || 0);
+exports.effectiveGst = effectiveGst;
+
 // ─── PUBLIC SHOP ENDPOINTS ──────────────────────────────────────────────────
 
 // List all categories
@@ -69,9 +77,12 @@ exports.getProducts = async (req, res) => {
         json.mrp = json.mrp ? parseFloat(json.mrp) + productMarkup : null;
         json.location_markup = productMarkup;
       }
+      // Clients read gst_rate off the product — serve the EFFECTIVE rate so the
+      // website/app cart GST matches what checkout will actually charge.
+      json.gst_rate = effectiveGst(json);
       return json;
     };
-    const catInclude = [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug'] }];
+    const catInclude = [{ model: ProductCategory, as: 'category', attributes: ['name', 'slug', 'gst_rate'] }];
     const meta = (total) => ({ total, page: pageNum, pages: Math.max(1, Math.ceil(total / lim)), limit: lim });
 
     // ── Search: SQL prefilter on name/description, JS relevance rank, then page ──
@@ -131,6 +142,7 @@ exports.getProductDetail = async (req, res) => {
     if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
 
     let json = product.toJSON();
+    json.gst_rate = effectiveGst(json); // category rate wins when set
     const { zone_id, geofence_id } = req.query;
     const activeZoneId = geofence_id || zone_id || (req.user ? (req.user.geofence_id || req.user.service_zone_id) : null);
     if (activeZoneId) {
@@ -192,7 +204,9 @@ exports.createOrder = async (req, res) => {
     // sum product items
     if (items && Array.isArray(items)) {
       for (const item of items) {
-        const product = await Product.findByPk(item.product_id);
+        const product = await Product.findByPk(item.product_id, {
+          include: [{ model: ProductCategory, as: 'category', attributes: ['gst_rate'] }],
+        });
         if (!product || !product.is_active) {
           throw new Error(`Product ${item.product_id} is no longer available`);
         }
@@ -201,12 +215,13 @@ exports.createOrder = async (req, res) => {
         subtotal += itemTotal;
         // GST is ALWAYS charged on products. apply_gst only means the customer
         // provided a GSTIN so the tax invoice carries it (input-credit claim).
-        if (product.gst_rate > 0) {
-          gstAmount += (itemTotal * product.gst_rate) / 100;
+        const rate = effectiveGst(product); // category rate wins when set
+        if (rate > 0) {
+          gstAmount += (itemTotal * rate) / 100;
         }
         orderItemsData.push({
           product_id: product.id, quantity: item.quantity, price: finalPrice,
-          gst_rate: Number(product.gst_rate) || 0, // snapshot — rate may change later
+          gst_rate: rate, // snapshot — rate may change later
         });
         await product.decrement('stock_quantity', { by: item.quantity, transaction: t });
       }

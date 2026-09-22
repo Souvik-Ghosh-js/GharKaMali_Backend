@@ -1090,6 +1090,8 @@ exports.getAdminCategories = async (req, res) => {
 exports.createCategory = async (req, res) => {
   try {
     const data = { ...req.body };
+    // '' from the form = no category-level rate (products keep their own).
+    if (data.gst_rate === '') data.gst_rate = null;
     if (req.file) {
       const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
       data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
@@ -1102,6 +1104,8 @@ exports.createCategory = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const data = { ...req.body };
+    // '' from the form clears the category-level rate (back to per-product).
+    if (data.gst_rate === '') data.gst_rate = null;
     if (req.file) {
       const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
       data.image_url = `${baseUrl}/uploads/shop/${req.file.filename}`;
@@ -1131,7 +1135,7 @@ exports.getAdminProducts = async (req, res) => {
   try {
     const products = await Product.findAll({
       where: { ...dateRangeWhere(req.query) },
-      include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }],
+      include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'gst_rate'] }],
       order: [['created_at', 'DESC']]
     });
     res.json({ success: true, data: products });

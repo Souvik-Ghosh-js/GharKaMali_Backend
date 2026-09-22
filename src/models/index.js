@@ -478,6 +478,10 @@ const ProductCategory = sequelize.define('ProductCategory', {
   slug: { type: DataTypes.STRING(100), unique: true },
   icon: { type: DataTypes.STRING(50) },
   image_url: { type: DataTypes.STRING(500) },
+  // Category-level GST slab (0/5/12/18/28). When set, it OVERRIDES every
+  // product's own gst_rate in the category (Plants 0%, Pots 18%); NULL means
+  // each product keeps its individually-set rate.
+  gst_rate: { type: DataTypes.INTEGER, allowNull: true },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'product_categories' });
 

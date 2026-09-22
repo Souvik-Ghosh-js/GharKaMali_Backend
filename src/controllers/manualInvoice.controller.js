@@ -131,7 +131,7 @@ async function priceProductInvoice(line_items) {
     let productId = null;
     if (l.product_id) {
       const product = await Product.findByPk(l.product_id, {
-        include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }],
+        include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'gst_rate'] }],
       });
       if (!product) {
         throw Object.assign(new Error(`Product ${l.product_id} not found`), { httpStatus: 404 });
@@ -139,7 +139,10 @@ async function priceProductInvoice(line_items) {
       productId = product.id;
       name = product.name;
       unitPrice = Number(product.price) || 0;
-      gstRate = Number(product.gst_rate) || 0;
+      // Category GST wins when set (Plants 0%, Pots 18%), else the product's own.
+      gstRate = product.category?.gst_rate != null
+        ? Number(product.category.gst_rate)
+        : (Number(product.gst_rate) || 0);
       categoryName = product.category?.name || '';
     }
     if (!name) throw badRequest('Each line item needs a name');

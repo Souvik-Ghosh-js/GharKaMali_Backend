@@ -288,7 +288,7 @@ async function buildOrderInvoice(id) {
       { model: User, as: 'customer', attributes: ['name', 'phone', 'email'] },
       {
         model: OrderItem, as: 'items',
-        include: [{ model: Product, as: 'product', attributes: ['name', 'gst_rate', 'category_id'], include: [{ model: ProductCategory, as: 'category', attributes: ['name'] }] }],
+        include: [{ model: Product, as: 'product', attributes: ['name', 'gst_rate', 'category_id'], include: [{ model: ProductCategory, as: 'category', attributes: ['name', 'gst_rate'] }] }],
       },
     ],
   });
@@ -309,8 +309,11 @@ async function buildOrderInvoice(id) {
       // — their invoices must stay at 0% so paper matches what was collected.
       // Prefer the rate SNAPSHOTTED on the order item at purchase; the admin
       // may change the product's gst_rate later and invoices must not drift.
+      // Legacy items without a snapshot: category rate wins, else product's.
       gstRate: Number(o.gst_amount) > 0
-        ? (it.gst_rate != null ? Number(it.gst_rate) : (Number(it.product?.gst_rate) || 0))
+        ? (it.gst_rate != null ? Number(it.gst_rate)
+          : (it.product?.category?.gst_rate != null ? Number(it.product.category.gst_rate)
+            : (Number(it.product?.gst_rate) || 0)))
         : 0,
     };
   });
