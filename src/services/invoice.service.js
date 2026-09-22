@@ -20,7 +20,7 @@ const {
   ServicePlan, Geofence, BookingAddOn, AddOnService, ManualInvoice,
 } = require('../models');
 const {
-  COMPANY, BANK, TERMS, FOOTER_BADGES, SERVICE_SAC, hsnForProduct,
+  COMPANY, BANK, TERMS, FOOTER_BADGES, SERVICE_SAC, sacForService, hsnForProduct,
   placeOfSupply, amountInWords,
 } = require('../config/invoice.config');
 const { getOrCreateInvoiceIssue } = require('./invoiceNumber.service');
@@ -390,7 +390,8 @@ async function buildManualInvoice(id) {
     qty: l.qty || 1, unit: l.unit || 'Nos',
     unitPrice: Number(l.amount) || 0, gstRate: l.gst_rate != null ? Number(l.gst_rate) : 0,
   } : {
-    description: l.name, hsn: l.hsn || SERVICE_SAC,
+    // Design/consultancy lines carry SAC 998328; other service lines 998597.
+    description: l.name, hsn: l.hsn || sacForService(l.name),
     qty: l.qty || 1,
     unit: isMakeover ? 'Service' : (l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit')),
     taxableOverride: serviceBaseSum > 0

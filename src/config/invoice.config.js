@@ -43,21 +43,41 @@ const FOOTER_BADGES = [
 ];
 
 // ── HSN / SAC codes ──────────────────────────────────────────────────────────
-// Services use a SAC; goods use an HSN. Products are mapped by category name
+// Source of truth: "GharKaMali GST/HSN/SAC Master for Developers" (CA-approved).
+//   Gardening & Plant Maintenance Service .. SAC 998597 (18%)
+//   Landscape Design Consultancy ........... SAC 998328 (18%)
+//   Plastic pots ........................... HSN 3926   (18%)
+//   Ceramic pots ........................... HSN 6912   (18%)
+//   Vermicompost / organic manure .......... HSN 31010099
+//   Live plants / saplings ................. HSN 0602
+// Services use a SAC; goods use an HSN. Products are mapped by category + name
 // (lowercased, substring match) since the Product model has no hsn_code column.
-const SERVICE_SAC = '998597';          // Gardening / landscaping services
-const DEFAULT_PRODUCT_HSN = '3926';    // Generic plastic articles fallback
+const SERVICE_SAC = '998597';          // Gardening / plant maintenance services
+const LANDSCAPE_SAC = '998328';        // Landscape design consultancy / planning
+// This is a PLANT store: an unmatched product name is almost always a botanical
+// name ("Monstera", "Areca Palm"), so unknown items default to live plants.
+const DEFAULT_PRODUCT_HSN = '0602';
 
+// Specific keywords first; the broad 'plant' match comes LAST so "Plant Food"
+// still resolves to fertilizer and "Plant Pruner" to tools, not to live plants.
 const HSN_BY_CATEGORY = [
   { match: ['plastic pot', 'plastic'], hsn: '3926', unit: 'Nos' },
   { match: ['ceramic', 'clay pot', 'terracotta'], hsn: '6912', unit: 'Nos' },
   { match: ['compost', 'vermicompost', 'fertilizer', 'manure'], hsn: '31010099', unit: 'Pack' },
   { match: ['seed'], hsn: '1209', unit: 'Pack' },
-  { match: ['plant', 'sapling', 'live'], hsn: '0602', unit: 'Nos' },
   { match: ['tool', 'pruner', 'cutter', 'shear'], hsn: '8201', unit: 'Nos' },
   { match: ['soil', 'cocopeat', 'peat'], hsn: '2703', unit: 'Pack' },
   { match: ['pesticide', 'insecticide'], hsn: '3808', unit: 'Pack' },
+  { match: ['plant', 'sapling', 'live'], hsn: '0602', unit: 'Nos' },
 ];
+
+// SAC for a manual-invoice service line: design/consultation lines carry the
+// landscape-consultancy SAC per the GST master; everything else is gardening.
+function sacForService(name = '') {
+  const hay = String(name).toLowerCase();
+  return (hay.includes('design') || hay.includes('consult') || hay.includes('planning'))
+    ? LANDSCAPE_SAC : SERVICE_SAC;
+}
 
 // Resolve HSN + unit for a product using its category and/or name.
 function hsnForProduct(productName = '', categoryName = '') {
@@ -151,7 +171,7 @@ function formatInvoiceNumber(seq, date = new Date(), channel = 'ONL', prefix = p
 
 module.exports = {
   COMPANY, BANK, TERMS, FOOTER_BADGES,
-  SERVICE_SAC, DEFAULT_PRODUCT_HSN, hsnForProduct,
+  SERVICE_SAC, LANDSCAPE_SAC, sacForService, DEFAULT_PRODUCT_HSN, hsnForProduct,
   STATE_CODES, placeOfSupply, title,
   amountInWords, financialYear, formatInvoiceNumber,
 };
