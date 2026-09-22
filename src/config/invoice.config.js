@@ -44,16 +44,16 @@ const FOOTER_BADGES = [
 
 // ── HSN / SAC codes ──────────────────────────────────────────────────────────
 // Source of truth: "GharKaMali GST/HSN/SAC Master for Developers" (CA-approved).
-//   Gardening & Plant Maintenance Service .. SAC 998597 (18%)
-//   Landscape Design Consultancy ........... SAC 998328 (18%)
+//   Gardening & Plant Maintenance Service .. SAC 998597 (18%) — On-Demand visits + Monthly plans
+//   Landscape Design Consultancy ........... SAC 998328 (18%) — Green Makeover invoices
 //   Plastic pots ........................... HSN 3926   (18%)
 //   Ceramic pots ........................... HSN 6912   (18%)
 //   Vermicompost / organic manure .......... HSN 31010099
 //   Live plants / saplings ................. HSN 0602
 // Services use a SAC; goods use an HSN. Products are mapped by category + name
 // (lowercased, substring match) since the Product model has no hsn_code column.
-const SERVICE_SAC = '998597';          // Gardening / plant maintenance services
-const LANDSCAPE_SAC = '998328';        // Landscape design consultancy / planning
+const SERVICE_SAC = '998597';          // Gardening / plant maintenance (on-demand + plans)
+const LANDSCAPE_SAC = '998328';        // Landscape design consultancy (Green Makeover)
 // This is a PLANT store: an unmatched product name is almost always a botanical
 // name ("Monstera", "Areca Palm"), so unknown items default to live plants.
 const DEFAULT_PRODUCT_HSN = '0602';
@@ -71,13 +71,6 @@ const HSN_BY_CATEGORY = [
   { match: ['plant', 'sapling', 'live'], hsn: '0602', unit: 'Nos' },
 ];
 
-// SAC for a manual-invoice service line: design/consultation lines carry the
-// landscape-consultancy SAC per the GST master; everything else is gardening.
-function sacForService(name = '') {
-  const hay = String(name).toLowerCase();
-  return (hay.includes('design') || hay.includes('consult') || hay.includes('planning'))
-    ? LANDSCAPE_SAC : SERVICE_SAC;
-}
 
 // Resolve HSN + unit for a product using its category and/or name.
 function hsnForProduct(productName = '', categoryName = '') {
@@ -171,7 +164,7 @@ function formatInvoiceNumber(seq, date = new Date(), channel = 'ONL', prefix = p
 
 module.exports = {
   COMPANY, BANK, TERMS, FOOTER_BADGES,
-  SERVICE_SAC, LANDSCAPE_SAC, sacForService, DEFAULT_PRODUCT_HSN, hsnForProduct,
+  SERVICE_SAC, LANDSCAPE_SAC, DEFAULT_PRODUCT_HSN, hsnForProduct,
   STATE_CODES, placeOfSupply, title,
   amountInWords, financialYear, formatInvoiceNumber,
 };
