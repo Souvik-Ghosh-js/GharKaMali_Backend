@@ -181,6 +181,7 @@ exports.createManualInvoice = async (req, res) => {
     line_items,                          // optional [{name, amount}] custom lines
     override_total,                      // optional GST-inclusive override
     gst_rate,                            // optional service GST slab (0/5/12/18/28; default 18)
+    tax_type = 'auto',                   // auto | cgst_sgst | igst — how to split the GST
     // gardener (booking outcome)
     assign_mode = 'none',                // none | pick | auto
     gardener_id: pickedGardenerId,
@@ -306,7 +307,15 @@ exports.createManualInvoice = async (req, res) => {
 
       ({ total, subtotal, gst_amount } = priceInvoice({ items, override_total, gst_rate: serviceGstRate }));
     }
-    const isUP = isUPAddress(service_address, city, state);
+    // Tax split: the admin can force CGST+SGST (intra-state, within UP) or
+    // IGST (inter-state) on the form; 'auto' derives it from the address.
+    // Company is registered in UP, so outside-UP must always bill IGST.
+    if (!['auto', 'cgst_sgst', 'igst'].includes(tax_type)) {
+      return res.status(400).json({ success: false, message: "tax_type must be 'auto', 'cgst_sgst' or 'igst'" });
+    }
+    const isUP = tax_type === 'cgst_sgst' ? true
+      : tax_type === 'igst' ? false
+        : isUPAddress(service_address, city, state);
 
     // Everything (customer creation + record + invoice) in one transaction.
     const result = await sequelize.transaction(async (t) => {
