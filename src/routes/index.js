@@ -1493,6 +1493,59 @@ router.get('/gardener/rewards', authenticate, authorize('gardener'), async (req,
 });
 
 // ── ADMIN: MANUALLY REASSIGN GARDENER TO BOOKING ─────────────────────────────
+// ── ADMIN: CORRECT A BOOKING STATUS ──────────────────────────────────────────
+// For fixing mistakes (e.g. a gardener accidentally marking a job failed).
+// Unlike the gardener flow this can reopen closed bookings; every correction is
+// written to the booking's activity log with the admin as the actor.
+router.patch('/admin/bookings/:id/status', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { Booking, BookingLog, User } = require('../models');
+    const { status, reason } = req.body;
+    const VALID = ['pending', 'assigned', 'en_route', 'arrived', 'in_progress', 'completed', 'cancelled', 'failed'];
+    if (!VALID.includes(status)) {
+      return res.status(400).json({ success: false, message: `status must be one of: ${VALID.join(', ')}` });
+    }
+    const booking = await Booking.findByPk(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.status === status) {
+      return res.status(400).json({ success: false, message: `Booking is already '${status}'` });
+    }
+    if (['assigned', 'en_route', 'arrived', 'in_progress'].includes(status) && !booking.gardener_id) {
+      return res.status(400).json({ success: false, message: 'No gardener on this booking — use Reassign to pick one' });
+    }
+
+    const oldStatus = booking.status;
+    const patch = { status };
+    if (status === 'completed' && !booking.completed_at) patch.completed_at = new Date();
+    await booking.update(patch);
+
+    // Activity log — event_type enum lacks 'pending', so corrections to
+    // pending are recorded as 'created'; everything else maps 1:1.
+    try {
+      await BookingLog.create({
+        booking_id: booking.id,
+        event_type: VALID.includes(status) && status !== 'pending' ? status : 'created',
+        actor_id: req.user.id, actor_role: 'admin',
+        meta: { corrected_from: oldStatus, corrected_to: status },
+        description: `Status corrected by admin: ${oldStatus} → ${status}${reason ? ` (${reason})` : ''}`,
+      });
+    } catch (e) { console.error('status-correction log failed:', e.message); }
+
+    // Reopened job? Let the gardener know it's back on their list (best-effort).
+    if (['completed', 'cancelled', 'failed'].includes(oldStatus) && ['assigned', 'en_route', 'arrived', 'in_progress'].includes(status) && booking.gardener_id) {
+      try {
+        const g = await User.findByPk(booking.gardener_id);
+        if (g?.fcm_token) {
+          const { notify } = require('../services/push.service');
+          await notify.newJobAssigned(g.fcm_token, booking.booking_number, booking.service_address, booking.scheduled_date);
+        }
+      } catch (e) { console.error('status-correction push failed:', e.message); }
+    }
+
+    res.json({ success: true, message: `Status corrected: ${oldStatus} → ${status}` });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.patch('/admin/bookings/:id/reassign', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
   try {
     const { Booking, User, GardenerProfile } = require('../models');
