@@ -577,6 +577,72 @@ exports.listManualInvoices = async (req, res) => {
   }
 };
 
+// ── UPDATE (corrections) ─────────────────────────────────────────────────────
+// Edits the NON-FINANCIAL fields of an issued manual invoice: customer name,
+// address, invoice date and the tax split. Amounts, lines, GST rate and the
+// GKM number are deliberately NOT editable — re-downloading the PDF renders
+// the corrected details under the same invoice number.
+exports.updateManualInvoice = async (req, res) => {
+  try {
+    const m = await ManualInvoice.findByPk(req.params.id);
+    if (!m) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    const { customer_name, customer_phone, service_address, city, state, pincode, invoice_date, tax_type } = req.body;
+    const patch = {};
+
+    if (customer_name !== undefined) {
+      if (!String(customer_name).trim()) {
+        return res.status(400).json({ success: false, message: 'customer_name cannot be empty' });
+      }
+      patch.customer_name = String(customer_name).trim();
+    }
+    if (customer_phone !== undefined) {
+      let p = String(customer_phone).replace(/[^0-9]/g, '');
+      if (p.length === 12 && p.startsWith('91')) p = p.slice(2);
+      else if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
+      if (p && !/^[0-9]{10}$/.test(p)) {
+        return res.status(400).json({ success: false, message: 'customer_phone must be a valid 10-digit mobile number' });
+      }
+      patch.customer_phone = p || null;
+    }
+    if (service_address !== undefined) patch.service_address = String(service_address).trim() || null;
+    if (city !== undefined) patch.city = String(city).trim() || null;
+    if (state !== undefined) patch.state = String(state).trim() || null;
+    if (pincode !== undefined) patch.pincode = String(pincode).trim() || null;
+    if (invoice_date !== undefined && String(invoice_date).trim() !== '') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(invoice_date))) {
+        return res.status(400).json({ success: false, message: 'invoice_date must be in YYYY-MM-DD format' });
+      }
+      if (String(invoice_date) > todayIST()) {
+        return res.status(400).json({ success: false, message: 'invoice_date cannot be in the future' });
+      }
+      patch.invoice_date = invoice_date;
+    }
+    // Tax split: explicit choice, or 'auto' to re-derive from the (possibly
+    // just-corrected) address. Silently unchanged when not sent.
+    if (tax_type !== undefined) {
+      if (!['auto', 'cgst_sgst', 'igst'].includes(tax_type)) {
+        return res.status(400).json({ success: false, message: "tax_type must be 'auto', 'cgst_sgst' or 'igst'" });
+      }
+      patch.is_up = tax_type === 'cgst_sgst' ? true
+        : tax_type === 'igst' ? false
+          : isUPAddress(
+            patch.service_address ?? m.service_address,
+            patch.city ?? m.city,
+            patch.state ?? m.state
+          );
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ success: false, message: 'Nothing to update' });
+    }
+    await m.update(patch);
+    res.json({ success: true, message: 'Invoice updated — re-download the PDF for the corrected copy', data: m });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ── DELETE ───────────────────────────────────────────────────────────────────
 // Removes a manual invoice AND its issued GKM number. The OFF counter is rolled
 // back to the highest sequence still issued, so deleting the LATEST invoice

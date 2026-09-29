@@ -422,6 +422,7 @@ router.post('/admin/manual-invoice', authenticate, authorize('admin', 'superviso
 router.get('/admin/manual-invoices', authenticate, authorize('admin', 'supervisor'), manualInvoiceCtrl.listManualInvoices);
 router.get('/admin/manual-invoices/:id/invoice', authenticate, authorize('admin', 'supervisor'), invoiceHandler('manual'));
 router.delete('/admin/manual-invoices/:id', authenticate, authorize('admin'), manualInvoiceCtrl.deleteManualInvoice);
+router.patch('/admin/manual-invoices/:id', authenticate, authorize('admin'), manualInvoiceCtrl.updateManualInvoice);
 
 // ── CUSTOMER-FACING INVOICES ────────────────────────────────────────────────────
 // The website and mobile app download the SAME PDF the admin does, so every
