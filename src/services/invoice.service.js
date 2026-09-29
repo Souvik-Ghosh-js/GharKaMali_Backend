@@ -534,6 +534,9 @@ function renderInvoicePDF(inv, res) {
     ['Invoice Date', inv.invoiceDate],
     [inv.referenceLabel, inv.referenceValue],
     ['Place of Supply', inv.placeOfSupply],
+    // Explicit GST nature — the company is registered in UP, so within-UP
+    // supplies split CGST+SGST and everything else bills IGST.
+    ['GST Type', inv.intra ? 'CGST + SGST (Within State)' : 'IGST (Outside State)'],
     ['Invoice Type', 'Original for Recipient'],
     ['Payment Mode', inv.paymentMode],
     ['Payment Status', inv.paymentStatus],
