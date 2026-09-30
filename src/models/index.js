@@ -792,6 +792,9 @@ const ManualInvoice = sequelize.define('ManualInvoice', {
   customer_name: { type: DataTypes.STRING(100), allowNull: false },
   customer_phone: { type: DataTypes.STRING(15) },
   customer_email: { type: DataTypes.STRING(100) },
+  // Customer's GSTIN for B2B bills — prints under Bill To so they can claim
+  // input credit (same convention as billing_gstin on shop orders).
+  customer_gstin: { type: DataTypes.STRING(20) },
   service_address: { type: DataTypes.TEXT },
   city: { type: DataTypes.STRING(100) },
   state: { type: DataTypes.STRING(100) },

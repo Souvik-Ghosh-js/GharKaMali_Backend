@@ -170,6 +170,7 @@ exports.createManualInvoice = async (req, res) => {
     plan_id,
     // customer
     customer_name, customer_phone, customer_email,
+    customer_gstin,                      // optional 15-char GSTIN for B2B input credit
     service_address, city, state, pincode,
     // service details
     scheduled_date, scheduled_time, plant_count, notes,
@@ -222,6 +223,14 @@ exports.createManualInvoice = async (req, res) => {
   if (customer_email != null && String(customer_email).trim() !== '' &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(customer_email).trim())) {
     return res.status(400).json({ success: false, message: 'customer_email is not a valid email address' });
+  }
+  // Customer GSTIN (B2B input credit): standard 15-char format, stored uppercase.
+  let normalizedGstin = null;
+  if (customer_gstin != null && String(customer_gstin).trim() !== '') {
+    normalizedGstin = String(customer_gstin).trim().toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(normalizedGstin)) {
+      return res.status(400).json({ success: false, message: 'customer_gstin is not a valid 15-character GSTIN' });
+    }
   }
   // Scheduled date: an invoice cannot be dated in the future (today is allowed).
   if (scheduled_date) {
@@ -458,6 +467,7 @@ exports.createManualInvoice = async (req, res) => {
         customer_name,
         customer_phone: normalizedPhone,
         customer_email: customer_email || null,
+        customer_gstin: normalizedGstin,
         service_address: service_address || null,
         city: city || null,
         state: state || null,
@@ -587,8 +597,16 @@ exports.updateManualInvoice = async (req, res) => {
     const m = await ManualInvoice.findByPk(req.params.id);
     if (!m) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
-    const { customer_name, customer_phone, service_address, city, state, pincode, invoice_date, tax_type } = req.body;
+    const { customer_name, customer_phone, customer_gstin, service_address, city, state, pincode, invoice_date, tax_type } = req.body;
     const patch = {};
+
+    if (customer_gstin !== undefined) {
+      const g = String(customer_gstin).trim().toUpperCase();
+      if (g && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(g)) {
+        return res.status(400).json({ success: false, message: 'customer_gstin is not a valid 15-character GSTIN' });
+      }
+      patch.customer_gstin = g || null; // '' clears it
+    }
 
     if (customer_name !== undefined) {
       if (!String(customer_name).trim()) {

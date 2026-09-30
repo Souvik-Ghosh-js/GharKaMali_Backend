@@ -440,7 +440,7 @@ async function buildManualInvoice(id) {
     billTo: {
       name: m.customer_name,
       lines: [m.service_address, [m.city, m.state].filter(Boolean).join(', '), m.pincode].filter(Boolean),
-      phone: m.customer_phone, gstin: null,
+      phone: m.customer_phone, gstin: m.customer_gstin || null,
     },
     serviceDetails: isProducts ? {
       'Invoice Type': 'Product Sale',

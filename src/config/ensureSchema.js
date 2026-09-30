@@ -27,6 +27,8 @@ const STATEMENTS = [
   "ALTER TABLE manual_invoices ADD COLUMN invoice_date DATE NULL",
   // Category-level GST: when set it overrides per-product gst_rate (Plants 0%, Pots 18%).
   "ALTER TABLE product_categories ADD COLUMN gst_rate INT NULL",
+  // Manual invoices: customer's GSTIN for B2B input-credit claims.
+  "ALTER TABLE manual_invoices ADD COLUMN customer_gstin VARCHAR(20) NULL",
   // Split invoice number series: ONL (automatic) vs OFF (manual/offline).
   "ALTER TABLE invoice_counters ADD COLUMN channel ENUM('ONL','OFF') NOT NULL DEFAULT 'ONL'",
   "ALTER TABLE invoice_counters DROP INDEX financial_year",
