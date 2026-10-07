@@ -20,7 +20,7 @@
 const { Op } = require('sequelize');
 const {
   ManualInvoice, Booking, Subscription, ServicePlan, Geofence, GardenerZone,
-  GardenerProfile, User, BookingLog, Product, ProductCategory, sequelize,
+  GardenerProfile, User, BookingLog, Product, ProductCategory, AddOnService, sequelize,
 } = require('../models');
 const { hsnForProduct } = require('../config/invoice.config');
 const { nowIST, todayIST } = require('../utils/time');
@@ -183,6 +183,7 @@ exports.createManualInvoice = async (req, res) => {
     override_total,                      // optional GST-inclusive override
     gst_rate,                            // optional service GST slab (0/5/12/18/28; default 18)
     tax_type = 'auto',                   // auto | cgst_sgst | igst — how to split the GST
+    addon_ids,                           // on-demand only: AddOnService ids billed as extra lines
     // gardener (booking outcome)
     assign_mode = 'none',                // none | pick | auto
     gardener_id: pickedGardenerId,
@@ -311,6 +312,19 @@ exports.createManualInvoice = async (req, res) => {
           const base = zone ? (parseFloat(zone.base_price) || 0) : 0;
           const extra = (parseInt(plant_count) || 0) * ADDITIONAL_PLANT_RATE;
           items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + extra }];
+        }
+      }
+
+      // On-demand add-ons: billed as extra service lines at the SERVER's price
+      // (same add-on catalog the online booking flow uses).
+      if (invoice_type === 'ondemand' && Array.isArray(addon_ids) && addon_ids.length) {
+        const ids = addon_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+        const addons = ids.length ? await AddOnService.findAll({ where: { id: ids, is_active: true } }) : [];
+        if (addons.length !== ids.length) {
+          return res.status(404).json({ success: false, message: 'One or more add-ons not found or inactive' });
+        }
+        for (const a of addons) {
+          items.push({ name: `Add-on: ${a.name}`, amount: Number(a.price) || 0 });
         }
       }
 

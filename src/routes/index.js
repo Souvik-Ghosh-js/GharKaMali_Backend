@@ -780,6 +780,42 @@ router.get('/admin/maintenance/purge-manual-invoices', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Browser-runnable ONE-TIME reformat of all issued invoice numbers to the
+// 16-character GST format (GKM/ONL/2627/123) — same sequence, channel and FY,
+// only the string changes (dash dropped from the FY, 3-char sequence).
+//   ...?key=gharkamali           -> DRY RUN: shows every old -> new mapping
+//   ...?key=gharkamali&apply=1   -> rewrites the numbers in one transaction
+router.get('/admin/maintenance/reformat-invoice-numbers', async (req, res) => {
+  if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
+  try {
+    const { IssuedInvoice, sequelize } = require('../models');
+    const { formatInvoiceNumberFromParts } = require('../config/invoice.config');
+    const rows = await IssuedInvoice.findAll({ order: [['channel', 'ASC'], ['financial_year', 'ASC'], ['seq', 'ASC']] });
+    const plan = rows.map((r) => ({
+      id: r.id,
+      old: r.invoice_number,
+      next: formatInvoiceNumberFromParts(r.financial_year, r.seq, r.channel),
+    }));
+    const changes = plan.filter((p) => p.old !== p.next);
+
+    if (req.query.apply === '1' && changes.length) {
+      await sequelize.transaction(async (t) => {
+        for (const p of changes) {
+          await IssuedInvoice.update({ invoice_number: p.next }, { where: { id: p.id }, transaction: t });
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      mode: req.query.apply === '1' ? 'APPLIED' : 'DRY RUN — add &apply=1 to write',
+      total: plan.length,
+      changed: changes.length,
+      mapping: changes.map((p) => `${p.old} -> ${p.next}`),
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/maintenance/sync-db', async (req, res) => {
   if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
   try {

@@ -156,15 +156,33 @@ function financialYear(date = new Date()) {
 }
 
 // Two independent GST series (both legal — each must simply be consecutive):
-//   GKM/ONL/25-26/000123  — online (automatic) invoices: bookings, subscriptions, shop orders
-//   GKM/OFF/25-26/000123  — offline (manual) invoices created from the admin panel
-function formatInvoiceNumber(seq, date = new Date(), channel = 'ONL', prefix = process.env.INVOICE_PREFIX || 'GKM') {
-  return `${prefix}/${channel}/${financialYear(date)}/${String(seq).padStart(6, '0')}`;
+//   GKM/ONL/2627/123  — online (automatic) invoices: bookings, subscriptions, shop orders
+//   GKM/OFF/2627/123  — offline (manual) invoices created from the admin panel
+// The GST portal caps invoice numbers at 16 characters; this format is exactly
+// 16: prefix(3) + '/' + channel(3) + '/' + fy(4, no dash) + '/' + seq(3).
+// The 3-character sequence covers a full FY series without ever growing:
+//   1–999     → zero-padded decimal        001 … 999
+//   1000–3599 → letter bucket + 2 digits   A00 (=1000) … Z99 (=3599)
+// Letter-first vs digit-first keeps the two ranges collision-free.
+function encodeSeq(seq) {
+  const n = Number(seq) || 0;
+  if (n <= 999) return String(n).padStart(3, '0');
+  if (n <= 3599) return String.fromCharCode(65 + Math.floor((n - 1000) / 100)) + String((n - 1000) % 100).padStart(2, '0');
+  return String(n); // >3599 would exceed 16 chars — revisit capacity before this is ever reached
+}
+
+// From the parts stored on an issued_invoices row (fy like '26-27').
+function formatInvoiceNumberFromParts(fy, seq, channel = 'ONL', prefix = process.env.INVOICE_PREFIX || 'GKM') {
+  return `${prefix}/${channel}/${String(fy).replace(/-/g, '')}/${encodeSeq(seq)}`;
+}
+
+function formatInvoiceNumber(seq, date = new Date(), channel = 'ONL', prefix) {
+  return formatInvoiceNumberFromParts(financialYear(date), seq, channel, prefix);
 }
 
 module.exports = {
   COMPANY, BANK, TERMS, FOOTER_BADGES,
   SERVICE_SAC, LANDSCAPE_SAC, DEFAULT_PRODUCT_HSN, hsnForProduct,
   STATE_CODES, placeOfSupply, title,
-  amountInWords, financialYear, formatInvoiceNumber,
+  amountInWords, financialYear, formatInvoiceNumber, formatInvoiceNumberFromParts,
 };

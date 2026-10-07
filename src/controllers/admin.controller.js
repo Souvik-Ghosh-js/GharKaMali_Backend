@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { Op, fn, col, literal, sequelize } = require('sequelize');
 const db = require('../config/database');
-const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq, Geofence, GardenerZone, Review, Complaint, PlantIdentification } = require('../models');
+const { User, GardenerProfile, ServiceZone, ServicePlan, Booking, Subscription, RewardPenalty, Blog, CityPage, Payment, PriceHikeLog, Product, ProductCategory, Order, OrderItem, Faq, Geofence, GardenerZone, Review, Complaint, PlantIdentification, ManualInvoice } = require('../models');
 const { sendWhatsApp, templates } = require('../services/otp.service');
 const { dateRangeWhere } = require('../utils/dateRange');
 
@@ -12,7 +12,7 @@ exports.getDashboard = async (req, res) => {
       totalCustomers, totalGardeners, totalSupervisors,
       activeSubscriptions, pendingGardeners,
       todayBookings, completedToday, pendingBookings,
-      totalRevenue, recentBookings
+      totalRevenue, manualSales, recentBookings
     ] = await Promise.all([
       User.count({ where: { role: 'customer', is_active: true } }),
       User.count({ where: { role: 'gardener', is_active: true, is_approved: true } }),
@@ -23,6 +23,9 @@ exports.getDashboard = async (req, res) => {
       Booking.count({ where: { status: 'completed', completed_at: { [Op.gte]: new Date(new Date().setHours(0, 0, 0, 0)) } } }),
       Booking.count({ where: { status: { [Op.in]: ['pending', 'assigned'] } } }),
       Booking.sum('total_amount', { where: { status: 'completed' } }),
+      // Offline sales: PAID manual invoices that are NOT also a booking or
+      // subscription (those are already counted in their own revenue figures).
+      ManualInvoice.sum('total_amount', { where: { payment_status: 'paid', outcome: 'invoice_only' } }),
       Booking.findAll({
         limit: 5,
         order: [['created_at', 'DESC']],
@@ -35,7 +38,7 @@ exports.getDashboard = async (req, res) => {
 
     res.json({
       success: true, data: {
-        stats: { totalCustomers, totalGardeners, totalSupervisors, activeSubscriptions, pendingGardeners, todayBookings, completedToday, pendingBookings, totalRevenue: totalRevenue || 0 },
+        stats: { totalCustomers, totalGardeners, totalSupervisors, activeSubscriptions, pendingGardeners, todayBookings, completedToday, pendingBookings, totalRevenue: totalRevenue || 0, manualSales: manualSales || 0 },
         recentBookings
       }
     });
@@ -265,8 +268,25 @@ exports.getAnalytics = async (req, res) => {
       `  (SELECT COALESCE(SUM(total_amount), 0) FROM orders o`,
       `    WHERE payment_status="paid" AND created_at >= :since ${orderCond}) as shop_revenue,`,
       `  (SELECT COALESCE(SUM(s.amount_paid), 0) FROM subscriptions s JOIN users cu ON cu.id = s.customer_id`,
-      `    WHERE s.created_at >= :since ${subscriptionCond}) as subscription_revenue`,
+      `    WHERE s.created_at >= :since ${subscriptionCond}) as subscription_revenue,`,
+      // Offline (manual) sales: paid, invoice_only — manual invoices that also
+      // created a booking/subscription are already inside those figures. Manual
+      // invoices carry no zone, so a zone-filtered view shows them as 0.
+      `  (SELECT COALESCE(SUM(total_amount), 0) FROM manual_invoices`,
+      `    WHERE payment_status = 'paid' AND outcome = 'invoice_only' AND created_at >= :since ${gfId ? 'AND 1 = 0' : ''}) as manual_revenue`,
     ].filter(Boolean).join('\n'), { replacements: rp, type: db.QueryTypes.SELECT });
+
+    // Offline/manual invoice sales detail (paid, standalone) for the analytics page.
+    const manualInvoiceStats = await db.query(`
+      SELECT COUNT(id) as total_invoices,
+             COALESCE(SUM(total_amount), 0) as total_revenue,
+             COALESCE(SUM(gst_amount), 0) as total_gst,
+             SUM(CASE WHEN invoice_type = 'products' THEN total_amount ELSE 0 END) as products_revenue,
+             SUM(CASE WHEN invoice_type = 'makeover' THEN total_amount ELSE 0 END) as makeover_revenue,
+             SUM(CASE WHEN invoice_type IN ('ondemand','plan') THEN total_amount ELSE 0 END) as service_revenue
+      FROM manual_invoices
+      WHERE payment_status = 'paid' AND outcome = 'invoice_only' AND created_at >= :since
+    `, { replacements: rp, type: db.QueryTypes.SELECT });
 
     const activeGardeners = await db.query(`
       SELECT COUNT(*) as count FROM users u
@@ -302,7 +322,8 @@ exports.getAnalytics = async (req, res) => {
         shopOrdersByCity,
         subscriptionsByPlan,
         subscriptionsByZone,
-        revenueBreakdown: revenueBreakdown[0] || { booking_revenue: 0, shop_revenue: 0, subscription_revenue: 0 },
+        revenueBreakdown: revenueBreakdown[0] || { booking_revenue: 0, shop_revenue: 0, subscription_revenue: 0, manual_revenue: 0 },
+        manualInvoiceStats: manualInvoiceStats[0] || {},
         activeGardeners: activeGardeners[0]?.count || 0,
         activeSubscriptions: activeSubscriptions[0]?.count || 0,
         selectedCity: cityFilter || null,
