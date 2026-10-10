@@ -29,6 +29,13 @@ const STATEMENTS = [
   "ALTER TABLE product_categories ADD COLUMN gst_rate INT NULL",
   // Manual invoices: customer's GSTIN for B2B input-credit claims.
   "ALTER TABLE manual_invoices ADD COLUMN customer_gstin VARCHAR(20) NULL",
+  // Legacy zone FK: bookings.zone_id still pointed at the RETIRED service_zones
+  // table, but the app writes GEOFENCE ids into zone_id (mirror of geofence_id).
+  // A geofence id with no same-numbered service_zones row made every booking
+  // INSERT fail ("foreign key constraint fails bookings_ibfk_68") and killed
+  // website checkout. geofence_id is the real reference — drop the stale FK.
+  // (ER_CANT_DROP_FIELD_OR_KEY is ignorable, so this is a safe no-op once gone.)
+  "ALTER TABLE bookings DROP FOREIGN KEY bookings_ibfk_68",
   // Split invoice number series: ONL (automatic) vs OFF (manual/offline).
   "ALTER TABLE invoice_counters ADD COLUMN channel ENUM('ONL','OFF') NOT NULL DEFAULT 'ONL'",
   "ALTER TABLE invoice_counters DROP INDEX financial_year",
