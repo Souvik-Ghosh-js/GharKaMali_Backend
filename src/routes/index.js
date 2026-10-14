@@ -816,6 +816,44 @@ router.get('/admin/maintenance/reformat-invoice-numbers', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Browser-runnable READ-ONLY duplicate-customer report. The id column is the
+// primary key (can never duplicate); what this finds is the same PERSON under
+// multiple accounts — customers sharing a phone number or an email address.
+router.get('/admin/maintenance/check-duplicate-customers', async (req, res) => {
+  if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
+  try {
+    const { sequelize } = require('../models');
+    const [byPhone] = await sequelize.query(`
+      SELECT phone, COUNT(*) AS accounts,
+             GROUP_CONCAT(CONCAT('#', id, ' ', COALESCE(name, '?'), ' (', COALESCE(DATE(created_at), '?'), ')') SEPARATOR ' | ') AS records
+      FROM users
+      WHERE role = 'customer' AND phone IS NOT NULL AND phone <> ''
+      GROUP BY phone HAVING COUNT(*) > 1
+      ORDER BY accounts DESC, phone
+    `);
+    const [byEmail] = await sequelize.query(`
+      SELECT email, COUNT(*) AS accounts,
+             GROUP_CONCAT(CONCAT('#', id, ' ', COALESCE(name, '?'), ' ', COALESCE(phone, '?')) SEPARATOR ' | ') AS records
+      FROM users
+      WHERE role = 'customer' AND email IS NOT NULL AND email <> ''
+      GROUP BY email HAVING COUNT(*) > 1
+      ORDER BY accounts DESC, email
+    `);
+    const [totals] = await sequelize.query(`
+      SELECT COUNT(*) AS total_customers,
+             COUNT(DISTINCT phone) AS distinct_phones
+      FROM users WHERE role = 'customer'
+    `);
+    res.json({
+      success: true,
+      note: 'id is the primary key and cannot duplicate; groups below are customers sharing a phone/email.',
+      totals: totals[0],
+      duplicate_phones: byPhone,
+      duplicate_emails: byEmail,
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/maintenance/sync-db', async (req, res) => {
   if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
   try {
