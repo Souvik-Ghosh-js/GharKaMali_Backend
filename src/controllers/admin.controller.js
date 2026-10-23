@@ -288,6 +288,50 @@ exports.getAnalytics = async (req, res) => {
       WHERE payment_status = 'paid' AND outcome = 'invoice_only' AND created_at >= :since
     `, { replacements: rp, type: db.QueryTypes.SELECT });
 
+    // 8. Customer-wise sales — one row per customer (phone is unique per
+    // account) across ALL purchase channels, with fixed 1-month / 3-month /
+    // 1-year windows so buying frequency reads off directly. Not zone-filtered
+    // (purchases span channels with differing zone semantics).
+    const now = Date.now();
+    const crp = {
+      m1: new Date(now - 30 * 864e5), m3: new Date(now - 90 * 864e5), y1: new Date(now - 365 * 864e5),
+      since,
+    };
+    const purchasesUnion = `
+      SELECT b.customer_id cid, COALESCE(b.total_amount, 0) amt, b.created_at ts, 'booking' src
+        FROM bookings b WHERE b.status NOT IN ('cancelled','failed') AND b.subscription_id IS NULL AND b.created_at >= :y1
+      UNION ALL
+      SELECT o.customer_id, COALESCE(o.total_amount, 0), o.created_at, 'order'
+        FROM orders o WHERE o.payment_status = 'paid' AND o.created_at >= :y1
+      UNION ALL
+      SELECT s.customer_id, COALESCE(s.amount_paid, 0), s.created_at, 'subscription'
+        FROM subscriptions s WHERE s.created_at >= :y1`;
+    const customerWiseSales = await db.query(`
+      SELECT u.id, u.name, u.phone, u.city,
+             SUM(x.ts >= :m1) AS purchases_1m, COALESCE(SUM(CASE WHEN x.ts >= :m1 THEN x.amt END), 0) AS spent_1m,
+             SUM(x.ts >= :m3) AS purchases_3m, COALESCE(SUM(CASE WHEN x.ts >= :m3 THEN x.amt END), 0) AS spent_3m,
+             COUNT(*) AS purchases_1y, COALESCE(SUM(x.amt), 0) AS spent_1y,
+             SUM(x.src = 'booking') AS bookings, SUM(x.src = 'order') AS orders, SUM(x.src = 'subscription') AS subscriptions,
+             MAX(x.ts) AS last_purchase
+      FROM (${purchasesUnion}) x
+      JOIN users u ON u.id = x.cid
+      GROUP BY u.id, u.name, u.phone, u.city
+      ORDER BY spent_1y DESC
+      LIMIT 500
+    `, { replacements: crp, type: db.QueryTypes.SELECT });
+
+    // Customer KPIs for the SELECTED period: total registered, unique buyers,
+    // and repeat buyers (2+ purchases inside the period).
+    const customerKpis = await db.query(`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE role = 'customer') AS total_customers,
+        COUNT(*) AS unique_buyers,
+        COALESCE(SUM(cnt > 1), 0) AS repeat_buyers
+      FROM (
+        SELECT x.cid, COUNT(*) cnt FROM (${purchasesUnion.replace(/:y1/g, ':since')}) x GROUP BY x.cid
+      ) y
+    `, { replacements: crp, type: db.QueryTypes.SELECT });
+
     const activeGardeners = await db.query(`
       SELECT COUNT(*) as count FROM users u
       WHERE u.role = "gardener" AND u.is_active = 1 AND u.is_approved = 1
@@ -324,6 +368,8 @@ exports.getAnalytics = async (req, res) => {
         subscriptionsByZone,
         revenueBreakdown: revenueBreakdown[0] || { booking_revenue: 0, shop_revenue: 0, subscription_revenue: 0, manual_revenue: 0 },
         manualInvoiceStats: manualInvoiceStats[0] || {},
+        customerWiseSales,
+        customerKpis: customerKpis[0] || {},
         activeGardeners: activeGardeners[0]?.count || 0,
         activeSubscriptions: activeSubscriptions[0]?.count || 0,
         selectedCity: cityFilter || null,
