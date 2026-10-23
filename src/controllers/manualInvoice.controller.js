@@ -566,8 +566,17 @@ exports.createManualInvoice = async (req, res) => {
 // ── LIST (admin history) ─────────────────────────────────────────────────────
 exports.listManualInvoices = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 20, search, from_date, to_date } = req.query;
     const where = {};
+    // Period filter — SERVER-SIDE so it spans every page, not just the 20
+    // loaded rows. Filters on the admin-chosen invoice_date, falling back to
+    // the creation date for invoices made before that field existed.
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const effDate = sequelize.literal('COALESCE(`ManualInvoice`.`invoice_date`, DATE(`ManualInvoice`.`created_at`))');
+    const dateConds = [];
+    if (DATE_RE.test(String(from_date || ''))) dateConds.push(sequelize.where(effDate, { [Op.gte]: from_date }));
+    if (DATE_RE.test(String(to_date || ''))) dateConds.push(sequelize.where(effDate, { [Op.lte]: to_date }));
+    if (dateConds.length) where[Op.and] = dateConds;
     if (search) {
       where[Op.or] = [
         { invoice_number: { [Op.like]: `%${search}%` } },
