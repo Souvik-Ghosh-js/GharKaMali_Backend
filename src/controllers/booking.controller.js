@@ -242,9 +242,20 @@ exports.createBooking = async (req, res) => {
     const basePrice = parseFloat(zone.base_price) || 0;
     const surge = parseFloat(zone.surge_multiplier) || 1.0;
 
-    // Pricing model: a flat ₹25 per plant added on top of the zone base price.
-    const ADDITIONAL_PLANT_RATE = 25;
-    const baseAmount = basePrice + (pCount * ADDITIONAL_PLANT_RATE);
+    // Pricing model: the zone base price covers up to 10 plants; the plant
+    // count's SLAB surcharge (admin-configurable) is added on top. Exact slab
+    // price only — never per-plant, interpolated or rounded. Beyond the last
+    // slab there is no auto price: the customer must request a custom quote.
+    const { getPlantSlabs, plantSurcharge, maxAutoPlants } = require('../config/plantSlabs');
+    const slabs = await getPlantSlabs();
+    const surcharge = plantSurcharge(pCount, slabs);
+    if (surcharge === null) {
+      return res.status(400).json({
+        success: false,
+        message: `For more than ${maxAutoPlants(slabs)} plants we prepare a custom quote — please contact us on WhatsApp at +91 96437 01701.`,
+      });
+    }
+    const baseAmount = basePrice + surcharge;
 
     // (Wallet balance is checked authoritatively inside the transaction below,
     //  against the full GST-inclusive total with the user row locked.)

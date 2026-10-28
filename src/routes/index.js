@@ -743,6 +743,36 @@ router.get('/admin/maintenance/renumber-invoices', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── ON-DEMAND PLANT-COUNT PRICING SLABS ──────────────────────────────────────
+// Public: website + app read the slab table to price the visit the same way
+// the server will. Base price covers up to base_covers plants; the matching
+// slab's extra is ADDED to the zone base; beyond max_auto_plants → custom quote.
+router.get('/pricing/plant-slabs', async (req, res) => {
+  try {
+    const { getPlantSlabs, BASE_COVERS, maxAutoPlants } = require('../config/plantSlabs');
+    const slabs = await getPlantSlabs();
+    res.json({ success: true, data: { base_covers: BASE_COVERS, max_auto_plants: maxAutoPlants(slabs), slabs } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Admin: edit the slab table (continuous ranges starting at base_covers + 1).
+router.put('/admin/pricing/plant-slabs', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { validateSlabs, SETTING_KEY, invalidatePlantSlabCache } = require('../config/plantSlabs');
+    const { SystemSetting } = require('../models');
+    const slabs = (req.body?.slabs || []).map((s) => ({
+      min: parseInt(s.min), max: parseInt(s.max), extra: Number(s.extra),
+    }));
+    const err = validateSlabs(slabs);
+    if (err) return res.status(400).json({ success: false, message: err });
+    const value = JSON.stringify(slabs);
+    const [row] = await SystemSetting.findOrCreate({ where: { key: SETTING_KEY }, defaults: { value } });
+    if (row.value !== value) await row.update({ value });
+    invalidatePlantSlabCache();
+    res.json({ success: true, message: 'Plant pricing slabs saved', data: { slabs } });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // Browser-runnable ONE-TIME wipe of ALL manual invoices (no shell access).
 // Deletes every manual_invoices row + its issued OFF number and resets the OFF
 // counters to 0, so the next manual invoice starts again at GKM/OFF/<fy>/000001.
@@ -812,44 +842,6 @@ router.get('/admin/maintenance/reformat-invoice-numbers', async (req, res) => {
       total: plan.length,
       changed: changes.length,
       mapping: changes.map((p) => `${p.old} -> ${p.next}`),
-    });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-// Browser-runnable READ-ONLY duplicate-customer report. The id column is the
-// primary key (can never duplicate); what this finds is the same PERSON under
-// multiple accounts — customers sharing a phone number or an email address.
-router.get('/admin/maintenance/check-duplicate-customers', async (req, res) => {
-  if (req.query.key !== 'gharkamali') return res.status(401).json({ success: false, message: 'Unauthorized' });
-  try {
-    const { sequelize } = require('../models');
-    const [byPhone] = await sequelize.query(`
-      SELECT phone, COUNT(*) AS accounts,
-             GROUP_CONCAT(CONCAT('#', id, ' ', COALESCE(name, '?'), ' (', COALESCE(DATE(created_at), '?'), ')') SEPARATOR ' | ') AS records
-      FROM users
-      WHERE role = 'customer' AND phone IS NOT NULL AND phone <> ''
-      GROUP BY phone HAVING COUNT(*) > 1
-      ORDER BY accounts DESC, phone
-    `);
-    const [byEmail] = await sequelize.query(`
-      SELECT email, COUNT(*) AS accounts,
-             GROUP_CONCAT(CONCAT('#', id, ' ', COALESCE(name, '?'), ' ', COALESCE(phone, '?')) SEPARATOR ' | ') AS records
-      FROM users
-      WHERE role = 'customer' AND email IS NOT NULL AND email <> ''
-      GROUP BY email HAVING COUNT(*) > 1
-      ORDER BY accounts DESC, email
-    `);
-    const [totals] = await sequelize.query(`
-      SELECT COUNT(*) AS total_customers,
-             COUNT(DISTINCT phone) AS distinct_phones
-      FROM users WHERE role = 'customer'
-    `);
-    res.json({
-      success: true,
-      note: 'id is the primary key and cannot duplicate; groups below are customers sharing a phone/email.',
-      totals: totals[0],
-      duplicate_phones: byPhone,
-      duplicate_emails: byEmail,
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

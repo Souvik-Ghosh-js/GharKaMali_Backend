@@ -29,7 +29,6 @@ const { notify: pushNotify } = require('../services/push.service');
 
 const GST_RATE = 0.18; // default service slab (18%) when the admin doesn't choose
 const SERVICE_GST_RATES = [0, 5, 12, 18, 28]; // admin-choosable slabs (0 = No GST)
-const ADDITIONAL_PLANT_RATE = 25;
 
 const genInvoiceNumber = () => `INV${Date.now().toString().slice(-8)}`;
 const genBookingNumber = () => `GKM${Date.now().toString().slice(-8)}`;
@@ -307,11 +306,20 @@ exports.createManualInvoice = async (req, res) => {
         if (plan) {
           items = [{ name: `${plan.name} Plan${plan.visits_per_month ? ` — ${plan.visits_per_month} visits/month` : ''}`, amount: Number(plan.price) || 0 }];
         } else {
-          // On-demand: zone base + ₹25 per extra plant (matches createBooking).
+          // On-demand: zone base (covers up to 10 plants) + the plant-count
+          // slab surcharge — same admin-configurable table createBooking uses.
+          const { getPlantSlabs, plantSurcharge, maxAutoPlants } = require('../config/plantSlabs');
+          const slabs = await getPlantSlabs();
+          const surcharge = plantSurcharge(parseInt(plant_count) || 0, slabs);
+          if (surcharge === null && !(override_total != null && Number(override_total) > 0)) {
+            return res.status(400).json({
+              success: false,
+              message: `More than ${maxAutoPlants(slabs)} plants needs a custom quote — enter the agreed price as the override total`,
+            });
+          }
           const zone = (geofence_id || zone_id) ? await Geofence.findByPk(geofence_id || zone_id) : null;
           const base = zone ? (parseFloat(zone.base_price) || 0) : 0;
-          const extra = (parseInt(plant_count) || 0) * ADDITIONAL_PLANT_RATE;
-          items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + extra }];
+          items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + (surcharge || 0) }];
         }
       }
 
