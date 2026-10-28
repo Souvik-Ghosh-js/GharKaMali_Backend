@@ -126,7 +126,9 @@ const booking = {
     // get a server-computed slot when `is_instant: true`.
     body('scheduled_date').optional({ values: 'falsy' }).isISO8601().withMessage('scheduled_date must be ISO date'),
     body('scheduled_time').optional({ values: 'falsy' }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
-      .withMessage('scheduled_time must be HH:mm'),
+      .withMessage('scheduled_time must be HH:mm')
+      // 8 AM slot retired — earliest customer-selectable slot is 9 AM.
+      .custom(v => !/^08:/.test(v)).withMessage('The 8 AM slot is no longer available. Please pick 9 AM or later.'),
     body('is_instant').optional({ values: 'falsy' }).isBoolean().toBoolean(),
     text('service_address', { min: 5, max: 500 }),
     lat('service_latitude', false), lng('service_longitude', false),
@@ -147,7 +149,8 @@ const booking = {
   reschedule: [
     intInRange('booking_id', { min: 1 }),
     isoDate('new_date'),
-    body('new_time').optional({ values: 'falsy' }).matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('new_time must be HH:mm'),
+    body('new_time').optional({ values: 'falsy' }).matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('new_time must be HH:mm')
+      .custom(v => !/^08:/.test(v)).withMessage('The 8 AM slot is no longer available. Please pick 9 AM or later.'),
   ],
   verifyOtp: [intInRange('booking_id', { min: 1 }), otp()],
   updateLocation: [

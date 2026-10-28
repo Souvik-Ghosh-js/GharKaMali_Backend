@@ -50,7 +50,7 @@ exports.getPreviousGardeners = async (req, res) => {
 
 // Internal function for availability check
 const checkGardenerAvailabilityInternal = async (date, gardener_id, zone_id) => {
-  const standardTimeSlots = ['08:00', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
+  const standardTimeSlots = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
 
   let gardenerIds = [];
   if (gardener_id) {
