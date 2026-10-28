@@ -689,13 +689,28 @@ const Review = sequelize.define('Review', {
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'reviews', underscored: true });
 
-// ─── TIP ──────────────────────────────────────────────────────────────────────
+// ─── TIP (ONLINE ONLY — gateway-verified; no cash workflow) ───────────────────
+// Extends the legacy wallet-tip table: `amount` (rupees) is kept for old rows,
+// `amount_paise` is the authoritative integer amount for everything new. A tip
+// is 'successful' only after server-side Razorpay verification.
 const Tip = sequelize.define('Tip', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   booking_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'bookings', key: 'id' } },
   customer_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
   gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
-  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false }, // rupees (legacy mirror)
+  amount_paise: { type: DataTypes.INTEGER },                    // authoritative integer paise
+  currency: { type: DataTypes.STRING(3), defaultValue: 'INR' },
+  method: { type: DataTypes.ENUM('online'), defaultValue: 'online' }, // ONLINE ONLY by design
+  status: { type: DataTypes.ENUM('pending', 'successful', 'failed', 'cancelled', 'refunded'), defaultValue: 'pending' },
+  payment_gateway: { type: DataTypes.STRING(20), defaultValue: 'razorpay' },
+  gateway_order_id: { type: DataTypes.STRING(64), unique: true },   // lookup key on verify/webhook
+  gateway_payment_id: { type: DataTypes.STRING(64) },
+  idempotency_key: { type: DataTypes.STRING(80), unique: true },    // kills duplicate creates on retries
+  verified_at: { type: DataTypes.DATE },
+  // Whole-tip payout allocation — set exactly once inside the payout-creation
+  // transaction, which is what makes paying the same tip twice impossible.
+  payout_id: { type: DataTypes.INTEGER, references: { model: 'tip_payouts', key: 'id' } },
   geofence_id: { type: DataTypes.INTEGER, references: { model: 'geofences', key: 'id' } }
 }, { tableName: 'tips', underscored: true });
 
@@ -738,6 +753,39 @@ const SystemSetting = sequelize.define('SystemSetting', {
   value: { type: DataTypes.TEXT },
   updated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } }
 }, { tableName: 'system_settings', underscored: true });
+
+// ─── ONLINE TIPS (customer → gardener, ONLINE ONLY — no cash workflow) ───────
+// Amounts are integer PAISE (never floats). A tip counts as successful only
+// after server-side Razorpay verification; the backend ledger is the single
+// source of truth for totals in the customer app, gardener app and admin.
+const TipPayout = sequelize.define('TipPayout', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  gardener_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  amount_paise: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  currency: { type: DataTypes.STRING(3), defaultValue: 'INR' },
+  status: { type: DataTypes.ENUM('draft', 'approved', 'processing', 'paid', 'failed', 'cancelled'), defaultValue: 'draft' },
+  payment_method: { type: DataTypes.STRING(30) },     // bank_transfer | upi | …
+  payout_reference: { type: DataTypes.STRING(100) },  // bank/UPI/provider reference
+  initiated_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  approved_by: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  approved_at: { type: DataTypes.DATE },
+  paid_at: { type: DataTypes.DATE },
+  failure_reason: { type: DataTypes.TEXT },
+  notes: { type: DataTypes.TEXT },
+}, { tableName: 'tip_payouts', underscored: true });
+
+// Append-only audit trail — completed transactions are never silently edited;
+// corrections happen as new status transitions recorded here.
+const TipAudit = sequelize.define('TipAudit', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  tip_id: { type: DataTypes.INTEGER, references: { model: 'tips', key: 'id' } },
+  payout_id: { type: DataTypes.INTEGER, references: { model: 'tip_payouts', key: 'id' } },
+  actor_id: { type: DataTypes.INTEGER, references: { model: 'users', key: 'id' } },
+  action: { type: DataTypes.STRING(40), allowNull: false },
+  from_status: { type: DataTypes.STRING(20) },
+  to_status: { type: DataTypes.STRING(20) },
+  reason: { type: DataTypes.TEXT },
+}, { tableName: 'tip_audits', underscored: true });
 
 // ─── INVOICE COUNTER (financial-year sequential numbering) ───────────────────
 // One row per financial year ("25-26") holding the last issued sequence. Used to
@@ -939,6 +987,12 @@ const ChecklistTemplate = sequelize.define('ChecklistTemplate', {
 }, { tableName: 'checklist_templates', underscored: true });
 
 // ─── ASSOCIATIONS ─────────────────────────────────────────────────────────────
+Tip.belongsTo(TipPayout, { foreignKey: 'payout_id', as: 'payout' });
+TipPayout.hasMany(Tip, { foreignKey: 'payout_id', as: 'allocations' });
+TipPayout.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
+TipAudit.belongsTo(User, { foreignKey: 'actor_id', as: 'actor' });
+Tip.hasMany(TipAudit, { foreignKey: 'tip_id', as: 'audits' });
+
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
 ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
 
@@ -1154,6 +1208,7 @@ module.exports = {
   ProductZonePrice,
   ContactMessage,
   SystemSetting,
+  Tip, TipPayout, TipAudit,
   UserAddress,
   GardenerDocument,
   Coupon,

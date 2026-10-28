@@ -394,7 +394,14 @@ exports.razorpayWebhook = async (req, res) => {
     const entity = req.body.payload && req.body.payload.payment && req.body.payload.payment.entity;
     if ((event === 'payment.captured' || event === 'order.paid') && entity && entity.order_id) {
       const payment = await Payment.findOne({ where: { transaction_id: entity.order_id } });
-      if (payment) await fulfillPayment(payment, { razorpay_order_id: entity.order_id, razorpay_payment_id: entity.id, source: 'webhook' });
+      if (payment) {
+        await fulfillPayment(payment, { razorpay_order_id: entity.order_id, razorpay_payment_id: entity.id, source: 'webhook' });
+      } else {
+        // Not a Payment order — may be a gardener TIP (separate ledger).
+        try {
+          await require('./tip.controller').fulfillTipByOrderId(entity.order_id, entity.id);
+        } catch (e) { console.error('[webhook] tip fulfillment failed:', e.message); }
+      }
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

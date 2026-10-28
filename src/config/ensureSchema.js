@@ -29,6 +29,22 @@ const STATEMENTS = [
   "ALTER TABLE product_categories ADD COLUMN gst_rate INT NULL",
   // Manual invoices: customer's GSTIN for B2B input-credit claims.
   "ALTER TABLE manual_invoices ADD COLUMN customer_gstin VARCHAR(20) NULL",
+  // Online tips: extend the legacy wallet-tip table with the gateway-verified
+  // ledger columns. Legacy rows (wallet-paid) are grandfathered as successful.
+  "ALTER TABLE tips ADD COLUMN amount_paise INT NULL",
+  "ALTER TABLE tips ADD COLUMN currency VARCHAR(3) NOT NULL DEFAULT 'INR'",
+  "ALTER TABLE tips ADD COLUMN method ENUM('online') NOT NULL DEFAULT 'online'",
+  "ALTER TABLE tips ADD COLUMN status ENUM('pending','successful','failed','cancelled','refunded') NOT NULL DEFAULT 'successful'",
+  "ALTER TABLE tips ADD COLUMN payment_gateway VARCHAR(20) NOT NULL DEFAULT 'razorpay'",
+  "ALTER TABLE tips ADD COLUMN gateway_order_id VARCHAR(64) NULL",
+  "ALTER TABLE tips ADD COLUMN gateway_payment_id VARCHAR(64) NULL",
+  "ALTER TABLE tips ADD COLUMN idempotency_key VARCHAR(80) NULL",
+  "ALTER TABLE tips ADD COLUMN verified_at DATETIME NULL",
+  "ALTER TABLE tips ADD COLUMN payout_id INT NULL",
+  "ALTER TABLE tips ADD UNIQUE INDEX uniq_tip_gateway_order (gateway_order_id)",
+  "ALTER TABLE tips ADD UNIQUE INDEX uniq_tip_idempotency (idempotency_key)",
+  "UPDATE tips SET amount_paise = ROUND(amount * 100) WHERE amount_paise IS NULL",
+  "UPDATE tips SET verified_at = created_at WHERE verified_at IS NULL AND status = 'successful'",
   // Legacy zone FK: bookings.zone_id still pointed at the RETIRED service_zones
   // table, but the app writes GEOFENCE ids into zone_id (mirror of geofence_id).
   // A geofence id with no same-numbered service_zones row made every booking

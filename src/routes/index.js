@@ -743,6 +743,30 @@ router.get('/admin/maintenance/renumber-invoices', async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── ONLINE TIPS (customer → gardener; online only, no cash workflow) ─────────
+const tipCtrl = require('../controllers/tip.controller');
+router.get('/tips/config', tipCtrl.getConfig); // public: suggested amounts + limits
+router.post('/tips', authenticate, authorize('customer'), tipCtrl.createTip);
+router.post('/tips/verify', authenticate, authorize('customer'), tipCtrl.verifyTip);
+router.post('/tips/cancel', authenticate, authorize('customer'), tipCtrl.cancelTip);
+// Gardener: read-only, own data only (ids come from the auth token, never params)
+router.get('/gardeners/me/tips/summary', authenticate, authorize('gardener'), tipCtrl.myTipSummary);
+router.get('/gardeners/me/tips', authenticate, authorize('gardener'), tipCtrl.myTips);
+router.get('/gardeners/me/payouts', authenticate, authorize('gardener'), tipCtrl.myPayouts);
+// Admin tip management (supervisor = operational view; payouts/corrections = admin)
+router.get('/admin/tips/summary', authenticate, authorize('admin', 'supervisor'), tipCtrl.adminSummary);
+router.get('/admin/tips/config', authenticate, authorize('admin'), tipCtrl.getConfig);
+router.put('/admin/tips/config', authenticate, authorize('admin'), tipCtrl.saveConfig);
+router.get('/admin/tips', authenticate, authorize('admin', 'supervisor'), tipCtrl.adminListTips);
+router.get('/admin/tips/:id', authenticate, authorize('admin', 'supervisor'), tipCtrl.adminTipDetail);
+router.post('/admin/tips/:id/reverse', authenticate, authorize('admin'), tipCtrl.adminReverseTip);
+router.get('/admin/payouts', authenticate, authorize('admin', 'supervisor'), tipCtrl.adminListPayouts);
+router.post('/admin/payouts', authenticate, authorize('admin'), tipCtrl.adminCreatePayout);
+router.post('/admin/payouts/:id/approve', authenticate, authorize('admin'), tipCtrl.adminApprovePayout);
+router.post('/admin/payouts/:id/confirm-paid', authenticate, authorize('admin'), tipCtrl.adminConfirmPayoutPaid);
+router.post('/admin/payouts/:id/cancel', authenticate, authorize('admin'), tipCtrl.adminCancelPayout);
+router.post('/admin/payouts/:id/fail', authenticate, authorize('admin'), tipCtrl.adminFailPayout);
+
 // ── ON-DEMAND PLANT-COUNT PRICING SLABS ──────────────────────────────────────
 // Public: website + app read the slab table to price the visit the same way
 // the server will. Base price covers up to base_covers plants; the matching
@@ -1751,38 +1775,13 @@ router.get('/admin/bookings/:id/logs', authenticate, authorize('admin', 'supervi
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// ── TIP FEATURE ───────────────────────────────────────────────────────────────
-router.post('/bookings/:id/tip', authenticate, authorize('customer'), validate(V.review.tip), async (req, res) => {
-  try {
-    const { Tip, Booking, GardenerProfile, User } = require('../models');
-    const { amount } = req.body;
-    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Tip amount must be positive' });
-
-    const booking = await Booking.findOne({ where: { id: req.params.id, customer_id: req.user.id, status: 'completed' } });
-    if (!booking) return res.status(404).json({ success: false, message: 'Completed booking not found' });
-    if (!booking.gardener_id) return res.status(400).json({ success: false, message: 'No gardener assigned to this booking' });
-
-    // Check wallet balance
-    const customer = await User.findByPk(req.user.id);
-    if (parseFloat(customer.wallet_balance) < amount) {
-      return res.status(400).json({ success: false, message: 'Insufficient wallet balance for tip' });
-    }
-
-    const tip = await Tip.create({
-      booking_id: booking.id,
-      customer_id: req.user.id,
-      gardener_id: booking.gardener_id,
-      geofence_id: req.body.geofence_id || booking.geofence_id,
-      amount
-    });
-
-    // Deduct from customer wallet
-    await User.decrement({ wallet_balance: amount }, { where: { id: req.user.id } });
-    // Credit to gardener earnings
-    await GardenerProfile.increment({ total_earnings: amount }, { where: { user_id: booking.gardener_id } });
-
-    res.json({ success: true, message: `Tip of ₹${amount} sent to gardener`, data: tip });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+// ── TIP FEATURE (legacy wallet flow — RETIRED) ────────────────────────────────
+// Tips are ONLINE-ONLY through the payment gateway now (POST /tips →
+// /tips/verify). The old wallet-deduction tip is gone by design: a tip counts
+// only after server-side gateway verification, and GharKaMali pays gardeners
+// later through audited payouts, not instant wallet credits.
+router.post('/bookings/:id/tip', authenticate, authorize('customer'), (req, res) => {
+  res.status(410).json({ success: false, message: 'Wallet tips are discontinued — please update the app and tip online via the new flow' });
 });
 
 // ── GARDENER WITHDRAWAL ───────────────────────────────────────────────────────
