@@ -238,7 +238,6 @@ exports.createBooking = async (req, res) => {
     // Total plants serviced = plan coverage + extras (falls back to extras if no plan).
     const totalPlants = (coveredPlants + extraCount) || extraCount || 1;
     const minPlants = zone.min_plants || 1;
-    const pricePerPlant = parseFloat(zone.price_per_plant) || 0;
     const basePrice = parseFloat(zone.base_price) || 0;
     const surge = parseFloat(zone.surge_multiplier) || 1.0;
 
@@ -813,8 +812,16 @@ exports.updateBookingStatus = async (req, res) => {
       }
 
       if (extra_plants > 0) {
-        const zone = await Geofence.findByPk(booking.zone_id);
-        const extraAmt = extra_plants * (zone ? parseFloat(zone.price_per_plant) : 15);
+        // Extra plants found at the visit are billed by the same slab table as
+        // booking: charge the DIFFERENCE between the slab for the new total
+        // plant count and the slab already paid for. Beyond the last slab the
+        // last slab's amount applies (an in-progress visit can't be refused).
+        const { getPlantSlabs, plantSurcharge } = require('../config/plantSlabs');
+        const slabs = await getPlantSlabs();
+        const lastExtra = slabs.length ? Number(slabs[slabs.length - 1].extra) || 0 : 0;
+        const sur = (n) => { const v = plantSurcharge(n, slabs); return v === null ? lastExtra : v; };
+        const booked = parseInt(booking.plant_count) || 0;
+        const extraAmt = Math.max(0, sur(booked + extra_plants) - sur(booked));
         updates.extra_plants = extra_plants;
         updates.extra_amount = extraAmt;
         updates.total_amount = parseFloat(booking.total_amount) + extraAmt;

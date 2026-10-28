@@ -454,9 +454,10 @@ const Geofence = sequelize.define('Geofence', {
   // JSON string: array of [lat, lng] pairs forming the polygon
   polygon_coords: { type: DataTypes.TEXT('long'), allowNull: false },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
-  // Pricing (replaces ServiceZone pricing)
+  // Pricing (replaces ServiceZone pricing). Per-plant pricing is RETIRED —
+  // plant counts are priced by the admin-configurable slab table
+  // (config/plantSlabs.js); the old price_per_plant DB column sits unused.
   base_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
-  price_per_plant: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   surge_multiplier: { type: DataTypes.DECIMAL(4, 2), defaultValue: 1.00 },
