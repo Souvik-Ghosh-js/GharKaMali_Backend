@@ -370,11 +370,11 @@ exports.createBooking = async (req, res) => {
           }
         }
 
-        // Wallet payment: ensure sufficient balance BEFORE creating the booking,
-        // so the wallet can't be driven negative.
+        // Wallet payment: ensure sufficient ledger balance BEFORE creating the
+        // booking (the debit below re-checks atomically under row locks).
         if (payment_method === 'wallet') {
-          const walletUser = await User.findByPk(req.user.id, { attributes: ['wallet_balance'], transaction: t, lock: t.LOCK.UPDATE });
-          const balance = parseFloat(walletUser?.wallet_balance) || 0;
+          const walletService = require('../services/wallet.service');
+          const balance = (await walletService.balancePaise(req.user.id, { transaction: t })) / 100;
           if (balance < grandTotal) {
             const e = new Error(`Insufficient wallet balance. This booking needs ₹${grandTotal.toFixed(0)} but your wallet has ₹${balance.toFixed(0)}.`);
             e.httpStatus = 400;
@@ -428,9 +428,15 @@ exports.createBooking = async (req, res) => {
           await BookingAddOn.bulkCreate(resolvedAddons.map(a => ({ booking_id: created.id, ...a })), { transaction: t });
         }
 
-        // Deduct wallet balance if wallet payment (full total including addons)
+        // Deduct from the wallet ledger if wallet payment (full total incl. addons).
+        // Throws httpStatus 400 if the balance changed since the pre-check.
         if (payment_method === 'wallet') {
-          await User.decrement({ wallet_balance: grandTotal }, { where: { id: req.user.id }, transaction: t });
+          const walletService = require('../services/wallet.service');
+          await walletService.debit(req.user.id, Math.round(grandTotal * 100), {
+            purposeType: 'booking', purposeId: created.id,
+            note: `Paid for booking ${created.booking_number}`,
+            transaction: t,
+          });
           await User.increment({ total_spent: grandTotal }, { where: { id: req.user.id }, transaction: t });
         }
 
@@ -461,6 +467,8 @@ exports.createBooking = async (req, res) => {
     // are NOT emailed here to avoid duplicates / reporting unpaid bookings.
     if (payment_method === 'wallet') {
       require('../services/financeMail').notifyBooking(booking.id, 'Wallet');
+      // Paid in full → cashback applies exactly as for an online payment.
+      require('../services/wallet.service').awardCashback(req.user.id, grandTotal, 'booking', booking.id);
     }
 
     // ── NOTIFY ─────────────────────────────────────────────────────────────

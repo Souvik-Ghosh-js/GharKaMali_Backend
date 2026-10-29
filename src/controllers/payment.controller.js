@@ -133,6 +133,28 @@ async function fulfillEntity(type, id) {
 
   // Report the confirmed payment to finance (best-effort, never blocks fulfilment).
   notifyFinanceOfEntity(type, id);
+  // Tiered wallet cashback on the entity's full value (idempotent, best-effort).
+  awardEntityCashback(type, id);
+}
+
+// Wallet cashback for a now-paid entity — tier picked from the entity's own
+// total, so the offer is per order/booking/subscription. Never throws.
+async function awardEntityCashback(type, id) {
+  try {
+    const walletService = require('../services/wallet.service');
+    let customerId = null, total = 0;
+    if (type === 'booking') {
+      const b = await Booking.findByPk(id, { attributes: ['customer_id', 'total_amount'] });
+      if (b) { customerId = b.customer_id; total = parseFloat(b.total_amount) || 0; }
+    } else if (type === 'subscription') {
+      const s = await Subscription.findByPk(id, { include: [{ model: ServicePlan, as: 'plan' }] });
+      if (s) { customerId = s.customer_id; total = parseFloat(s.amount_paid || (s.plan && s.plan.price)) || 0; }
+    } else if (type === 'order') {
+      const o = await Order.findByPk(id, { attributes: ['customer_id', 'total_amount'] });
+      if (o) { customerId = o.customer_id; total = parseFloat(o.total_amount) || 0; }
+    }
+    if (customerId && total > 0) await walletService.awardCashback(customerId, total, type, id);
+  } catch (e) { console.error('[wallet] entity cashback failed:', e.message); }
 }
 
 // Build + send the finance notification for a now-paid entity. Fire-and-forget.
@@ -234,10 +256,36 @@ async function fulfillPayment(payment, gatewayResponse) {
     gateway_response: gatewayResponse || null
   });
 
+  const walletService = require('../services/wallet.service');
+
   if (payment.type === 'wallet_topup') {
-    const user = await User.findByPk(payment.user_id);
-    if (user) await user.update({ wallet_balance: Number(user.wallet_balance || 0) + Number(payment.amount) });
+    // Ledger credit (never expires). Idempotent: unique on (type, source) so a
+    // verify+webhook race can't credit twice.
+    try {
+      await walletService.credit(payment.user_id, {
+        type: 'topup',
+        amountPaise: Math.round(Number(payment.amount) * 100),
+        sourceType: 'payment', sourceId: payment.id,
+        note: `Wallet top-up of ₹${payment.amount}`,
+      });
+    } catch (e) {
+      if (e?.name !== 'SequelizeUniqueConstraintError') throw e;
+    }
     return;
+  }
+
+  // Split payment: the wallet share quoted at checkout is debited now, at the
+  // moment the gateway payment is confirmed (never on a failed payment).
+  const walletApplied = Number(payment.wallet_applied) || 0;
+  if (walletApplied > 0) {
+    try {
+      await walletService.debit(payment.user_id, Math.round(walletApplied * 100), {
+        purposeType: payment.type === 'order' ? 'order' : payment.type,
+        purposeId: payment.booking_id || payment.subscription_id || payment.id,
+        note: `Paid towards ${payment.payment_for || 'order'}`,
+        allowPartial: true, // expiry mid-checkout: debit what's left, never block fulfillment
+      });
+    } catch (e) { console.error('[wallet] split-payment debit failed:', e.message); }
   }
 
   // Combined cart: fulfill the whole list.
@@ -288,9 +336,67 @@ exports.createRazorpayOrder = async (req, res) => {
     if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Invalid payment amount' });
 
     const user = await User.findByPk(req.user.id);
+
+    // Wallet at checkout: `use_wallet: true` pays as much as the wallet covers;
+    // Razorpay only charges the remainder. The wallet share is computed from
+    // credits still valid 2h out (so nothing expires mid-checkout) and is
+    // debited only at fulfillment — a failed/abandoned payment costs nothing.
+    const useWallet = (req.body.use_wallet === true || req.body.use_wallet === 'true' || req.body.use_wallet === 1)
+      && (combined ? 'cart' : type) !== 'wallet_topup';
+    let walletApplied = 0;
+    if (useWallet) {
+      const walletService = require('../services/wallet.service');
+      const balPaise = await walletService.balancePaise(req.user.id, { bufferMs: 2 * 60 * 60 * 1000 });
+      walletApplied = Math.min(balPaise / 100, amount);
+      // Razorpay needs at least ₹1 — shave the wallet share rather than fail.
+      if (walletApplied < amount && amount - walletApplied < 1) walletApplied = Math.max(0, amount - 1);
+      walletApplied = Math.floor(walletApplied * 100) / 100;
+    }
+
+    // Wallet covers everything → no gateway at all. Debit strictly (throws 400
+    // if the balance changed underneath), record a successful wallet Payment
+    // and fulfill immediately. The client skips Checkout on `wallet_paid`.
+    if (walletApplied >= amount) {
+      const walletService = require('../services/wallet.service');
+      const purposeType = combined ? 'cart' : (type === 'order' ? 'order' : type);
+      const purposeId = booking_id || subscription_id || order_id || null;
+      try {
+        await walletService.debit(req.user.id, Math.round(amount * 100), {
+          purposeType, purposeId, note: `Paid towards ${productinfo}`,
+        });
+      } catch (e) {
+        if (e.httpStatus) return res.status(e.httpStatus).json({ success: false, message: e.message });
+        throw e;
+      }
+      const payment = await Payment.create({
+        user_id: req.user.id,
+        booking_id: (!combined && booking_id) || null,
+        subscription_id: (!combined && subscription_id) || null,
+        geofence_id: geofence_id || null,
+        amount,
+        wallet_applied: amount,
+        type: combined ? 'order' : (type || 'order'),
+        status: 'success',
+        payment_method: 'wallet',
+        transaction_id: `WALLET-${Date.now()}-${req.user.id}`,
+        payment_for: productinfo,
+        notes
+      });
+      // Fulfill everything this payment covers (same shapes as fulfillPayment).
+      if (combined) {
+        for (const e of fulfill) { if (e && e.type && e.id) await fulfillEntity(e.type, e.id); }
+      } else if (type === 'booking' && booking_id) await fulfillEntity('booking', booking_id);
+      else if (type === 'subscription' && subscription_id) await fulfillEntity('subscription', subscription_id);
+      else if (type === 'order' && order_id) await fulfillEntity('order', order_id);
+      return res.json({
+        success: true,
+        data: { wallet_paid: true, wallet_applied: amount, amount: 0, payment_id: payment.id, description: productinfo }
+      });
+    }
+
     const instance = getRazorpay();
     const rzpOrder = await instance.orders.create({
-      amount: Math.round(amount * 100), // paise
+      amount: Math.round((amount - walletApplied) * 100), // paise — gateway charges the post-wallet remainder
       currency: 'INR',
       receipt: `GKM-${Date.now()}`,
       notes: { user_id: String(req.user.id), type: combined ? 'cart' : (type || 'order') }
@@ -302,6 +408,7 @@ exports.createRazorpayOrder = async (req, res) => {
       subscription_id: (!combined && subscription_id) || null,
       geofence_id: geofence_id || null,
       amount,
+      wallet_applied: walletApplied,
       type: combined ? 'order' : (type || 'order'),
       status: 'pending',
       payment_method: 'razorpay',
@@ -317,6 +424,7 @@ exports.createRazorpayOrder = async (req, res) => {
         order_id: rzpOrder.id,
         amount: rzpOrder.amount,
         currency: rzpOrder.currency,
+        wallet_applied: walletApplied,
         name: 'GharKaMali',
         description: productinfo,
         prefill: { name: user?.name || '', email: user?.email || '', contact: user?.phone || '' }

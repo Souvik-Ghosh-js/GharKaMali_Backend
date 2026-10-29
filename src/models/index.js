@@ -301,6 +301,9 @@ const Payment = sequelize.define('Payment', {
   booking_id: { type: DataTypes.INTEGER },
   subscription_id: { type: DataTypes.INTEGER },
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  // Rupees paid from the customer's wallet; the Razorpay order (if any) covers
+  // amount − wallet_applied. Debited from the wallet ledger at fulfillment.
+  wallet_applied: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
   type: { type: DataTypes.ENUM('booking', 'subscription', 'refund', 'wallet_topup', 'order'), allowNull: false },
   status: { type: DataTypes.ENUM('pending', 'success', 'failed', 'refunded'), defaultValue: 'pending' },
   payment_method: { type: DataTypes.STRING(50) },
@@ -787,6 +790,46 @@ const TipAudit = sequelize.define('TipAudit', {
   reason: { type: DataTypes.TEXT },
 }, { tableName: 'tip_audits', underscored: true });
 
+// ─── WALLET LEDGER (cashback + top-ups, amounts in integer PAISE) ────────────
+// Source of truth for customer wallet money. Each credit is a separate row so
+// cashback can expire independently (expires_at NULL = never expires, e.g.
+// top-ups). Spendable balance = SUM(remaining_paise) of unexpired credits.
+// users.wallet_balance is kept as a display cache, synced by wallet.service.
+const WalletCredit = sequelize.define('WalletCredit', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  type: { type: DataTypes.ENUM('cashback', 'topup', 'refund', 'admin', 'migration'), allowNull: false },
+  amount_paise: { type: DataTypes.INTEGER, allowNull: false },
+  remaining_paise: { type: DataTypes.INTEGER, allowNull: false },
+  source_type: { type: DataTypes.STRING(20) },   // booking | subscription | order | payment
+  source_id: { type: DataTypes.INTEGER },
+  note: { type: DataTypes.STRING(255) },
+  expires_at: { type: DataTypes.DATE },          // NULL = never expires
+}, {
+  tableName: 'wallet_credits',
+  underscored: true,
+  indexes: [
+    { fields: ['user_id', 'expires_at'], name: 'idx_wallet_user_expiry' },
+    // One cashback per paid entity — makes awarding idempotent across retries.
+    { unique: true, fields: ['type', 'source_type', 'source_id'], name: 'uniq_wallet_cashback_source' },
+  ],
+});
+
+// Every spend, logged for the customer-facing history. The actual money is
+// consumed by decrementing remaining_paise on credits (soonest-expiring first).
+const WalletDebit = sequelize.define('WalletDebit', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'users', key: 'id' } },
+  amount_paise: { type: DataTypes.INTEGER, allowNull: false },
+  purpose_type: { type: DataTypes.STRING(20) },  // booking | subscription | order | cart
+  purpose_id: { type: DataTypes.INTEGER },
+  note: { type: DataTypes.STRING(255) },
+}, {
+  tableName: 'wallet_debits',
+  underscored: true,
+  indexes: [{ fields: ['user_id', 'created_at'], name: 'idx_wallet_debit_user' }],
+});
+
 // ─── INVOICE COUNTER (financial-year sequential numbering) ───────────────────
 // One row per financial year ("25-26") holding the last issued sequence. Used to
 // mint GST-compliant sequential invoice numbers like GKM/25-26/000123.
@@ -992,6 +1035,10 @@ TipPayout.hasMany(Tip, { foreignKey: 'payout_id', as: 'allocations' });
 TipPayout.belongsTo(User, { foreignKey: 'gardener_id', as: 'gardener' });
 TipAudit.belongsTo(User, { foreignKey: 'actor_id', as: 'actor' });
 Tip.hasMany(TipAudit, { foreignKey: 'tip_id', as: 'audits' });
+
+// Wallet ledger
+WalletCredit.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+WalletDebit.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 Product.belongsTo(ProductCategory, { foreignKey: 'category_id', as: 'category' });
 ProductCategory.hasMany(Product, { foreignKey: 'category_id', as: 'products' });
@@ -1209,6 +1256,7 @@ module.exports = {
   ContactMessage,
   SystemSetting,
   Tip, TipPayout, TipAudit,
+  WalletCredit, WalletDebit,
   UserAddress,
   GardenerDocument,
   Coupon,

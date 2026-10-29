@@ -248,6 +248,11 @@ exports.gardenerRegister = async (req, res) => {
 // Get profile
 exports.getProfile = async (req, res) => {
   try {
+    // wallet_balance is a cache of the wallet ledger; refresh it here so the
+    // profile never shows money that has expired since the last wallet op.
+    if (req.user.role === 'customer') {
+      try { await require('../services/wallet.service').syncBalanceCache(req.user.id); } catch (_) { /* display-only */ }
+    }
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password', 'otp', 'otp_expires_at'] },
       include: [

@@ -767,6 +767,15 @@ router.post('/admin/payouts/:id/confirm-paid', authenticate, authorize('admin'),
 router.post('/admin/payouts/:id/cancel', authenticate, authorize('admin'), tipCtrl.adminCancelPayout);
 router.post('/admin/payouts/:id/fail', authenticate, authorize('admin'), tipCtrl.adminFailPayout);
 
+// ── CUSTOMER WALLET (cashback + top-ups — ledger in wallet.service) ───────────
+const walletCtrl = require('../controllers/wallet.controller');
+router.get('/wallet/offers', walletCtrl.getOffers); // public: cashback tiers for banners
+router.get('/wallet', authenticate, authorize('customer'), walletCtrl.getMyWallet);
+router.get('/admin/wallet/summary', authenticate, authorize('admin', 'supervisor'), walletCtrl.adminSummary);
+router.get('/admin/wallet/config', authenticate, authorize('admin'), walletCtrl.adminGetConfig);
+router.put('/admin/wallet/config', authenticate, authorize('admin'), walletCtrl.adminSaveConfig);
+router.post('/admin/wallet/credit', authenticate, authorize('admin'), walletCtrl.adminCredit);
+
 // ── ON-DEMAND PLANT-COUNT PRICING SLABS ──────────────────────────────────────
 // Public: website + app read the slab table to price the visit the same way
 // the server will. Base price covers up to base_covers plants; the matching

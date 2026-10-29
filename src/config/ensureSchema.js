@@ -63,6 +63,18 @@ const STATEMENTS = [
   "ALTER TABLE bookings ADD COLUMN checkout_latitude DECIMAL(10,8) NULL",
   "ALTER TABLE bookings ADD COLUMN checkout_longitude DECIMAL(11,8) NULL",
   "ALTER TABLE bookings ADD COLUMN checkin_distance_m INT NULL",
+  // Wallet ledger: rupees paid out of the wallet on a split (wallet + Razorpay)
+  // payment — debited from wallet_credits at fulfillment.
+  "ALTER TABLE payments ADD COLUMN wallet_applied DECIMAL(10,2) NOT NULL DEFAULT 0",
+  // One-time carry-over of the old flat users.wallet_balance into the ledger as
+  // a never-expiring credit. Idempotent: skips anyone who already has ledger
+  // rows (wallet_balance stays in place — it is now a display cache the wallet
+  // service keeps in sync with the ledger).
+  `INSERT INTO wallet_credits (user_id, type, amount_paise, remaining_paise, note, created_at, updated_at)
+   SELECT u.id, 'migration', ROUND(u.wallet_balance * 100), ROUND(u.wallet_balance * 100), 'Existing wallet balance carried over', NOW(), NOW()
+   FROM users u
+   WHERE u.wallet_balance > 0
+     AND NOT EXISTS (SELECT 1 FROM wallet_credits wc WHERE wc.user_id = u.id)`,
 ];
 
 const IGNORABLE = new Set(['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY']);
