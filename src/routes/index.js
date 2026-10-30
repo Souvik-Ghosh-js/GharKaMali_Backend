@@ -408,7 +408,7 @@ const invoiceHandler = (type) => async (req, res) => {
     await streamInvoice(type, req.params.id, res);
   } catch (err) {
     // Only send JSON if nothing has been streamed yet (PDF sets headers early).
-    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
+    if (!res.headersSent) res.status(err.statusCode || 500).json({ success: false, message: err.message });
     else res.end();
   }
 };
@@ -439,7 +439,7 @@ const ownedInvoiceHandler = (type, model, ownerField = 'customer_id') => async (
     }
     await streamInvoice(type, req.params.id, res);
   } catch (err) {
-    if (!res.headersSent) res.status(500).json({ success: false, message: err.message });
+    if (!res.headersSent) res.status(err.statusCode || 500).json({ success: false, message: err.message });
     else res.end();
   }
 };
@@ -1044,7 +1044,7 @@ router.get('/admin/payments/:id/invoice', authenticate, authorize('admin', 'supe
     if (!target) return res.status(404).json({ success: false, message: 'No invoice is linked to this payment (e.g. a wallet top-up or refund)' });
     const { streamInvoice } = require('../services/invoice.service');
     await streamInvoice(target.type, target.id, res);
-  } catch (err) { if (!res.headersSent) res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { if (!res.headersSent) res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 router.get('/admin/payments', authenticate, authorize('admin'), paymentCtrl.getAllPayments);

@@ -131,6 +131,13 @@ async function fulfillEntity(type, id) {
   else if (type === 'subscription') await Subscription.update({ status: 'active' }, { where: { id } });
   else if (type === 'order') await Order.update({ payment_status: 'paid', status: 'processing' }, { where: { id } });
 
+  // Mint the GST invoice number NOW that the money is real. Online entities are
+  // created unpaid and deliberately skip mint-at-creation, so the sequence
+  // number is only ever consumed by a successful payment. Best-effort: the
+  // guarded download path re-mints if this hiccups.
+  try { await require('../services/invoiceNumber.service').getOrCreateInvoiceIssue(type, id); }
+  catch (e) { console.error(`[invoiceNumber] mint at fulfilment failed (${type} ${id}):`, e.message); }
+
   // Report the confirmed payment to finance (best-effort, never blocks fulfilment).
   notifyFinanceOfEntity(type, id);
   // Tiered wallet cashback on the entity's full value (idempotent, best-effort).

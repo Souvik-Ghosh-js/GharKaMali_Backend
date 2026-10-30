@@ -17,13 +17,19 @@ const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const {
   Booking, Subscription, Order, OrderItem, Product, ProductCategory, User,
-  ServicePlan, Geofence, BookingAddOn, AddOnService, ManualInvoice,
+  ServicePlan, Geofence, BookingAddOn, AddOnService, ManualInvoice, Payment,
 } = require('../models');
 const {
   COMPANY, BANK, TERMS, FOOTER_BADGES, SERVICE_SAC, LANDSCAPE_SAC, hsnForProduct,
   placeOfSupply, amountInWords,
 } = require('../config/invoice.config');
 const { getOrCreateInvoiceIssue } = require('./invoiceNumber.service');
+
+// Thrown when an invoice is requested for an entity whose money was never
+// received. The request itself is fine — the paperwork just must not exist:
+// minting a GST invoice (and consuming a sequence number) for an unpaid or
+// failed online checkout is a tax-compliance problem. Routes surface statusCode.
+const invoiceNotReady = (message) => Object.assign(new Error(message), { statusCode: 409 });
 
 const ASSETS = path.join(__dirname, '..', 'assets');
 const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
@@ -132,6 +138,14 @@ async function buildBookingInvoice(id) {
   });
   if (!b) return null;
 
+  // Online bookings are created BEFORE the Razorpay payment, so a pending or
+  // failed checkout must never yield a tax invoice. Offline walk-in bookings
+  // (linked to a ManualInvoice) may deliberately print a PENDING invoice.
+  if (b.payment_status !== 'paid' && b.payment_status !== 'refunded') {
+    const offline = await ManualInvoice.findOne({ where: { booking_id: b.id }, attributes: ['id'] });
+    if (!offline) throw invoiceNotReady('No invoice yet — this booking has not been paid.');
+  }
+
   const c = b.customer;
   const state = c?.state || b.geofenceRef?.state || '';
   const intra = isIntraState(b.service_address, state, b.geofenceRef?.city);
@@ -225,6 +239,20 @@ async function buildSubscriptionInvoice(id) {
   });
   if (!s) return null;
 
+  // Online subscriptions start 'pending' and are activated only when Razorpay
+  // confirms the payment — no invoice until then. A 'cancelled' sub only gets
+  // an invoice if it was actually paid at some point (or is offline paperwork).
+  if (s.status === 'pending') throw invoiceNotReady('No invoice yet — this subscription has not been paid.');
+  if (s.status === 'cancelled') {
+    const paidOnce = await Payment.findOne({
+      where: { subscription_id: s.id, status: ['success', 'refunded'] }, attributes: ['id'],
+    });
+    if (!paidOnce) {
+      const offline = await ManualInvoice.findOne({ where: { subscription_id: s.id }, attributes: ['id'] });
+      if (!offline) throw invoiceNotReady('No invoice — this subscription was never paid.');
+    }
+  }
+
   const c = s.customer;
   const state = c?.state || '';
   const intra = isIntraState(s.service_address, state);
@@ -293,6 +321,15 @@ async function buildOrderInvoice(id) {
     ],
   });
   if (!o) return null;
+
+  // COD orders legitimately carry a pending payment (the invoice travels with
+  // the delivery); online (razorpay) orders must actually be paid first.
+  if (o.payment_status !== 'paid' && o.payment_status !== 'refunded') {
+    const isOnline = String(o.payment_method || '').toLowerCase() === 'razorpay';
+    if (isOnline || o.payment_status === 'failed' || o.status === 'cancelled') {
+      throw invoiceNotReady('No invoice yet — this order has not been paid.');
+    }
+  }
 
   const c = o.customer;
   const intra = isIntraState(o.shipping_state, o.shipping_city, o.shipping_address);

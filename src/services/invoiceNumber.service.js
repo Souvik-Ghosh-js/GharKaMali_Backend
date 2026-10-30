@@ -92,19 +92,31 @@ async function getOrCreateInvoiceNumber(entityType, entityId) {
   return issue.number;
 }
 
-// ── Mint at creation ─────────────────────────────────────────────────────────
-// Every invoice-able entity gets its number the moment it is created, so the
-// number series follows booking/payment order. Runs AFTER COMMIT (a rolled-back
-// booking must never consume a sequence number) and is best-effort: a minting
-// hiccup must never fail the booking itself — the download path re-mints.
+// ── Mint at creation (only when the money is already certain) ────────────────
+// A GST sequence number must never be consumed by an online checkout whose
+// payment later fails or is abandoned — those entities are created BEFORE the
+// Razorpay payment. So minting at creation happens only for entities born paid:
+//   • Booking       — wallet-paid / admin-created already-paid bookings
+//   • Order         — paid at creation, or COD (invoice travels with delivery)
+//   • Subscription  — created active (offline/admin); online subs start 'pending'
+//   • ManualInvoice — always (deliberate offline paperwork, own OFF series)
+// Everything created unpaid gets its number at payment fulfilment (see
+// fulfillEntity in payment.controller) or, as a fallback, at first download —
+// which is itself guarded so unpaid entities can't reach it.
+// Runs AFTER COMMIT (a rolled-back row must never consume a number) and is
+// best-effort: a minting hiccup must never fail the booking itself.
 const mint = (entityType, id) => {
   getOrCreateInvoiceIssue(entityType, id).catch((e) =>
     console.error(`[invoiceNumber] mint on create failed (${entityType} ${id}):`, e.message));
 };
-for (const [Model, entityType] of [
-  [Booking, 'booking'], [Order, 'order'], [Subscription, 'subscription'], [ManualInvoice, 'manual'],
+for (const [Model, entityType, bornPaid] of [
+  [Booking, 'booking', (r) => r.payment_status === 'paid'],
+  [Order, 'order', (r) => r.payment_status === 'paid' || String(r.payment_method || '').toLowerCase() !== 'razorpay'],
+  [Subscription, 'subscription', (r) => r.status === 'active'],
+  [ManualInvoice, 'manual', () => true],
 ]) {
   Model.afterCreate((row, options) => {
+    if (!bornPaid(row)) return;
     if (options && options.transaction) options.transaction.afterCommit(() => mint(entityType, row.id));
     else mint(entityType, row.id);
   });
