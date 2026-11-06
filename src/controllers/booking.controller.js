@@ -103,6 +103,18 @@ exports.checkAvailability = async (req, res) => {
     const { date, gardener_id, geofence_id } = req.query;
     if (!date) return res.status(400).json({ success: false, message: 'Date is required' });
 
+    // Admin-blocked day: no slots, and tell the clients why. `data` is an
+    // object here (normally an array) — deployed clients fall back to their
+    // "no slots" state on it, updated clients read `blocked`/`message`.
+    const blockedDates = require('../services/blockedDates.service');
+    const blockedDay = await blockedDates.isDateBlocked(date);
+    if (blockedDay) {
+      return res.json({
+        success: true,
+        data: { slots: [], blocked: true, message: blockedDates.blockedMessage(blockedDay) },
+      });
+    }
+
     // Check if any gardeners are assigned to this zone at all
     let noGardenersInZone = false;
     if (geofence_id && !gardener_id) {
@@ -258,6 +270,15 @@ exports.createBooking = async (req, res) => {
 
     // (Wallet balance is checked authoritatively inside the transaction below,
     //  against the full GST-inclusive total with the user row locked.)
+
+    // Admin-blocked day: refuse even if an (old) client offered the date.
+    {
+      const blockedDates = require('../services/blockedDates.service');
+      const blockedDay = await blockedDates.isDateBlocked(req.body.scheduled_date);
+      if (blockedDay) {
+        return res.status(400).json({ success: false, message: blockedDates.blockedMessage(blockedDay) });
+      }
+    }
 
     // Calculate addon total before creating booking
     const { addons } = req.body;

@@ -1272,6 +1272,20 @@ router.get('/bookings/:id/addons', authenticate, async (req, res) => {
 });
 
 // Admin: manage add-ons catalog
+// ── ADMIN: BLOCKED BOOKING DATES (close new bookings on chosen days) ──────────
+const blockedDatesService = require('../services/blockedDates.service');
+router.get('/admin/blocked-dates', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try { res.json({ success: true, data: await blockedDatesService.getBlockedDates() }); }
+  catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.put('/admin/blocked-dates', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    // Body: { dates: [{ date: 'YYYY-MM-DD', reason? }] } — the full list; the
+    // service dedupes, validates and sorts. Malformed entries are dropped.
+    res.json({ success: true, data: await blockedDatesService.saveBlockedDates(req.body && req.body.dates) });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/addons', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { AddOnService } = require('../models');

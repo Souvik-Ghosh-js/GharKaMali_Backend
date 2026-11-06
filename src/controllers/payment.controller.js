@@ -33,7 +33,14 @@ exports.rescheduleBooking = async (req, res) => {
     const { booking_id, new_date, new_time } = req.body;
     const booking = await Booking.findOne({ where: { id: booking_id, customer_id: req.user.id } });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    
+
+    // Admin-blocked day: rescheduling onto it is closed too.
+    const blockedDates = require('../services/blockedDates.service');
+    const blockedDay = await blockedDates.isDateBlocked(new_date);
+    if (blockedDay) {
+      return res.status(400).json({ success: false, message: blockedDates.blockedMessage(blockedDay) });
+    }
+
     await booking.update({ scheduled_date: new_date, scheduled_time: new_time });
     res.json({ success: true, message: 'Booking rescheduled successfully' });
   } catch (err) {
