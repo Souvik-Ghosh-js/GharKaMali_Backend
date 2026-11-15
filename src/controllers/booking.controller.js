@@ -208,7 +208,7 @@ exports.createBooking = async (req, res) => {
       service_address, service_latitude, service_longitude,
       flat_no, building, area, landmark, city, state, pincode,
       plant_count, plan_id, customer_notes, preferred_gardener_id, payment_method,
-      is_instant, coupon_code
+      is_instant, coupon_code, vermicompost_kg, expected_total
     } = req.body;
 
     // Instant booking — server-side computes the slot. The client cannot pick
@@ -236,37 +236,25 @@ exports.createBooking = async (req, res) => {
     });
 
     const activeZoneId = geofence_id || zone_id;
-    // Use Geofence for pricing if available
-    const zone = await Geofence.findByPk(activeZoneId);
-    if (!zone) return res.status(404).json({ success: false, message: 'Service zone not found' });
-
-    // The chosen plan defines how many plants are COVERED (max_plants). Anything
-    // the customer adds on top is "extra plants" billed at ₹25 each.
-    const plan = plan_id ? await ServicePlan.findByPk(plan_id) : null;
-    const coveredPlants = plan ? (parseInt(plan.max_plants) || 0) : 0;
-
-    const extraCount = parseInt(plant_count) || 0; // additional plants beyond plan coverage (optional)
-    const pCount = extraCount; // pricing uses the extra plants only
-    // Total plants serviced = plan coverage + extras (falls back to extras if no plan).
-    const totalPlants = (coveredPlants + extraCount) || extraCount || 1;
-    const minPlants = zone.min_plants || 1;
-    const basePrice = parseFloat(zone.base_price) || 0;
-    const surge = parseFloat(zone.surge_multiplier) || 1.0;
-
-    // Pricing model: the zone base price covers up to 10 plants; the plant
-    // count's SLAB surcharge (admin-configurable) is added on top. Exact slab
-    // price only — never per-plant, interpolated or rounded. Beyond the last
-    // slab there is no auto price: the customer must request a custom quote.
-    const { getPlantSlabs, plantSurcharge, maxAutoPlants } = require('../config/plantSlabs');
-    const slabs = await getPlantSlabs();
-    const surcharge = plantSurcharge(pCount, slabs);
-    if (surcharge === null) {
-      return res.status(400).json({
-        success: false,
-        message: `For more than ${maxAutoPlants(slabs)} plants we prepare a custom quote — please contact us on WhatsApp at +91 96437 01701.`,
-      });
+    // The service zone (resolved from the address's map location) decides the
+    // price list. An unknown or switched-off zone never borrows another
+    // zone's prices.
+    const zone = activeZoneId ? await Geofence.findByPk(activeZoneId) : null;
+    if (!zone || !zone.is_active) {
+      return res.status(404).json({ success: false, code: 'ZONE_NOT_SERVICEABLE', message: "We don't serve this address yet. Please choose a supported service area or contact support." });
     }
-    const baseAmount = basePrice + surcharge;
+    const surge = parseFloat(zone.surge_multiplier) || 1.0; // logged only (not a price input)
+
+    // ── One-time service pricing (services/oneTimePricing.js) ────────────────
+    // plant_count is the EXACT number of plants (minimum 10 — older clients
+    // send 0 for "up to 10", which prices as 10). Zone base price covers the
+    // first 10; each interval's per-plant rate applies only to the plants in
+    // that interval; rounded to the nearest rupee once. Vermicompost and
+    // admin surcharges are separate lines. The server is authoritative.
+    const pricingEngine = require('../services/oneTimePricing');
+    const zonePricing = pricingEngine.zonePricing(zone);
+    const totalPlants = Math.max(pricingEngine.MIN_PLANTS, parseInt(plant_count) || 0);
+    const serviceDate = scheduled_date || pricingEngine.todayIST();
 
     // (Wallet balance is checked authoritatively inside the transaction below,
     //  against the full GST-inclusive total with the user row locked.)
@@ -295,11 +283,35 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    // 18% GST is added on top of every booking (base + add-ons). total_amount is
-    // GST-inclusive; the tax invoice derives the tax split from it (total / 1.18).
-    const GST_RATE = 0.18;
-    const preGstBase = baseAmount + addonTotal;
-    let grandTotal = Math.round(preGstBase * (1 + GST_RATE) * 100) / 100;
+    let quote;
+    try {
+      quote = pricingEngine.buildQuote({
+        pricing: zonePricing,
+        plantCount: totalPlants,
+        vermicompostKg: vermicompost_kg,
+        surcharges: await pricingEngine.getActiveSurcharges(),
+        date: serviceDate,
+        addonTotal,
+      });
+    } catch (e) {
+      if (e.httpStatus) return res.status(e.httpStatus).json({ success: false, message: e.message });
+      throw e;
+    }
+    if (!quote.ok) {
+      return res.status(400).json({
+        success: false,
+        code: 'CUSTOM_QUOTE',
+        max_plants: quote.max_plants,
+        message: `For more than ${quote.max_plants} plants we prepare a custom quote — please contact us on WhatsApp at +91 96437 01701.`,
+      });
+    }
+    const baseAmount = quote.service.amount; // gardening service charge (pre-GST)
+
+    // 18% GST is added on top of every booking (service + vermicompost +
+    // add-ons + surcharges). total_amount is GST-inclusive; the tax invoice
+    // derives the tax split from it.
+    const preGstBase = quote.subtotal;
+    let grandTotal = quote.total;
 
     // ── Discount coupon (scope 'booking') ───────────────────────────────────
     // Validated against the pre-GST base (min-order + percentage math), then
@@ -316,6 +328,20 @@ exports.createBooking = async (req, res) => {
       discountAmount = result.discount;
       appliedCoupon = result.coupon;
       grandTotal = Math.max(0, Math.round((grandTotal - discountAmount) * 100) / 100);
+    }
+
+    // The customer must see the final amount before paying. Current website /
+    // app builds send the total they displayed; if prices changed meanwhile
+    // (zone switch, new surcharge, rate update) refuse with the fresh quote so
+    // they can review it. (Older builds don't send expected_total.)
+    if (expected_total !== undefined && expected_total !== null && expected_total !== '' &&
+        Math.abs(Number(expected_total) - grandTotal) > 1) {
+      return res.status(409).json({
+        success: false,
+        code: 'PRICE_CHANGED',
+        message: `The price for this visit has been updated to ₹${grandTotal.toFixed(0)}. Please review the new total and confirm again.`,
+        data: { ...quote, discount_amount: discountAmount, total: grandTotal },
+      });
     }
 
     // ── Gardener assignment + booking creation are done inside a single DB
@@ -434,9 +460,14 @@ exports.createBooking = async (req, res) => {
           service_address,
           service_latitude,
           service_longitude,
-          plant_count: totalPlants,   // total plants serviced (plan coverage + extras)
-          extra_plants: extraCount,   // additional plants the customer added (₹25 each)
-          base_amount: baseAmount,
+          plant_count: totalPlants,   // exact plants to be serviced (min 10)
+          extra_plants: 0,            // set later only if the gardener finds more plants at the visit
+          base_amount: baseAmount,    // gardening service charge (pre-GST)
+          vermicompost_kg: quote.vermicompost ? quote.vermicompost.kg : null,
+          vermicompost_amount: quote.vermicompost ? quote.vermicompost.amount : 0,
+          surcharge_amount: quote.surcharge_total,
+          surcharge_details: quote.surcharges.length ? quote.surcharges : null,
+          pricing_snapshot: pricingEngine.pricingSnapshot(zonePricing, quote),
           total_amount: grandTotal,
           coupon_code: appliedCoupon ? appliedCoupon.code : null,
           discount_amount: discountAmount,
@@ -540,7 +571,20 @@ exports.createBooking = async (req, res) => {
       });
     }
 
-    res.status(201).json({ success: true, message: 'Booking created', data: booking });
+    const out = booking.get({ plain: true });
+    out.price_breakdown = {
+      plants: quote.plants,
+      service_amount: quote.service.amount,
+      vermicompost: quote.vermicompost,
+      addon_total: quote.addon_total,
+      surcharges: quote.surcharges,
+      surcharge_total: quote.surcharge_total,
+      subtotal: quote.subtotal,
+      gst_amount: quote.gst_amount,
+      discount_amount: discountAmount,
+      total: grandTotal,
+    };
+    res.status(201).json({ success: true, message: 'Booking created', data: out });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -841,17 +885,21 @@ exports.updateBookingStatus = async (req, res) => {
       }
 
       if (extra_plants > 0) {
-        // Extra plants found at the visit are billed by the same slab table as
-        // booking: charge the DIFFERENCE between the slab for the new total
-        // plant count and the slab already paid for. Beyond the last slab the
-        // last slab's amount applies (an in-progress visit can't be refused).
-        const { getPlantSlabs, plantSurcharge } = require('../config/plantSlabs');
-        const slabs = await getPlantSlabs();
-        const lastExtra = slabs.length ? Number(slabs[slabs.length - 1].extra) || 0 : 0;
-        const sur = (n) => { const v = plantSurcharge(n, slabs); return v === null ? lastExtra : v; };
-        const booked = parseInt(booking.plant_count) || 0;
-        const extraAmt = Math.max(0, sur(booked + extra_plants) - sur(booked));
-        updates.extra_plants = extra_plants;
+        // Extra plants found at the visit are billed progressively with the
+        // SAME rates the customer was quoted (the booking's pricing snapshot;
+        // the zone's current table for older bookings): the difference between
+        // the service charge for the new total and for the plants booked.
+        // Past the last interval its rate continues (a visit can't be refused).
+        const pricingEngine = require('../services/oneTimePricing');
+        const snap = pricingEngine.parseJson(booking.pricing_snapshot);
+        const zoneRow = snap ? null : await Geofence.findByPk(booking.geofence_id || booking.zone_id);
+        const rates = snap ? pricingEngine.zonePricing({ id: snap.zone_id, base_price: snap.base_price, plant_rate_intervals: snap.intervals })
+                           : pricingEngine.zonePricing(zoneRow || {});
+        const charge = (n) => pricingEngine.serviceCharge(n, rates, { extendBeyondMax: true }).amount;
+        const booked = Math.max(pricingEngine.MIN_PLANTS, parseInt(booking.plant_count) || 0);
+        const found = parseInt(extra_plants, 10) || 0; // multipart sends strings
+        const extraAmt = Math.max(0, charge(booked + found) - charge(booked));
+        updates.extra_plants = found;
         updates.extra_amount = extraAmt;
         updates.total_amount = parseFloat(booking.total_amount) + extraAmt;
       }

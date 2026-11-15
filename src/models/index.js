@@ -166,6 +166,13 @@ const Booking = sequelize.define('Booking', {
   base_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   extra_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   total_amount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  // One-time pricing line items, frozen at checkout (pre-GST). base_amount is
+  // the gardening service charge; these sit beside it as separate lines.
+  vermicompost_kg: { type: DataTypes.INTEGER, allowNull: true },
+  vermicompost_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+  surcharge_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+  surcharge_details: { type: DataTypes.JSON, allowNull: true },  // [{id,name,reason,type,value,basis,amount}]
+  pricing_snapshot: { type: DataTypes.JSON, allowNull: true },   // zone rates used for this booking
   // Coupon applied at booking. total_amount is stored POST-discount.
   coupon_code: { type: DataTypes.STRING(40) },
   discount_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
@@ -457,10 +464,14 @@ const Geofence = sequelize.define('Geofence', {
   // JSON string: array of [lat, lng] pairs forming the polygon
   polygon_coords: { type: DataTypes.TEXT('long'), allowNull: false },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
-  // Pricing (replaces ServiceZone pricing). Per-plant pricing is RETIRED —
-  // plant counts are priced by the admin-configurable slab table
-  // (config/plantSlabs.js); the old price_per_plant DB column sits unused.
+  // One-time service pricing (services/oneTimePricing.js): base_price covers
+  // the first 10 plants; plant_rate_intervals adds a progressive per-plant
+  // rate for each quantity interval on top of it; vermicompost_prices holds
+  // this zone's 1/5/10 kg add-on prices. NULL tables fall back to the spec
+  // defaults. The old price_per_plant DB column sits unused.
   base_price: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  plant_rate_intervals: { type: DataTypes.JSON, allowNull: true },
+  vermicompost_prices: { type: DataTypes.JSON, allowNull: true },
   min_plants: { type: DataTypes.INTEGER, defaultValue: 1 },
   product_markup: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   surge_multiplier: { type: DataTypes.DECIMAL(4, 2), defaultValue: 1.00 },
@@ -750,6 +761,40 @@ const GardenerDocument = sequelize.define('GardenerDocument', {
 }, { tableName: 'gardener_documents', underscored: true });
 
 // ─── SYSTEM SETTING ───────────────────────────────────────────────────────────
+// ─── ONE-TIME SERVICE SURCHARGES (admin rules) ───────────────────────────────
+// Applied automatically to one-time bookings in the matching zones while
+// active and (optionally) within the visit-date window. Shown to the customer
+// as its own line item; stored on the booking in surcharge_details.
+const Surcharge = sequelize.define('Surcharge', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING(100), allowNull: false },
+  reason: { type: DataTypes.STRING(255) },
+  type: { type: DataTypes.ENUM('fixed', 'percentage'), allowNull: false, defaultValue: 'fixed' },
+  value: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  zone_scope: { type: DataTypes.ENUM('all', 'selected'), allowNull: false, defaultValue: 'all' },
+  zone_ids: { type: DataTypes.JSON, allowNull: true },
+  starts_on: { type: DataTypes.DATEONLY, allowNull: true },
+  ends_on: { type: DataTypes.DATEONLY, allowNull: true },
+  is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+  created_by: { type: DataTypes.INTEGER },
+  updated_by: { type: DataTypes.INTEGER },
+}, { tableName: 'surcharges', underscored: true });
+
+// Append-only history of pricing changes: zone rates/base/vermicompost and
+// surcharges — who changed what, and when.
+const PricingAudit = sequelize.define('PricingAudit', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  entity_type: { type: DataTypes.STRING(30), allowNull: false },   // zone_pricing | surcharge
+  entity_id: { type: DataTypes.INTEGER },
+  zone_id: { type: DataTypes.INTEGER },
+  action: { type: DataTypes.STRING(30), allowNull: false },        // seed | update | copy | create | delete | enable | disable
+  before_value: { type: DataTypes.JSON },
+  after_value: { type: DataTypes.JSON },
+  note: { type: DataTypes.STRING(255) },
+  actor_id: { type: DataTypes.INTEGER },
+}, { tableName: 'pricing_audits', underscored: true, indexes: [{ fields: ['entity_type', 'entity_id'] }, { fields: ['zone_id'] }] });
+PricingAudit.belongsTo(User, { foreignKey: 'actor_id', as: 'actor', constraints: false });
+
 const SystemSetting = sequelize.define('SystemSetting', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   key: { type: DataTypes.STRING(100), allowNull: false, unique: true },
@@ -1255,6 +1300,8 @@ module.exports = {
   ProductZonePrice,
   ContactMessage,
   SystemSetting,
+  Surcharge,
+  PricingAudit,
   Tip, TipPayout, TipAudit,
   WalletCredit, WalletDebit,
   UserAddress,

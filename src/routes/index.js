@@ -776,35 +776,24 @@ router.get('/admin/wallet/config', authenticate, authorize('admin'), walletCtrl.
 router.put('/admin/wallet/config', authenticate, authorize('admin'), walletCtrl.adminSaveConfig);
 router.post('/admin/wallet/credit', authenticate, authorize('admin'), walletCtrl.adminCredit);
 
-// ── ON-DEMAND PLANT-COUNT PRICING SLABS ──────────────────────────────────────
-// Public: website + app read the slab table to price the visit the same way
-// the server will. Base price covers up to base_covers plants; the matching
-// slab's extra is ADDED to the zone base; beyond max_auto_plants → custom quote.
-router.get('/pricing/plant-slabs', async (req, res) => {
-  try {
-    const { getPlantSlabs, BASE_COVERS, maxAutoPlants } = require('../config/plantSlabs');
-    const slabs = await getPlantSlabs();
-    res.json({ success: true, data: { base_covers: BASE_COVERS, max_auto_plants: maxAutoPlants(slabs), slabs } });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
-
-// Admin: edit the slab table (continuous ranges starting at base_covers + 1).
-router.put('/admin/pricing/plant-slabs', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { validateSlabs, SETTING_KEY, invalidatePlantSlabCache } = require('../config/plantSlabs');
-    const { SystemSetting } = require('../models');
-    const slabs = (req.body?.slabs || []).map((s) => ({
-      min: parseInt(s.min), max: parseInt(s.max), extra: Number(s.extra),
-    }));
-    const err = validateSlabs(slabs);
-    if (err) return res.status(400).json({ success: false, message: err });
-    const value = JSON.stringify(slabs);
-    const [row] = await SystemSetting.findOrCreate({ where: { key: SETTING_KEY }, defaults: { value } });
-    if (row.value !== value) await row.update({ value });
-    invalidatePlantSlabCache();
-    res.json({ success: true, message: 'Plant pricing slabs saved', data: { slabs } });
-  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
-});
+// ── ONE-TIME SERVICE PRICING (Word spec, Nov 2026) ───────────────────────────
+// Zone base price covers the first 10 plants; each quantity interval adds its
+// per-plant rate only for the plants inside it (progressive). Vermicompost
+// add-on and admin surcharges are separate line items. See
+// services/oneTimePricing.js — the server always recomputes the final amount.
+const pricingCtrl = require('../controllers/pricing.controller');
+router.get('/pricing/one-time', pricingCtrl.getOneTimePricing);
+router.post('/pricing/one-time/quote', pricingCtrl.quoteOneTime);
+// Legacy: app builds released before progressive pricing read this table.
+router.get('/pricing/plant-slabs', pricingCtrl.legacyPlantSlabs);
+router.get('/admin/pricing/one-time/zones', authenticate, authorize('admin'), pricingCtrl.listZonePricing);
+router.put('/admin/pricing/one-time/zones/:id', authenticate, authorize('admin'), pricingCtrl.updateZonePricing);
+router.post('/admin/pricing/one-time/vermicompost/apply-all', authenticate, authorize('admin'), pricingCtrl.applyVermicompostToZones);
+router.get('/admin/pricing/audit', authenticate, authorize('admin'), pricingCtrl.getPricingAudit);
+router.get('/admin/surcharges', authenticate, authorize('admin'), pricingCtrl.listSurcharges);
+router.post('/admin/surcharges', authenticate, authorize('admin'), pricingCtrl.createSurcharge);
+router.put('/admin/surcharges/:id', authenticate, authorize('admin'), pricingCtrl.updateSurcharge);
+router.delete('/admin/surcharges/:id', authenticate, authorize('admin'), pricingCtrl.deleteSurcharge);
 
 // Browser-runnable ONE-TIME wipe of ALL manual invoices (no shell access).
 // Deletes every manual_invoices row + its issued OFF number and resets the OFF

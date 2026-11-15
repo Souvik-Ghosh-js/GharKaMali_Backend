@@ -1095,7 +1095,15 @@ exports.createGeofence = async (req, res) => {
       visit_minutes: parseInt(visit_minutes) || 60,
       time_addon_minutes: parseInt(time_addon_minutes) || 30,
       time_addon_price: parseFloat(time_addon_price) || 0,
+      // New zones start on the approved one-time per-plant rates and
+      // vermicompost prices; edit them on the zone's pricing panel.
+      plant_rate_intervals: require('../services/oneTimePricing').DEFAULT_INTERVALS,
+      vermicompost_prices: require('../services/oneTimePricing').DEFAULT_VERMICOMPOST,
       created_by: req.user.id
+    });
+    require('../services/oneTimePricing').logPricingAudit({
+      entity_type: 'zone_pricing', entity_id: geofence.id, zone_id: geofence.id, action: 'create',
+      after: { base_price: Number(geofence.base_price) }, actor_id: req.user.id, note: 'Zone created with the default one-time rates',
     });
     res.status(201).json({ success: true, data: geofence });
   } catch (err) {
@@ -1123,7 +1131,15 @@ exports.updateGeofence = async (req, res) => {
     if (polygon_coords && Array.isArray(polygon_coords) && polygon_coords.length >= 3) {
       updates.polygon_coords = JSON.stringify(polygon_coords);
     }
+    const oldBase = Number(geofence.base_price) || 0;
     await geofence.update(updates);
+    if (updates.base_price !== undefined && updates.base_price !== oldBase) {
+      await require('../services/oneTimePricing').logPricingAudit({
+        entity_type: 'zone_pricing', entity_id: geofence.id, zone_id: geofence.id, action: 'update',
+        before: { base_price: oldBase }, after: { base_price: updates.base_price },
+        actor_id: req.user.id, note: 'Base price changed from the zone settings',
+      });
+    }
     res.json({ success: true, data: geofence });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -158,6 +158,13 @@ async function buildBookingInvoice(id) {
   const base = Number(b.base_amount) || paid;
   const addonsSum = (b.addons || []).reduce(
     (s, a) => s + (Number(a.price) || Number(a.addon?.price) || 0) * (a.quantity || 1), 0);
+  // One-time pricing extras, stored pre-GST as their own lines.
+  const vermiAmt = Number(b.vermicompost_amount) || 0;
+  let surchargeLines = b.surcharge_details;
+  if (typeof surchargeLines === 'string') { try { surchargeLines = JSON.parse(surchargeLines); } catch { surchargeLines = null; } }
+  surchargeLines = Array.isArray(surchargeLines) ? surchargeLines : [];
+  const surchargeSum = Number(b.surcharge_amount) || surchargeLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const extrasSum = addonsSum + vermiAmt + surchargeSum;
 
   // Bookings created by the current flows store base_amount / add-on prices
   // EXCLUSIVE of GST and total_amount INCLUSIVE (total = (base + addons) × 1.18).
@@ -166,13 +173,26 @@ async function buildBookingInvoice(id) {
   // GST was never added have total == base + addons — for those the stored
   // amounts ARE what the customer paid, so keep them GST-inclusive.
   const gstAddedOnTop = paid > 0 &&
-    Math.abs((base + addonsSum) * 1.18 - paid) <= Math.abs((base + addonsSum) - paid);
+    Math.abs((base + extrasSum) * 1.18 - paid) <= Math.abs((base + extrasSum) - paid);
 
   const inputs = [{
-    description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : ''}`,
+    description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : (b.plant_count ? ` (${b.plant_count} Plants)` : '')}`,
     hsn: SERVICE_SAC, qty: 1, unit: plan ? 'Plan' : 'Visit',
     unitPrice: base, gstRate: 18,
   }];
+  if (vermiAmt > 0) {
+    inputs.push({
+      description: `Vermicompost${b.vermicompost_kg ? ` (${b.vermicompost_kg} kg)` : ''}`, hsn: SERVICE_SAC,
+      qty: 1, unit: 'Pack', unitPrice: vermiAmt, gstRate: 18,
+    });
+  }
+  for (const s of surchargeLines) {
+    if (!(Number(s.amount) > 0)) continue;
+    inputs.push({
+      description: `Surcharge: ${s.name || 'Service surcharge'}${s.type === 'percentage' ? ` (${Number(s.value)}% of service)` : ''}`,
+      hsn: SERVICE_SAC, qty: 1, unit: 'Nos', unitPrice: Number(s.amount), gstRate: 18,
+    });
+  }
   for (const a of (b.addons || [])) {
     inputs.push({
       description: a.addon?.name || 'Add-on', hsn: SERVICE_SAC,

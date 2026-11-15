@@ -183,6 +183,7 @@ exports.createManualInvoice = async (req, res) => {
     gst_rate,                            // optional service GST slab (0/5/12/18/28; default 18)
     tax_type = 'auto',                   // auto | cgst_sgst | igst — how to split the GST
     addon_ids,                           // on-demand only: AddOnService ids billed as extra lines
+    vermicompost_kg,                     // on-demand only: optional 1 / 5 / 10 kg vermicompost add-on
     // gardener (booking outcome)
     assign_mode = 'none',                // none | pick | auto
     gardener_id: pickedGardenerId,
@@ -293,6 +294,7 @@ exports.createManualInvoice = async (req, res) => {
     }
 
     let items, total, subtotal, gst_amount;
+    let odPricing = null; // on-demand derived pricing → copied onto a created booking
     if (invoice_type === 'products') {
       // Shop convention: GST-exclusive unit prices, per-line rates added on top.
       ({ items, total, subtotal, gst_amount } = await priceProductInvoice(line_items));
@@ -306,20 +308,52 @@ exports.createManualInvoice = async (req, res) => {
         if (plan) {
           items = [{ name: `${plan.name} Plan${plan.visits_per_month ? ` — ${plan.visits_per_month} visits/month` : ''}`, amount: Number(plan.price) || 0 }];
         } else {
-          // On-demand: zone base (covers up to 10 plants) + the plant-count
-          // slab surcharge — same admin-configurable table createBooking uses.
-          const { getPlantSlabs, plantSurcharge, maxAutoPlants } = require('../config/plantSlabs');
-          const slabs = await getPlantSlabs();
-          const surcharge = plantSurcharge(parseInt(plant_count) || 0, slabs);
-          if (surcharge === null && !(override_total != null && Number(override_total) > 0)) {
-            return res.status(400).json({
-              success: false,
-              message: `More than ${maxAutoPlants(slabs)} plants needs a custom quote — enter the agreed price as the override total`,
-            });
-          }
+          // On-demand: the same one-time pricing as online bookings — zone
+          // base price (first 10 plants) + progressive per-plant interval
+          // rates, optional vermicompost, and any active zone surcharges, each
+          // as its own line. A zone is required: never price from a guess.
+          const pricingEngine = require('../services/oneTimePricing');
           const zone = (geofence_id || zone_id) ? await Geofence.findByPk(geofence_id || zone_id) : null;
-          const base = zone ? (parseFloat(zone.base_price) || 0) : 0;
-          items = [{ name: `On-Demand Gardener Visit (${plant_count || 0} plants)`, amount: base + (surcharge || 0) }];
+          const hasOverride = override_total != null && Number(override_total) > 0;
+          if (!zone) {
+            return res.status(400).json({ success: false, message: 'Select the service zone to price an on-demand visit (or enter custom line items)' });
+          }
+          const zp = pricingEngine.zonePricing(zone);
+          const plants = Math.max(pricingEngine.MIN_PLANTS, parseInt(plant_count) || 0);
+          let q;
+          try {
+            q = pricingEngine.buildQuote({
+              pricing: zp, plantCount: plants, vermicompostKg: vermicompost_kg,
+              surcharges: await pricingEngine.getActiveSurcharges(),
+              date: scheduled_date || todayIST(),
+            });
+          } catch (e) {
+            if (e.httpStatus) return res.status(e.httpStatus).json({ success: false, message: e.message });
+            throw e;
+          }
+          if (!q.ok) {
+            if (!hasOverride) {
+              return res.status(400).json({
+                success: false,
+                message: `More than ${q.max_plants} plants needs a custom quote — enter the agreed price as the override total`,
+              });
+            }
+            items = [{ name: `On-Demand Gardener Visit (${plants} plants — custom quote)`, amount: 0 }];
+          } else {
+            items = [{ name: `On-Demand Gardener Visit (${q.plants} plants)`, amount: q.service.amount }];
+            if (q.vermicompost) items.push({ name: `Vermicompost (${q.vermicompost.kg} kg)`, amount: q.vermicompost.amount });
+            for (const s of q.surcharges) {
+              items.push({ name: `Surcharge: ${s.name}${s.type === 'percentage' ? ` (${s.value}% of service)` : ''}`, amount: s.amount });
+            }
+            odPricing = {
+              service_amount: q.service.amount,
+              vermicompost_kg: q.vermicompost ? q.vermicompost.kg : null,
+              vermicompost_amount: q.vermicompost ? q.vermicompost.amount : 0,
+              surcharge_amount: q.surcharge_total,
+              surcharge_details: q.surcharges.length ? q.surcharges : null,
+              pricing_snapshot: pricingEngine.pricingSnapshot(zp, q),
+            };
+          }
         }
       }
 
@@ -406,7 +440,16 @@ exports.createManualInvoice = async (req, res) => {
           service_latitude: lat != null ? lat : 0,
           service_longitude: lng != null ? lng : 0,
           plant_count: parseInt(plant_count) || 0,
-          base_amount: subtotal,
+          // Derived on-demand pricing keeps its separate lines on the booking;
+          // custom/override invoices store the whole pre-GST amount as base.
+          base_amount: odPricing && !(override_total != null && Number(override_total) > 0) ? odPricing.service_amount : subtotal,
+          ...(odPricing && !(override_total != null && Number(override_total) > 0) ? {
+            vermicompost_kg: odPricing.vermicompost_kg,
+            vermicompost_amount: odPricing.vermicompost_amount,
+            surcharge_amount: odPricing.surcharge_amount,
+            surcharge_details: odPricing.surcharge_details,
+            pricing_snapshot: odPricing.pricing_snapshot,
+          } : {}),
           total_amount: total,
           payment_status,
           customer_notes: notes || null,

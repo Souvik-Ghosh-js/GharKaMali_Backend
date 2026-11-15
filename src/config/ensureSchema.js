@@ -8,6 +8,9 @@
 // "Duplicate column" is expected on subsequent boots and stays silent; any
 // other failure is logged loudly but never blocks startup.
 // ─────────────────────────────────────────────────────────────────────────────
+const { DEFAULT_INTERVALS, DEFAULT_VERMICOMPOST } = require('../services/oneTimePricing');
+const sqlJson = (v) => JSON.stringify(v).replace(/'/g, "''");
+
 const STATEMENTS = [
   // Shop order line items remember the GST rate they were charged at.
   "ALTER TABLE order_items ADD COLUMN gst_rate INT NULL",
@@ -75,6 +78,28 @@ const STATEMENTS = [
    FROM users u
    WHERE u.wallet_balance > 0
      AND NOT EXISTS (SELECT 1 FROM wallet_credits wc WHERE wc.user_id = u.id)`,
+  // One-time service pricing (Word spec, Nov 2026): per-zone progressive
+  // per-plant rates + vermicompost add-on prices; frozen line items on bookings.
+  "ALTER TABLE geofences ADD COLUMN plant_rate_intervals JSON NULL",
+  "ALTER TABLE geofences ADD COLUMN vermicompost_prices JSON NULL",
+  "ALTER TABLE bookings ADD COLUMN vermicompost_kg INT NULL",
+  "ALTER TABLE bookings ADD COLUMN vermicompost_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+  "ALTER TABLE bookings ADD COLUMN surcharge_amount DECIMAL(10,2) NOT NULL DEFAULT 0",
+  "ALTER TABLE bookings ADD COLUMN surcharge_details JSON NULL",
+  "ALTER TABLE bookings ADD COLUMN pricing_snapshot JSON NULL",
+  // One-time seed: every existing zone gets the spec's interval rates and
+  // vermicompost prices. Zone base prices are NOT touched (a ₹499 zone still
+  // starts at ₹499). Idempotent — only zones with no table yet are seeded,
+  // and the audit row is written first for exactly those zones.
+  `INSERT INTO pricing_audits (entity_type, entity_id, zone_id, action, before_value, after_value, note, created_at, updated_at)
+   SELECT 'zone_pricing', id, id, 'seed', NULL,
+          CONCAT('{"base_price":', COALESCE(base_price, 0), ',"intervals":${sqlJson(DEFAULT_INTERVALS)},"vermicompost":${sqlJson(DEFAULT_VERMICOMPOST)}}'),
+          'Seeded with the approved one-time pricing rates (zone base price kept)', NOW(), NOW()
+   FROM geofences WHERE plant_rate_intervals IS NULL`,
+  `UPDATE geofences
+     SET plant_rate_intervals = '${sqlJson(DEFAULT_INTERVALS)}',
+         vermicompost_prices = COALESCE(vermicompost_prices, '${sqlJson(DEFAULT_VERMICOMPOST)}')
+   WHERE plant_rate_intervals IS NULL`,
 ];
 
 const IGNORABLE = new Set(['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY']);

@@ -7,7 +7,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "migrate": "node src/config/migrate.js",
-    "seed": "node src/config/seed.js"
+    "seed": "node src/config/seed.js",
+    "test": "node --test test/oneTimePricing.test.js"
   },
   "dependencies": {
     "axios": "^1.6.2",

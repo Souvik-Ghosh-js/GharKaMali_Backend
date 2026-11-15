@@ -133,6 +133,9 @@ const booking = {
     text('service_address', { min: 5, max: 500 }),
     lat('service_latitude', false), lng('service_longitude', false),
     intInRange('plant_count', { min: 1, max: 1000, optional: true }),
+    body('vermicompost_kg').optional({ values: 'falsy' }).isIn([1, 5, 10, '1', '5', '10'])
+      .withMessage('vermicompost_kg must be 1, 5 or 10').toInt(),
+    body('expected_total').optional({ values: 'null' }).isFloat({ min: 0 }).withMessage('expected_total must be a number').toFloat(),
     intInRange('preferred_gardener_id', { min: 1, optional: true }),
     text('customer_notes', { max: 1000, optional: true }),
     text('coupon_code', { max: 40, optional: true }),
