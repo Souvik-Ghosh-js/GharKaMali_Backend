@@ -172,8 +172,11 @@ async function buildBookingInvoice(id) {
   // strip GST out a second time (the ₹349 → ₹295.76 bug). Legacy records where
   // GST was never added have total == base + addons — for those the stored
   // amounts ARE what the customer paid, so keep them GST-inclusive.
+  // Expected GST-on-top total: 18% on service/add-ons/surcharges, 5% on
+  // vermicompost (HSN 3101 fertilizer — not the 18% service rate).
+  const expectedOnTop = (base + addonsSum + surchargeSum) * 1.18 + vermiAmt * 1.05;
   const gstAddedOnTop = paid > 0 &&
-    Math.abs((base + extrasSum) * 1.18 - paid) <= Math.abs((base + extrasSum) - paid);
+    Math.abs(expectedOnTop - paid) <= Math.abs((base + extrasSum) - paid);
 
   const inputs = [{
     description: `Gardening & Plant Maintenance Service${plan ? ` (${plan.name}${plan.max_plants ? ` - Up to ${plan.max_plants} Plants` : ''})` : (b.plant_count ? ` (${b.plant_count} Plants)` : '')}`,
@@ -182,8 +185,9 @@ async function buildBookingInvoice(id) {
   }];
   if (vermiAmt > 0) {
     inputs.push({
-      description: `Vermicompost${b.vermicompost_kg ? ` (${b.vermicompost_kg} kg)` : ''}`, hsn: SERVICE_SAC,
-      qty: 1, unit: 'Pack', unitPrice: vermiAmt, gstRate: 18,
+      // Goods line, not a service: organic fertilizer HSN 3101, 5% GST.
+      description: `Vermicompost${b.vermicompost_kg ? ` (${b.vermicompost_kg} kg)` : ''}`, hsn: '3101',
+      qty: 1, unit: 'Pack', unitPrice: vermiAmt, gstRate: 5,
     });
   }
   for (const s of surchargeLines) {
@@ -445,6 +449,14 @@ async function buildManualInvoice(id) {
   // to a ₹350 all-in quote must print ₹350, not ₹599). Without an override the
   // share is simply amount × (1 + rate).
   const serviceBaseSum = isProducts ? 0 : lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  // A service line may carry its OWN gst_rate (vermicompost = 5%, HSN 3101).
+  // Use the per-line rates only when they reconstruct the STORED total (i.e.
+  // no override_total was involved); otherwise fall back to the proportional
+  // single-slab scaling, which is the only faithful reading of an override.
+  const lineRateOf = (l) => (l.gst_rate != null ? Number(l.gst_rate) : svcRate);
+  const perLineTotal = round2(lines.reduce((s, l) => s + round2((Number(l.amount) || 0) * (1 + lineRateOf(l) / 100)), 0));
+  const perLineExact = !isProducts && lines.length > 0 &&
+    Math.abs(perLineTotal - (Number(m.total_amount) || 0)) <= 1;
   const inputs = lines.map((l) => (isProducts ? {
     description: l.name, hsn: l.hsn || hsnForProduct(l.name || '').hsn,
     qty: l.qty || 1, unit: l.unit || 'Nos',
@@ -455,10 +467,12 @@ async function buildManualInvoice(id) {
     description: l.name, hsn: l.hsn || (isMakeover ? LANDSCAPE_SAC : SERVICE_SAC),
     qty: l.qty || 1,
     unit: isMakeover ? 'Service' : (l.unit || (m.invoice_type === 'plan' ? 'Plan' : 'Visit')),
-    taxableOverride: serviceBaseSum > 0
-      ? round2((Number(l.amount) || 0) * (Number(m.total_amount) || 0) / serviceBaseSum)
-      : round2((Number(m.total_amount) || 0) / (lines.length || 1)),
-    gstRate: svcRate,
+    taxableOverride: perLineExact
+      ? round2((Number(l.amount) || 0) * (1 + lineRateOf(l) / 100))
+      : serviceBaseSum > 0
+        ? round2((Number(l.amount) || 0) * (Number(m.total_amount) || 0) / serviceBaseSum)
+        : round2((Number(m.total_amount) || 0) / (lines.length || 1)),
+    gstRate: perLineExact ? lineRateOf(l) : svcRate,
   }));
   // Fall back to a single line from the stored total if no items were captured.
   if (!inputs.length) {

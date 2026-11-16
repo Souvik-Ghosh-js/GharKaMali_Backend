@@ -67,6 +67,7 @@ exports.getOneTimePricing = handle(async (req, res) => {
       vermicompost: pricing.vermicompost,
       surcharges,
       gst_rate: P.GST_RATE,
+      vermicompost_gst_rate: P.VERMICOMPOST_GST_RATE, // fertilizer (HSN 3101) — 5%
     },
   });
 });

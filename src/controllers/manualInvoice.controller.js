@@ -84,20 +84,24 @@ async function findOrCreateCustomer({ phone, name, email, city, state, pincode, 
 
 // Build the priced line items + GST-inclusive total for the form.
 // If `override_total` is provided (> 0), it becomes the GST-INCLUSIVE total and
-// the base is back-computed; otherwise the total is derived from the items.
-// `gst_rate` is the admin-chosen slab in percent (default 18; 0 = No GST).
+// the base is back-computed at the admin slab; otherwise the total is derived
+// from the items, where a line may carry its OWN gst_rate (vermicompost = 5%,
+// HSN 3101 fertilizer) and every other line uses the admin-chosen slab
+// (`gst_rate` in percent; default 18; 0 = No GST).
 function priceInvoice({ items, override_total, gst_rate }) {
   const rate = (gst_rate != null ? Number(gst_rate) : GST_RATE * 100) / 100;
   const baseSum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
-  let total;
   if (override_total != null && Number(override_total) > 0) {
-    total = Math.round(Number(override_total) * 100) / 100;
-  } else {
-    total = Math.round(baseSum * (1 + rate) * 100) / 100;
+    const total = Math.round(Number(override_total) * 100) / 100;
+    const subtotal = Math.round((total / (1 + rate)) * 100) / 100;
+    return { total, subtotal, gst_amount: Math.round((total - subtotal) * 100) / 100 };
   }
-  const subtotal = Math.round((total / (1 + rate)) * 100) / 100;
-  const gst_amount = Math.round((total - subtotal) * 100) / 100;
-  return { total, subtotal, gst_amount };
+  const total = Math.round(items.reduce((s, it) => {
+    const r = it.gst_rate != null ? Number(it.gst_rate) / 100 : rate;
+    return s + Math.round((Number(it.amount) || 0) * (1 + r) * 100) / 100;
+  }, 0) * 100) / 100;
+  const subtotal = Math.round(baseSum * 100) / 100;
+  return { total, subtotal, gst_amount: Math.round((total - subtotal) * 100) / 100 };
 }
 
 // ── Product invoices ─────────────────────────────────────────────────────────
@@ -341,7 +345,12 @@ exports.createManualInvoice = async (req, res) => {
             items = [{ name: `On-Demand Gardener Visit (${plants} plants — custom quote)`, amount: 0 }];
           } else {
             items = [{ name: `On-Demand Gardener Visit (${q.plants} plants)`, amount: q.service.amount }];
-            if (q.vermicompost) items.push({ name: `Vermicompost (${q.vermicompost.kg} kg)`, amount: q.vermicompost.amount });
+            // Vermicompost is goods (organic fertilizer, HSN 3101) at 5% GST,
+            // not the service slab — unless the admin chose No GST (0).
+            if (q.vermicompost) items.push({
+              name: `Vermicompost (${q.vermicompost.kg} kg)`, amount: q.vermicompost.amount,
+              gst_rate: serviceGstRate === 0 ? 0 : 5, hsn: '3101', unit: 'Pack',
+            });
             for (const s of q.surcharges) {
               items.push({ name: `Surcharge: ${s.name}${s.type === 'percentage' ? ` (${s.value}% of service)` : ''}`, amount: s.amount });
             }

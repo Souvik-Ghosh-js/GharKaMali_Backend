@@ -307,9 +307,9 @@ exports.createBooking = async (req, res) => {
     }
     const baseAmount = quote.service.amount; // gardening service charge (pre-GST)
 
-    // 18% GST is added on top of every booking (service + vermicompost +
-    // add-ons + surcharges). total_amount is GST-inclusive; the tax invoice
-    // derives the tax split from it.
+    // GST is added on top per rate: 18% on the service + add-ons + surcharges,
+    // 5% on vermicompost (HSN 3101 fertilizer). total_amount is GST-inclusive;
+    // the tax invoice derives the tax split from it.
     const preGstBase = quote.subtotal;
     let grandTotal = quote.total;
 

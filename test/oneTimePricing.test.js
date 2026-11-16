@@ -167,10 +167,24 @@ test('the same surcharge is never applied twice on recalculation', () => {
   assert.equal(q.surcharge_total, 50);
 });
 
-test('final payable = service + add-ons + surcharges + 18% GST', () => {
+test('final payable: 18% GST on service/add-ons/surcharges, 5% on vermicompost', () => {
   const q = P.buildQuote({ pricing: zoneA, plantCount: 25, vermicompostKg: 5, surcharges: [S({})], date: '2026-12-10', addonTotal: 99 });
   assert.equal(q.subtotal, 675 + 300 + 99 + 50);
-  assert.equal(q.total, Math.round(1124 * 1.18 * 100) / 100);
+  const gst18 = Math.round((675 + 99 + 50) * 0.18 * 100) / 100; // service portion
+  const gst5 = Math.round(300 * 0.05 * 100) / 100;              // vermicompost (HSN 3101)
+  assert.equal(q.gst_amount, Math.round((gst18 + gst5) * 100) / 100);
+  assert.equal(q.total, Math.round((1124 + gst18 + gst5) * 100) / 100);
+  assert.deepEqual(q.gst_breakup, [
+    { rate: 18, taxable: 824, amount: gst18 },
+    { rate: 5, taxable: 300, amount: gst5 },
+  ]);
+});
+
+test('no vermicompost → single 18% GST line', () => {
+  const q = P.buildQuote({ pricing: zoneA, plantCount: 25, surcharges: [], date: '2026-12-10' });
+  assert.equal(q.gst_breakup.length, 1);
+  assert.equal(q.gst_breakup[0].rate, 18);
+  assert.equal(q.total, Math.round(q.subtotal * 1.18 * 100) / 100);
 });
 
 test('legacy slab view reproduces the new price for old app builds', () => {

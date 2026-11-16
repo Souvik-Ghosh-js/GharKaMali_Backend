@@ -22,7 +22,10 @@ const MIN_PLANTS = BASE_PLANTS;      // minimum selectable quantity
 const SPEC_MAX_PLANTS = 200;         // intervals must cover 11..200 with no gaps
 const MAX_PLANT_LIMIT = 1000;        // sanity cap for admin-entered interval max
 const FALLBACK_BASE_PRICE = 349;     // only if a zone has no usable base price
-const GST_RATE = 0.18;               // 18% GST on top (same as every booking)
+const GST_RATE = 0.18;               // 18% GST on the service / add-ons / surcharges
+// Vermicompost is an organic fertilizer (HSN 3101) — 5% GST, NOT the 18%
+// service rate. It gets its own GST line in the quote and on the invoice.
+const VERMICOMPOST_GST_RATE = 0.05;
 
 // Spec section 2 — incremental rate per additional plant in each interval.
 const DEFAULT_INTERVALS = [
@@ -239,8 +242,9 @@ function computeSurcharges(all, { zoneId, date, serviceAmount }) {
 // ── Full quote ───────────────────────────────────────────────────────────────
 
 // Final payable = zone service charge + vermicompost + other add-ons
-//               + surcharges, then 18% GST on top (coupons are applied by the
-//               caller against `subtotal`, exactly as before).
+//               + surcharges, with GST on top PER RATE: 18% on the service /
+//               add-ons / surcharges, 5% on vermicompost (HSN 3101 fertilizer).
+//               Coupons are applied by the caller against `subtotal`, as before.
 function buildQuote({ pricing, plantCount, vermicompostKg, surcharges = [], date, addonTotal = 0 }) {
   const service = serviceCharge(plantCount, pricing);
   if (!service.ok) return { ok: false, code: service.code, max_plants: service.max_plants, plants: service.plants };
@@ -249,8 +253,13 @@ function buildQuote({ pricing, plantCount, vermicompostKg, surcharges = [], date
     zoneId: pricing.zone_id, date, serviceAmount: service.amount,
   });
   const surchargeTotal = round2(surchargeLines.reduce((s, l) => s + l.amount, 0));
-  const subtotal = round2(service.amount + (vermicompost?.amount || 0) + (Number(addonTotal) || 0) + surchargeTotal);
-  const total = round2(subtotal * (1 + GST_RATE));
+  const vermiAmount = round2(vermicompost?.amount || 0);
+  const serviceTaxable = round2(service.amount + (Number(addonTotal) || 0) + surchargeTotal);
+  const subtotal = round2(serviceTaxable + vermiAmount);
+  const gstService = round2(serviceTaxable * GST_RATE);
+  const gstVermi = round2(vermiAmount * VERMICOMPOST_GST_RATE);
+  const gstAmount = round2(gstService + gstVermi);
+  const total = round2(subtotal + gstAmount);
   return {
     ok: true,
     zone_id: pricing.zone_id,
@@ -261,8 +270,14 @@ function buildQuote({ pricing, plantCount, vermicompostKg, surcharges = [], date
     surcharges: surchargeLines,
     surcharge_total: surchargeTotal,
     subtotal,
-    gst_rate: GST_RATE,
-    gst_amount: round2(total - subtotal),
+    gst_rate: GST_RATE,                               // rate on the service portion
+    vermicompost_gst_rate: VERMICOMPOST_GST_RATE,
+    // Per-rate split for display ("GST 18%: ₹x · GST 5%: ₹y") and audits.
+    gst_breakup: [
+      { rate: GST_RATE * 100, taxable: serviceTaxable, amount: gstService },
+      ...(vermiAmount > 0 ? [{ rate: VERMICOMPOST_GST_RATE * 100, taxable: vermiAmount, amount: gstVermi }] : []),
+    ],
+    gst_amount: gstAmount,
     total,
   };
 }
@@ -328,7 +343,7 @@ async function logPricingAudit({ entity_type, entity_id, zone_id = null, action,
 }
 
 module.exports = {
-  BASE_PLANTS, MIN_PLANTS, SPEC_MAX_PLANTS, GST_RATE,
+  BASE_PLANTS, MIN_PLANTS, SPEC_MAX_PLANTS, GST_RATE, VERMICOMPOST_GST_RATE,
   DEFAULT_INTERVALS, DEFAULT_VERMICOMPOST, VERMICOMPOST_SIZES,
   parseJson, round2,
   normalizeIntervals, validateIntervals, normalizeVermicompost, validateVermicompost, validateBasePrice,
