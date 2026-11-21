@@ -1431,7 +1431,8 @@ router.get('/admin/leads', authenticate, authorize('admin', 'supervisor'), async
       data: {
         leads,
         sync: { at: sync.at, ok: sync.ok, error: sync.error, added: sync.added, updated: sync.updated, total: sync.total },
-        sheet_url: config.sheet_url || `https://docs.google.com/spreadsheets/d/${config.sheet_id}/edit#gid=${config.gid || '0'}`,
+        sheet_url: config.sheet_url || (config.sheet_id ? `https://docs.google.com/spreadsheets/d/${config.sheet_id}/edit#gid=${config.gid || '0'}` : null),
+        connection: config.webapp_url ? 'private' : 'link-shared',
       },
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -1460,9 +1461,9 @@ router.patch('/admin/leads/:id', authenticate, authorize('admin', 'supervisor'),
 });
 router.put('/admin/leads/config', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const saved = await leadsService.saveConfig(req.body && req.body.sheet_url);
+    const saved = await leadsService.saveConfig(req.body || {});
     const sync = await leadsService.syncLeads({ force: true });
-    res.json({ success: true, data: { config: saved, sync } });
+    res.json({ success: true, data: { config: { ...saved, token: saved.token ? '•••' : undefined }, sync } });
   } catch (err) { res.status(err.httpStatus || 500).json({ success: false, message: err.message }); }
 });
 

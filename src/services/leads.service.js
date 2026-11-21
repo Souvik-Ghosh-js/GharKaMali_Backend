@@ -54,14 +54,40 @@ async function getConfig() {
   return { ...DEFAULT_CONFIG };
 }
 
-async function saveConfig(sheetUrl) {
-  const parsed = parseSheetUrl(sheetUrl);
-  if (!parsed) {
-    const e = new Error('That does not look like a Google Sheets link. Paste the full sheet URL.');
-    e.httpStatus = 400;
-    throw e;
+// Two connection modes:
+//   • { sheet_url }                    → the sheet's CSV export; needs the sheet
+//                                        shared as "Anyone with the link → Viewer".
+//   • { webapp_url, token, gid? }      → a tiny Apps Script Web App deployed ON
+//                                        the (fully private) sheet returns the
+//                                        rows as JSON; the token is our shared
+//                                        secret. The sheet needs NO link sharing.
+async function saveConfig(input) {
+  const body = input && typeof input === 'object' ? input : { sheet_url: input };
+  let value;
+  if (body.webapp_url) {
+    const url = String(body.webapp_url).trim();
+    if (!/^https:\/\/script\.google(?:usercontent)?\.com\//.test(url)) {
+      const e = new Error('That does not look like an Apps Script Web App URL (it starts with https://script.google.com/macros/…/exec).');
+      e.httpStatus = 400;
+      throw e;
+    }
+    const token = String(body.token || '').trim();
+    if (token.length < 8) {
+      const e = new Error('Paste the same access token you put inside the Apps Script (min 8 characters).');
+      e.httpStatus = 400;
+      throw e;
+    }
+    const prev = await getConfig();
+    value = { webapp_url: url, token, gid: String(body.gid || prev.gid || '0'), sheet_url: prev.sheet_url || null, sheet_id: prev.sheet_id || null };
+  } else {
+    const parsed = parseSheetUrl(body.sheet_url);
+    if (!parsed) {
+      const e = new Error('That does not look like a Google Sheets link. Paste the full sheet URL.');
+      e.httpStatus = 400;
+      throw e;
+    }
+    value = { ...parsed, sheet_url: String(body.sheet_url).trim() };
   }
-  const value = { ...parsed, sheet_url: String(sheetUrl).trim() };
   const { SystemSetting } = require('../models');
   const [row, created] = await SystemSetting.findOrCreate({
     where: { key: SETTING_KEY }, defaults: { value: JSON.stringify(value) },
@@ -100,6 +126,7 @@ function parseCsv(text) {
 }
 
 async function fetchSheetRows(config) {
+  if (config.webapp_url) return fetchViaWebApp(config);
   const url = `https://docs.google.com/spreadsheets/d/${config.sheet_id}/export?format=csv&gid=${config.gid || '0'}`;
   let res;
   try {
@@ -131,6 +158,37 @@ async function fetchSheetRows(config) {
     throw e;
   }
   return parseCsv(body);
+}
+
+// The private-sheet path: a one-function Apps Script Web App deployed on the
+// sheet ("Execute as: me", "Access: anyone with the link") returns
+// { values: [[...], ...] } when called with the right token. The sheet itself
+// stays completely private — only the script's owner account can read it.
+async function fetchViaWebApp(config) {
+  const sep = config.webapp_url.includes('?') ? '&' : '?';
+  const url = `${config.webapp_url}${sep}token=${encodeURIComponent(config.token || '')}&gid=${encodeURIComponent(config.gid || '')}`;
+  let res;
+  try {
+    res = await axios.get(url, { responseType: 'text', maxRedirects: 5, timeout: 25000 });
+  } catch (err) {
+    const e = new Error(`Could not reach the Apps Script endpoint (${(err.response && err.response.status) || err.code || err.message}). Check the Web App URL in Leads settings.`);
+    e.httpStatus = 502;
+    throw e;
+  }
+  const body = String(res.data || '').trim();
+  if (/unauthorized/i.test(body) && body.length < 100) {
+    const e = new Error('The Apps Script rejected our token. Make sure the TOKEN inside the script matches the one saved in Leads settings.');
+    e.httpStatus = 409;
+    throw e;
+  }
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { parsed = null; }
+  if (!parsed || !Array.isArray(parsed.values)) {
+    const e = new Error("The Apps Script endpoint didn't return sheet data. Re-deploy it with access set to 'Anyone' and 'Execute as: Me', then save the new URL.");
+    e.httpStatus = 409;
+    throw e;
+  }
+  return parsed.values.map((row) => (Array.isArray(row) ? row.map((c) => String(c ?? '')) : []));
 }
 
 // ── Header mapping ───────────────────────────────────────────────────────────
