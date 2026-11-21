@@ -161,17 +161,47 @@ const normPhone = (v) => {
   return digits.length >= 10 ? digits.slice(-10) : '';
 };
 
-// Google Sheets dates come as "11/18/2026 14:02:11" (export locale) or ISO.
+// Sheet dates: "20/11/2026" (Indian DD/MM/YYYY — what our lead sheet uses),
+// optionally with a time, or ISO "2026-11-25". When both slash parts could be
+// a month we read DD/MM, falling back to MM/DD only when DD/MM is impossible.
 function parseSheetDate(v) {
   const s = String(v || '').trim();
   if (!s) return null;
-  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (mdy) {
-    const d = new Date(Date.UTC(+mdy[3], +mdy[1] - 1, +mdy[2], +(mdy[4] || 12), +(mdy[5] || 0), +(mdy[6] || 0)));
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (slash) {
+    const a = +slash[1], b = +slash[2];
+    const [day, month] = b > 12 ? [b, a] : [a, b]; // default DD/MM; flip only if MM/DD is the only valid read
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(Date.UTC(+slash[3], month - 1, day, +(slash[4] || 12), +(slash[5] || 0), +(slash[6] || 0)));
     return isNaN(d.getTime()) ? null : d;
   }
   const d = new Date(s.includes(' ') && !s.includes('T') ? s.replace(' ', 'T') : s);
   return isNaN(d.getTime()) ? null : d;
+}
+
+// ── Seeding the panel status from the sheet's own tracking columns ──────────
+// The lead sheet carries Status / Disposition / Lead Contacted / Next Followup
+// columns the team already fills. A NEW lead starts from them so nobody
+// re-triages old leads; after that, the panel owns these fields and a sync
+// never touches them again.
+function rawField(raw, re) {
+  const k = Object.keys(raw).find((h) => re.test(h));
+  return k ? String(raw[k] || '').trim() : '';
+}
+
+function seedStatus(raw) {
+  const txt = `${rawField(raw, /^status/i)} ${rawField(raw, /^disposition/i)}`.toLowerCase();
+  if (/book|converted|won/.test(txt)) return 'booked';
+  if (/not ?interest|lost|dead|dnd/.test(txt)) return 'not_interested';
+  if (/invalid|wrong ?number|junk|spam|^test/.test(txt)) return 'invalid';
+  if (/callback|follow/.test(txt)) return 'follow_up';
+  if (/^y(es)?$/i.test(rawField(raw, /contacted/i)) || /contacted|responded|spoke/.test(txt)) return 'contacted';
+  return 'new';
+}
+
+function seedFollowUp(raw) {
+  const d = parseSheetDate(rawField(raw, /next ?follow ?-? ?up/i));
+  return d ? d.toISOString().slice(0, 10) : null;
 }
 
 // ── Sync ─────────────────────────────────────────────────────────────────────
@@ -187,6 +217,14 @@ async function syncLeads({ force = false } = {}) {
     const map = mapHeaders(headers);
     const { Lead } = require('../models');
 
+    // One-time cleanup: drop untouched rows from the short-lived first key
+    // scheme (plain ph:<10 digits>) so the per-enquiry keys don't duplicate
+    // them. Rows an admin already worked on are never deleted.
+    try {
+      const { Op } = require('sequelize');
+      await Lead.destroy({ where: { sheet_key: { [Op.regexp]: '^ph:[0-9]{10}$' }, status: 'new', notes: null } });
+    } catch (_) { /* best-effort */ }
+
     let added = 0, updated = 0;
     const seen = new Set();
     for (const cells of rows.slice(1, MAX_ROWS + 1)) {
@@ -196,10 +234,14 @@ async function syncLeads({ force = false } = {}) {
       const phone = normPhone(get('phone'));
       const name = get('name');
       const email = get('email');
-      // Stable identity: phone when present, else a hash of the row's identity
-      // fields (so edits to other columns don't duplicate the lead).
+      // Stable identity: the same person can enquire more than once, so the
+      // key is phone + booking id when the row has one, else phone + the
+      // row's timestamp (one lead per person per day) — these never get
+      // edited, so sheet edits to other columns can't duplicate the lead.
+      // Phoneless rows fall back to a content hash.
+      const bookingId = rawField(raw, /booking ?(id|no)/i);
       const key = phone
-        ? `ph:${phone}`
+        ? `ph:${phone}:${crypto.createHash('sha1').update((bookingId || get('date')).toLowerCase()).digest('hex').slice(0, 12)}`
         : `h:${crypto.createHash('sha1').update([name, email, get('date'), get('city')].join('|').toLowerCase()).digest('hex')}`;
       if (seen.has(key)) continue; // duplicate row in the sheet → first one wins
       seen.add(key);
@@ -228,7 +270,12 @@ async function syncLeads({ force = false } = {}) {
         });
         if (changed) { await existing.update(sheetFields); updated++; }
       } else {
-        await Lead.create({ sheet_key: key, status: 'new', ...sheetFields });
+        await Lead.create({
+          sheet_key: key,
+          status: seedStatus(raw),
+          follow_up_on: seedFollowUp(raw),
+          ...sheetFields,
+        });
         added++;
       }
     }
@@ -240,4 +287,9 @@ async function syncLeads({ force = false } = {}) {
   return lastSync;
 }
 
-module.exports = { getConfig, saveConfig, parseSheetUrl, syncLeads, parseCsv, SETTING_KEY, lastSyncInfo: () => lastSync };
+module.exports = {
+  getConfig, saveConfig, parseSheetUrl, syncLeads, parseCsv, SETTING_KEY,
+  lastSyncInfo: () => lastSync,
+  // Pure helpers, exported for tests/dry-runs.
+  mapHeaders, parseSheetDate, seedStatus, seedFollowUp, normPhone, fetchSheetRows,
+};
