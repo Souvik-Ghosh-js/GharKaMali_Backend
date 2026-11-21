@@ -1275,6 +1275,59 @@ router.put('/admin/blocked-dates', authenticate, authorize('admin'), async (req,
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
+// ── ADMIN: LEADS (synced from the marketing Google Sheet) ─────────────────────
+const leadsService = require('../services/leads.service');
+router.get('/admin/leads', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    // Refresh from the sheet first (throttled to every 2 min; never blocks the
+    // list on a sheet error — the panel shows the sync error instead).
+    const sync = await leadsService.syncLeads({ force: req.query.sync === '1' });
+    const { Lead } = require('../models');
+    const leads = await Lead.findAll({
+      order: [['sheet_date', 'DESC'], ['id', 'DESC']],
+      limit: 5000,
+    });
+    const config = await leadsService.getConfig();
+    res.json({
+      success: true,
+      data: {
+        leads,
+        sync: { at: sync.at, ok: sync.ok, error: sync.error, added: sync.added, updated: sync.updated, total: sync.total },
+        sheet_url: config.sheet_url || `https://docs.google.com/spreadsheets/d/${config.sheet_id}/edit#gid=${config.gid || '0'}`,
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.patch('/admin/leads/:id', authenticate, authorize('admin', 'supervisor'), async (req, res) => {
+  try {
+    const { Lead } = require('../models');
+    const lead = await Lead.findByPk(req.params.id);
+    if (!lead) return res.status(404).json({ success: false, message: 'Lead not found' });
+    const { status, notes, follow_up_on } = req.body || {};
+    const patch = {};
+    if (status !== undefined) {
+      const allowed = ['new', 'contacted', 'follow_up', 'booked', 'not_interested', 'invalid'];
+      if (!allowed.includes(status)) return res.status(400).json({ success: false, message: `status must be one of ${allowed.join(', ')}` });
+      patch.status = status;
+      patch.status_updated_at = new Date();
+      patch.status_updated_by = req.user.id;
+    }
+    if (notes !== undefined) patch.notes = String(notes).slice(0, 5000) || null;
+    if (follow_up_on !== undefined) {
+      patch.follow_up_on = follow_up_on && /^\d{4}-\d{2}-\d{2}$/.test(String(follow_up_on)) ? follow_up_on : null;
+    }
+    await lead.update(patch);
+    res.json({ success: true, data: lead });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.put('/admin/leads/config', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const saved = await leadsService.saveConfig(req.body && req.body.sheet_url);
+    const sync = await leadsService.syncLeads({ force: true });
+    res.json({ success: true, data: { config: saved, sync } });
+  } catch (err) { res.status(err.httpStatus || 500).json({ success: false, message: err.message }); }
+});
+
 router.get('/admin/addons', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { AddOnService } = require('../models');

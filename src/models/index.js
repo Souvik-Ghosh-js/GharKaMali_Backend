@@ -875,6 +875,31 @@ const WalletDebit = sequelize.define('WalletDebit', {
   indexes: [{ fields: ['user_id', 'created_at'], name: 'idx_wallet_debit_user' }],
 });
 
+// ─── LEADS (synced from the marketing Google Sheet; see leads.service.js) ────
+// Sheet-derived fields are overwritten on every sync; the management fields
+// (status/notes/follow_up_on) belong to the admin panel and survive syncs.
+const Lead = sequelize.define('Lead', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  sheet_key: { type: DataTypes.STRING(64), allowNull: false, unique: true }, // ph:<10 digits> or h:<sha1>
+  name: { type: DataTypes.STRING(200) },
+  phone: { type: DataTypes.STRING(20) },
+  email: { type: DataTypes.STRING(200) },
+  city: { type: DataTypes.STRING(120) },
+  service: { type: DataTypes.STRING(200) },     // what they asked about
+  source: { type: DataTypes.STRING(120) },      // campaign / platform
+  sheet_date: { type: DataTypes.DATE },         // when the lead came in (from the sheet)
+  raw: { type: DataTypes.TEXT('long') },        // the full sheet row, header → value
+  status: { type: DataTypes.ENUM('new', 'contacted', 'follow_up', 'booked', 'not_interested', 'invalid'), defaultValue: 'new' },
+  notes: { type: DataTypes.TEXT },
+  follow_up_on: { type: DataTypes.DATEONLY },
+  status_updated_at: { type: DataTypes.DATE },
+  status_updated_by: { type: DataTypes.INTEGER },
+}, {
+  tableName: 'leads',
+  underscored: true,
+  indexes: [{ fields: ['status'] }, { fields: ['sheet_date'] }],
+});
+
 // ─── INVOICE COUNTER (financial-year sequential numbering) ───────────────────
 // One row per financial year ("25-26") holding the last issued sequence. Used to
 // mint GST-compliant sequential invoice numbers like GKM/25-26/000123.
@@ -1303,7 +1328,7 @@ module.exports = {
   Surcharge,
   PricingAudit,
   Tip, TipPayout, TipAudit,
-  WalletCredit, WalletDebit,
+  WalletCredit, WalletDebit, Lead,
   UserAddress,
   GardenerDocument,
   Coupon,
