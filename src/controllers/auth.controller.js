@@ -185,7 +185,7 @@ exports.adminLogin = async (req, res) => {
       }
     };
 
-    const user = await User.findOne({ where: { phone, role: { [Op.in]: ['admin', 'supervisor'] } } });
+    const user = await User.findOne({ where: { phone, role: { [Op.in]: ['admin', 'supervisor', 'accounts', 'sales', 'business'] } } });
     if (!user) {
       await recordFailure();
       return res.status(401).json({ success: false, message: 'Invalid credentials' });

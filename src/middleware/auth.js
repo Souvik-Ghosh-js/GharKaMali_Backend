@@ -20,11 +20,21 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+// RBAC-governed panel roles (accounts/sales/business). The per-route role
+// lists below predate them: when the central RBAC guard (services/rbac.service
+// guard, mounted on /admin) has already approved the request's module for such
+// a user, an admin-level route lets them through. Admin-only territory stays
+// admin-only because the guard never approves the users/settings/audit modules
+// for panel roles.
+const RBAC_PANEL_ROLES = ['accounts', 'sales', 'business'];
+
 const authorize = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role)) {
-    return res.status(403).json({ success: false, message: 'Access denied' });
+  if (roles.includes(req.user.role)) return next();
+  if (req.rbacApproved && RBAC_PANEL_ROLES.includes(req.user.role) &&
+      (roles.includes('admin') || roles.includes('supervisor'))) {
+    return next();
   }
-  next();
+  return res.status(403).json({ success: false, message: 'Access denied' });
 };
 
 const generateToken = (user) => {

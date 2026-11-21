@@ -100,6 +100,10 @@ const STATEMENTS = [
      SET plant_rate_intervals = '${sqlJson(DEFAULT_INTERVALS)}',
          vermicompost_prices = COALESCE(vermicompost_prices, '${sqlJson(DEFAULT_VERMICOMPOST)}')
    WHERE plant_rate_intervals IS NULL`,
+  // RBAC panel roles (accounts/sales/business) + per-user permission overrides.
+  // MODIFY is idempotent — re-running it with the same enum is a no-op.
+  "ALTER TABLE users MODIFY COLUMN role ENUM('admin','supervisor','gardener','customer','accounts','sales','business') DEFAULT 'customer'",
+  'ALTER TABLE users ADD COLUMN permissions JSON NULL',
 ];
 
 const IGNORABLE = new Set(['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY']);

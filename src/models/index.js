@@ -8,7 +8,11 @@ const User = sequelize.define('User', {
   phone: { type: DataTypes.STRING(15), allowNull: false, unique: true },
   email: { type: DataTypes.STRING(100), unique: true },
   password: { type: DataTypes.STRING(255) },
-  role: { type: DataTypes.ENUM('admin', 'supervisor', 'gardener', 'customer'), defaultValue: 'customer' },
+  // admin = Super Admin; supervisor = Operations; accounts/sales/business are
+  // RBAC-governed panel roles (see services/rbac.service.js).
+  role: { type: DataTypes.ENUM('admin', 'supervisor', 'gardener', 'customer', 'accounts', 'sales', 'business'), defaultValue: 'customer' },
+  // Per-user RBAC overrides: { "module:action": true|false } on top of the role matrix.
+  permissions: { type: DataTypes.JSON },
   is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
   is_approved: { type: DataTypes.BOOLEAN, defaultValue: false },
   profile_image: { type: DataTypes.STRING(500) },
@@ -900,6 +904,26 @@ const Lead = sequelize.define('Lead', {
   indexes: [{ fields: ['status'] }, { fields: ['sheet_date'] }],
 });
 
+// ─── AUDIT LOG (RBAC guard writes every admin-panel change here) ─────────────
+// Append-only: there is no update/delete route for this table.
+const AuditLog = sequelize.define('AuditLog', {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  actor_id: { type: DataTypes.INTEGER },
+  actor_name: { type: DataTypes.STRING(100) },
+  actor_role: { type: DataTypes.STRING(20) },
+  method: { type: DataTypes.STRING(10) },
+  path: { type: DataTypes.STRING(500) },
+  module: { type: DataTypes.STRING(40) },
+  action: { type: DataTypes.STRING(20) },   // manage | export
+  body: { type: DataTypes.TEXT },           // sanitized request body snapshot
+  ip: { type: DataTypes.STRING(64) },
+}, {
+  tableName: 'audit_logs',
+  underscored: true,
+  updatedAt: false,
+  indexes: [{ fields: ['actor_id', 'created_at'] }, { fields: ['module'] }],
+});
+
 // ─── INVOICE COUNTER (financial-year sequential numbering) ───────────────────
 // One row per financial year ("25-26") holding the last issued sequence. Used to
 // mint GST-compliant sequential invoice numbers like GKM/25-26/000123.
@@ -1328,7 +1352,7 @@ module.exports = {
   Surcharge,
   PricingAudit,
   Tip, TipPayout, TipAudit,
-  WalletCredit, WalletDebit, Lead,
+  WalletCredit, WalletDebit, Lead, AuditLog,
   UserAddress,
   GardenerDocument,
   Coupon,

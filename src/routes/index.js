@@ -14,6 +14,144 @@ const taglineCtrl = require('../controllers/tagline.controller');
 const fieldCtrl = require('../controllers/field.controller');
 const { dateRangeWhere } = require('../utils/dateRange');
 
+// ── RBAC: central permission guard + audit for the WHOLE admin panel ─────────
+// Runs before every /admin route. Enforces the module matrix for the panel
+// roles (accounts/sales/business), leaves admin/supervisor to the per-route
+// authorize() lists, and writes every change to audit_logs. Backend-side
+// enforcement per the RBAC requirement doc — hiding buttons is not security.
+const rbac = require('../services/rbac.service');
+router.use('/admin', (req, res, next) => {
+  // The browser-runnable /admin/maintenance/* tools are deliberately
+  // token-less (each protects itself with its ?key=…) — leave them be.
+  if (req.path.startsWith('/maintenance')) return next();
+  authenticate(req, res, () => rbac.guard(req, res, next));
+});
+
+// Effective permissions for the logged-in staff member (drives the dashboard
+// menu + landing page). Any staff role may call it.
+router.get('/admin/rbac/me', async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        role: req.user.role,
+        modules: await rbac.effectivePermissions(req.user),
+        catalog: rbac.MODULES.map(({ key, label }) => ({ key, label })),
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// Role matrix editor (Super Admin only).
+router.get('/admin/rbac/config', authorize('admin'), async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        matrix: await rbac.getMatrix(),
+        defaults: rbac.DEFAULT_MATRIX,
+        catalog: rbac.MODULES.map(({ key, label }) => ({ key, label })),
+        actions: rbac.ACTIONS,
+        roles: rbac.PANEL_ROLES,
+        admin_only_modules: rbac.ADMIN_ONLY_MODULES,
+      },
+    });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.put('/admin/rbac/config', authorize('admin'), async (req, res) => {
+  try {
+    const saved = await rbac.saveMatrix(req.body && req.body.matrix);
+    res.json({ success: true, data: saved });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── Panel user management (Super Admin only) ─────────────────────────────────
+router.get('/admin/panel-users', authorize('admin'), async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const { Op } = require('sequelize');
+    const users = await User.findAll({
+      where: { role: { [Op.in]: rbac.STAFF_ROLES } },
+      attributes: ['id', 'name', 'phone', 'email', 'role', 'is_active', 'permissions', 'last_login'],
+      order: [['role', 'ASC'], ['name', 'ASC']],
+    });
+    res.json({ success: true, data: users });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.post('/admin/panel-users', authorize('admin'), async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const bcrypt = require('bcryptjs');
+    const { name, phone, email, password, role } = req.body || {};
+    const assignable = ['supervisor', ...rbac.PANEL_ROLES, 'admin'];
+    if (!assignable.includes(role)) return res.status(400).json({ success: false, message: `role must be one of ${assignable.join(', ')}` });
+    if (!name || !String(name).trim()) return res.status(400).json({ success: false, message: 'Name is required' });
+    if (!/^\d{10}$/.test(String(phone || ''))) return res.status(400).json({ success: false, message: 'Phone must be a 10-digit mobile number (it is the login ID)' });
+    if (!password || String(password).length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    const clash = await User.findOne({ where: { phone: String(phone) } });
+    if (clash) return res.status(409).json({ success: false, message: `That phone number already belongs to ${clash.name || 'another account'} (${clash.role})` });
+    const user = await User.create({
+      name: String(name).trim().slice(0, 100),
+      phone: String(phone),
+      email: email ? String(email).trim().slice(0, 100) : null,
+      password: await bcrypt.hash(String(password), 10),
+      role, is_active: true, is_approved: true,
+    });
+    const data = user.toJSON(); delete data.password; delete data.otp;
+    res.status(201).json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+router.patch('/admin/panel-users/:id', authorize('admin'), async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const { Op } = require('sequelize');
+    const bcrypt = require('bcryptjs');
+    const user = await User.findOne({ where: { id: req.params.id, role: { [Op.in]: rbac.STAFF_ROLES } } });
+    if (!user) return res.status(404).json({ success: false, message: 'Staff account not found' });
+    const { is_active, role, password, permissions, name, email } = req.body || {};
+    const patch = {};
+    if (is_active !== undefined) {
+      if (user.id === req.user.id && is_active === false) {
+        return res.status(400).json({ success: false, message: 'You cannot deactivate your own account' });
+      }
+      patch.is_active = !!is_active; // deactivated accounts cannot log in; history stays attributable
+    }
+    if (role !== undefined) {
+      const assignable = ['supervisor', ...rbac.PANEL_ROLES, 'admin'];
+      if (!assignable.includes(role)) return res.status(400).json({ success: false, message: `role must be one of ${assignable.join(', ')}` });
+      if (user.id === req.user.id && role !== 'admin') {
+        return res.status(400).json({ success: false, message: 'You cannot remove your own Super Admin role' });
+      }
+      patch.role = role;
+    }
+    if (password !== undefined && password !== '') {
+      if (String(password).length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+      patch.password = await bcrypt.hash(String(password), 10);
+    }
+    if (permissions !== undefined) {
+      // { "module:action": true|false } — validated loosely; unknown keys ignored by the checker.
+      patch.permissions = permissions && typeof permissions === 'object' ? permissions : null;
+    }
+    if (name !== undefined && String(name).trim()) patch.name = String(name).trim().slice(0, 100);
+    if (email !== undefined) patch.email = email ? String(email).trim().slice(0, 100) : null;
+    await user.update(patch);
+    const data = user.toJSON(); delete data.password; delete data.otp;
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ── Audit logs (Super Admin only; append-only, no edit/delete routes) ────────
+router.get('/admin/audit-logs', authorize('admin'), async (req, res) => {
+  try {
+    const { AuditLog } = require('../models');
+    const where = {};
+    if (req.query.module) where.module = String(req.query.module);
+    if (req.query.actor_id) where.actor_id = parseInt(req.query.actor_id) || 0;
+    const logs = await AuditLog.findAll({ where, order: [['id', 'DESC']], limit: Math.min(parseInt(req.query.limit) || 200, 500) });
+    res.json({ success: true, data: logs });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 router.post('/auth/send-otp',       validate(V.auth.sendOtp),       authCtrl.sendOtp);
 router.post('/auth/verify-otp',     validate(V.auth.verifyOtp),     authCtrl.verifyOtp);
